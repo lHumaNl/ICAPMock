@@ -1,0 +1,614 @@
+# =============================================================================
+# ICAP Mock Server — Example Configuration
+# =============================================================================
+# Copy this file, uncomment the sections you need, and run:
+#   icap-mock server --config configs/example.yaml
+#
+# Priority order (highest to lowest):
+#   1. CLI flags  (--server.port 1344)
+#   2. This YAML file
+#   3. Built-in defaults (shown next to each field)
+#
+# Two operating modes are shown in this file:
+#   - SINGLE-SERVER MODE  (section "server:" + "mock:")  — active by default
+#   - MULTI-SERVER MODE   (sections "defaults:" + "servers:") — commented out
+#
+# All duration values accept Go duration strings: 5s, 1m, 30m, 2h, etc.
+# =============================================================================
+
+
+# =============================================================================
+# SERVER — ICAP listener (single-server mode)
+# =============================================================================
+# Used when "servers:" map is absent. Exactly one ICAP listener is started.
+server:
+  # Interface to bind. "0.0.0.0" listens on all interfaces.
+  # Type: string | Default: "0.0.0.0"
+  host: "0.0.0.0"
+
+  # ICAP port. RFC 3507 standard port is 1344.
+  # Type: int | Default: 1344
+  port: 1344
+
+  # Maximum duration for reading a full request (headers + body).
+  # Type: duration | Default: 30s
+  read_timeout: 30s
+
+  # Maximum duration before timing out a response write.
+  # Type: duration | Default: 30s
+  write_timeout: 30s
+
+  # Maximum number of simultaneous TCP connections.
+  # Raise for high-traffic deployments; each connection costs ~8 KB RAM.
+  # Type: int | Default: 15000
+  max_connections: 15000
+
+  # Maximum request body size in bytes. Protects against OOM from huge payloads.
+  # Human-readable strings are also accepted: "10MB", "256KB".
+  # Set to 0 to disable the limit (not recommended in production).
+  # Type: int64 (bytes) | Default: 10485760 (10 MB)
+  max_body_size: 10485760
+
+  # Stream body through O(1) memory pipeline instead of buffering it entirely.
+  # Disable only for debugging; always leave true in production.
+  # Type: bool | Default: true
+  streaming: true
+
+  # Close idle connections (no reads/writes) after this duration.
+  # Prevents slow-loris attacks and leaks of idle file descriptors.
+  # Type: duration | Default: 60s
+  idle_timeout: 60s
+
+  # Graceful-shutdown window. The server stops accepting new connections and
+  # waits up to this duration for in-flight requests to finish. After the
+  # timeout, remaining connections are force-closed.
+  # Type: duration | Default: 30s
+  shutdown_timeout: 30s
+
+  # ---------------------------------------------------------------------------
+  # TLS — transport-layer security for the ICAP listener
+  # ---------------------------------------------------------------------------
+  tls:
+    # Enable TLS. cert_file and key_file are required when true.
+    # Type: bool | Default: false
+    enabled: false
+
+    # Path to the PEM-encoded TLS certificate file.
+    # Type: string | Default: ""
+    # cert_file: "/etc/icap-mock/tls/server.crt"
+
+    # Path to the PEM-encoded private key file.
+    # Type: string | Default: ""
+    # key_file: "/etc/icap-mock/tls/server.key"
+
+    # How often the server checks whether the certificate is approaching expiry.
+    # Type: duration | Default: 24h
+    cert_check_interval: 24h
+
+    # Start logging a warning this many days before the certificate expires.
+    # Type: int (days) | Default: 30
+    expiry_warning_days: 30
+
+    # Path to CA certificate for verifying client certificates (mTLS).
+    # Required when client_auth is "optional" or "required".
+    # Type: string | Default: ""
+    # client_ca_file: "/etc/icap-mock/tls/ca.crt"
+
+    # Whether to request and verify a client certificate.
+    # Values: "none" (no mTLS), "optional" (verify if presented), "required" (always verify)
+    # Type: string | Default: "none"
+    # client_auth: "none"
+
+
+# =============================================================================
+# HEALTH — HTTP liveness and readiness probes
+# =============================================================================
+health:
+  # Expose /health and /ready endpoints.
+  # Disable only if an external health-check mechanism is used.
+  # Type: bool | Default: true
+  enabled: true
+
+  # Port for the health-check HTTP server. Keep separate from the ICAP port.
+  # Type: int | Default: 8080
+  port: 8080
+
+  # HTTP path that returns 200 OK when the process is alive.
+  # Type: string | Default: "/health"
+  health_path: "/health"
+
+  # HTTP path that returns 200 OK when the server is ready to serve traffic
+  # (scenarios loaded, storage initialised, etc.).
+  # Type: string | Default: "/ready"
+  ready_path: "/ready"
+
+  # Bearer token required for REST API management endpoints.
+  # If empty, management endpoints are accessible without authentication.
+  # Can also be set via the ICAP_API_TOKEN environment variable.
+  # Type: string | Default: ""
+  # api_token: "super-secret-token"
+
+
+# =============================================================================
+# METRICS — Prometheus exposition
+# =============================================================================
+metrics:
+  # Expose a Prometheus /metrics endpoint.
+  # Type: bool | Default: true
+  enabled: true
+
+  # Interface to bind the metrics HTTP server to.
+  # Type: string | Default: "0.0.0.0"
+  host: "0.0.0.0"
+
+  # Port for the Prometheus metrics HTTP server.
+  # Type: int | Default: 9090
+  port: 9090
+
+  # HTTP path for the metrics endpoint.
+  # Type: string | Default: "/metrics"
+  path: "/metrics"
+
+
+# =============================================================================
+# LOGGING — structured log output
+# =============================================================================
+logging:
+  # Log verbosity level.
+  # Values: "debug", "info", "warn", "error"
+  # Type: string | Default: "info"
+  level: "info"
+
+  # Log format. Use "json" for log aggregators (ELK, Loki); "text" for humans.
+  # Values: "json", "text"
+  # Type: string | Default: "json"
+  format: "json"
+
+  # Log destination. Use "stdout", "stderr", or an absolute file path.
+  # When a file path is given, log rotation (max_size/max_backups/max_age) applies.
+  # Type: string | Default: "stdout"
+  output: "stdout"
+
+  # Maximum log file size in megabytes before rotation. Only used when output
+  # is a file path.
+  # Type: int (MB) | Default: 100
+  max_size: 100
+
+  # Number of rotated log files to keep. Older files are deleted automatically.
+  # Type: int | Default: 5
+  max_backups: 5
+
+  # Maximum age in days before a rotated log file is deleted.
+  # Type: int (days) | Default: 30
+  max_age: 30
+
+
+# =============================================================================
+# MOCK — scenario engine and processing mode
+# =============================================================================
+mock:
+  # Default processing mode when no specific handler matches.
+  # Values:
+  #   "mock"   — look up a matching scenario and return its response (normal use)
+  #   "echo"   — reflect the request back as-is (useful for debugging)
+  #   "script" — execute a JavaScript processor (requires plugin config)
+  # Type: string | Default: "mock"
+  default_mode: "mock"
+
+  # Directory that contains scenario YAML files (v1 or v2 format).
+  # Relative paths are resolved from the working directory of the process.
+  # Type: string | Default: "" (no scenarios loaded)
+  scenarios_dir: "./configs/scenarios/example"
+
+  # Timeout for processing a single request. Requests that exceed this duration
+  # are answered with ICAP 500.
+  # Type: duration | Default: 5s
+  default_timeout: 5s
+
+  # Value of the ICAP Service-ID header returned in OPTIONS responses.
+  # Useful for identifying instances in multi-node deployments.
+  # Type: string | Default: "icap-mock"
+  service_id: "icap-mock"
+
+  # ---------------------------------------------------------------------------
+  # HOT RELOAD — watch scenario files for changes and reload without restart
+  # ---------------------------------------------------------------------------
+  hot_reload:
+    # Enable filesystem watching for scenario file changes.
+    # When true, any modification to files in scenarios_dir automatically
+    # reloads the scenario registry (zero downtime, no signal required).
+    # Type: bool | Default: false
+    enabled: false
+
+    # Wait this long after the last file-change event before reloading.
+    # Prevents multiple rapid saves from triggering multiple reloads.
+    # Type: duration | Default: 1s
+    debounce: 1s
+
+    # Watch the entire scenarios_dir tree. When false, only the top-level
+    # scenario file is watched.
+    # Type: bool | Default: true
+    watch_directory: true
+
+
+# =============================================================================
+# STORAGE — recording incoming ICAP requests to disk
+# =============================================================================
+storage:
+  # Persist every incoming ICAP request to disk for later replay or analysis.
+  # Disable to reduce I/O in pure benchmarking scenarios.
+  # Type: bool | Default: true
+  enabled: true
+
+  # Directory for stored request files. Created automatically if absent.
+  # Type: string | Default: "./data/requests"
+  requests_dir: "./data/requests"
+
+  # Maximum size of a single storage file in bytes. When reached, the file is
+  # rotated (closed and a new one opened).
+  # Type: int64 (bytes) | Default: 104857600 (100 MB)
+  max_file_size: 104857600
+
+  # Rotate the storage file after this many records regardless of file size.
+  # Type: int | Default: 10000
+  rotate_after: 10000
+
+  # Number of background goroutines that flush requests to disk.
+  # More workers reduce latency under write spikes.
+  # Type: int | Default: 16
+  workers: 16
+
+  # Capacity of the in-memory write queue. When the queue is full, new
+  # storage jobs are dropped (requests are still served normally).
+  # Type: int | Default: 10000
+  queue_size: 10000
+
+  # ---------------------------------------------------------------------------
+  # DISK MONITOR — prevent crashes from a full disk
+  # ---------------------------------------------------------------------------
+  disk_monitor:
+    # Periodically check available disk space.
+    # Type: bool | Default: true
+    enabled: true
+
+    # How often to poll disk usage.
+    # Type: duration | Default: 30s
+    check_interval: 30s
+
+    # Log a warning when disk usage exceeds this fraction (0.0–1.0).
+    # Writes are still accepted above this level.
+    # Type: float64 | Default: 0.80 (80%)
+    warning_threshold: 0.80
+
+    # Reject writes and emit an error metric when disk usage exceeds this
+    # fraction. Prevents the filesystem from filling completely.
+    # Type: float64 | Default: 0.95 (95%)
+    error_threshold: 0.95
+
+    # Directory path to measure. Empty means use requests_dir.
+    # Type: string | Default: "" (use requests_dir)
+    path: ""
+
+    # Use fast platform-native syscalls (statfs on Linux, GetDiskFreeSpaceEx
+    # on Windows). Set to false for cross-platform compatibility testing.
+    # Type: bool | Default: true
+    use_syscalls: true
+
+    # Cache the last disk-check result for this duration to avoid hammering
+    # the filesystem on every request.
+    # Type: duration | Default: 5s
+    cache_interval: 5s
+
+  # ---------------------------------------------------------------------------
+  # CIRCUIT BREAKER (storage) — isolate storage failures from request flow
+  # ---------------------------------------------------------------------------
+  circuit_breaker:
+    # Enable the circuit breaker for storage write operations.
+    # When tripped, storage is silently skipped until the circuit resets,
+    # preventing a slow disk from stalling the ICAP request path.
+    # Type: bool | Default: true
+    enabled: true
+
+    # Open the circuit after this many consecutive write failures.
+    # Type: int | Default: 5
+    max_failures: 5
+
+    # Duration to wait in the Open state before probing with one request
+    # (transition to Half-Open).
+    # Type: duration | Default: 30s
+    reset_timeout: 30s
+
+    # Number of consecutive successes in Half-Open state needed to close
+    # the circuit and resume normal operation.
+    # Type: int | Default: 3
+    success_threshold: 3
+
+
+# =============================================================================
+# RATE_LIMIT — global request rate limiting (all clients combined)
+# =============================================================================
+rate_limit:
+  # Enable the global rate limiter. Requests that exceed the limit receive
+  # ICAP 429 Too Many Requests.
+  # Type: bool | Default: true
+  enabled: true
+
+  # Maximum sustained request rate across all clients.
+  # Type: float64 (RPS) | Default: 10000
+  requests_per_second: 10000
+
+  # Maximum burst size. Allows short spikes above requests_per_second.
+  # Type: int | Default: 15000
+  burst: 15000
+
+  # Rate-limiting algorithm.
+  # Values:
+  #   "sharded_token_bucket" — best performance for 10k+ RPS (default)
+  #   "token_bucket"         — single-lock token bucket, simpler
+  #   "sliding_window"       — precise but more memory per client
+  # Type: string | Default: "sharded_token_bucket"
+  algorithm: "sharded_token_bucket"
+
+
+# =============================================================================
+# PER_CLIENT_RATE_LIMIT — per source-IP rate limiting
+# Protects against a single client overwhelming the server.
+# =============================================================================
+per_client_rate_limit:
+  # Enable per-client rate limiting. Each unique client IP gets its own bucket.
+  # Type: bool | Default: false
+  enabled: false
+
+  # Allowed requests per second per client IP.
+  # Type: int | Default: 100
+  requests_per_second: 100
+
+  # Per-client burst capacity.
+  # Type: int | Default: 200
+  burst: 200
+
+  # Maximum number of client IPs to track simultaneously. LRU eviction applies
+  # when the limit is reached to prevent unbounded memory growth.
+  # Type: int | Default: 10000
+  max_clients: 10000
+
+  # Evict idle client entries after this duration of inactivity.
+  # Type: duration | Default: 5m
+  ttl: 5m
+
+
+# =============================================================================
+# PER_METHOD_RATE_LIMIT — separate limits for REQMOD, RESPMOD, OPTIONS
+# =============================================================================
+per_method_rate_limit:
+  # Enable per-method rate limiting.
+  # Type: bool | Default: false
+  enabled: false
+
+  # Allowed requests per second for each ICAP method independently.
+  # Type: float64 | Default: 5000
+  requests_per_second: 5000
+
+  # Per-method burst capacity.
+  # Type: int | Default: 7500
+  burst: 7500
+
+
+# =============================================================================
+# CHAOS — fault injection for resilience testing
+# All probabilities are in the range 0.0 (never) to 1.0 (always).
+# =============================================================================
+chaos:
+  # Master switch. All chaos features are disabled when false.
+  # Type: bool | Default: false
+  enabled: false
+
+  # Probability of returning an ICAP 500 error response.
+  # Type: float64 [0.0–1.0] | Default: 0.10 (10%)
+  error_rate: 0.10
+
+  # Probability of simulating a server-side timeout (closes connection).
+  # Type: float64 [0.0–1.0] | Default: 0.05 (5%)
+  timeout_rate: 0.05
+
+  # Lower bound of the artificial latency range (milliseconds).
+  # Type: int (ms) | Default: 10
+  min_latency_ms: 10
+
+  # Upper bound of the artificial latency range (milliseconds).
+  # Type: int (ms) | Default: 500
+  max_latency_ms: 500
+
+  # Probability of injecting a random delay between min_latency_ms and
+  # max_latency_ms before responding.
+  # Type: float64 [0.0–1.0] | Default: 0.10 (10%)
+  latency_rate: 0.10
+
+  # Probability of abruptly closing the TCP connection without a response.
+  # Type: float64 [0.0–1.0] | Default: 0.02 (2%)
+  connection_drop_rate: 0.02
+
+
+# =============================================================================
+# PREVIEW — per-client rate limit for ICAP preview requests
+# Prevents DoS via resource-heavy preview mode.
+# =============================================================================
+preview:
+  # Enable preview-request rate limiting.
+  # Type: bool | Default: true
+  enabled: true
+
+  # Maximum preview requests allowed per client within window_seconds.
+  # Type: int | Default: 100
+  max_requests: 100
+
+  # Sliding window duration in seconds.
+  # Type: int (seconds) | Default: 60
+  window_seconds: 60
+
+  # Maximum number of distinct clients to track.
+  # Type: int | Default: 10000
+  max_clients: 10000
+
+
+# =============================================================================
+# SHARDING — O(1) scenario matching via hash-distributed shards
+# Improves matching throughput when a large number of scenarios are loaded.
+# =============================================================================
+sharding:
+  # Enable scenario sharding.
+  # Type: bool | Default: true
+  enabled: true
+
+  # Number of hash shards. Must be a power of 2 for even distribution.
+  # Type: int | Default: 16
+  shard_count: 16
+
+  # Size of the LRU cache that stores recent match results. Set to 0 to disable.
+  # Type: int | Default: 1000
+  cache_size: 1000
+
+  # Enable the LRU match-result cache. Disable to trade memory for simplicity.
+  # Type: bool | Default: true
+  enable_cache: true
+
+
+# =============================================================================
+# CIRCUIT_BREAKER — global circuit breaker for all components
+# Separate from the storage-specific circuit breaker above.
+# =============================================================================
+circuit_breaker:
+  # Enable circuit breakers globally for all tracked components.
+  # Type: bool | Default: false
+  enabled: false
+
+  # Default settings applied to any component not listed in "components:".
+  defaults:
+    # Number of failures within rolling_window before the circuit opens.
+    # Type: int | Default: 5
+    failure_threshold: 5
+
+    # Consecutive successes in Half-Open state to close the circuit.
+    # Type: int | Default: 3
+    success_threshold: 3
+
+    # Duration to remain in Open state before trying Half-Open.
+    # Type: duration | Default: 30s
+    open_timeout: 30s
+
+    # Maximum requests allowed through in Half-Open state.
+    # Type: int | Default: 1
+    half_open_max_requests: 1
+
+    # Time window over which failures are counted.
+    # Type: duration | Default: 60s
+    rolling_window: 60s
+
+    # Number of time-buckets within rolling_window. Higher = finer granularity.
+    # Type: int | Default: 60
+    window_buckets: 60
+
+  # Per-component overrides. Any field omitted here falls back to defaults above.
+  # Known component names: "storage", "scenario_loader", "metrics_server"
+  components:
+    storage:
+      failure_threshold: 10
+      success_threshold: 3
+      open_timeout: 60s
+      half_open_max_requests: 2
+    scenario_loader:
+      failure_threshold: 5
+      success_threshold: 3
+      open_timeout: 30s
+      half_open_max_requests: 1
+
+
+# =============================================================================
+# REPLAY — replay previously recorded requests
+# =============================================================================
+replay:
+  # Enable replay mode. When true, the server reads requests from requests_dir
+  # and sends them to a target ICAP server (used with the "replay" subcommand).
+  # Type: bool | Default: false
+  enabled: false
+
+  # Directory containing the recorded request files to replay.
+  # Type: string | Default: ""
+  # requests_dir: "./data/requests"
+
+  # Playback speed multiplier. 1.0 = original timing, 2.0 = twice as fast.
+  # Type: float64 | Default: 1.0
+  speed: 1.0
+
+
+# =============================================================================
+# PPROF — Go runtime profiling endpoints
+# WARNING: exposes detailed runtime internals. Enable only in trusted networks.
+# =============================================================================
+pprof:
+  # Expose /debug/pprof/* endpoints on the metrics server port.
+  # Type: bool | Default: false
+  enabled: false
+
+
+# =============================================================================
+# PLUGIN — Go plugin (.so) system for custom processors
+# =============================================================================
+plugin:
+  # Enable the plugin loader.
+  # Type: bool | Default: false
+  enabled: false
+
+  # Directory containing compiled plugin .so files.
+  # Type: string | Default: "./plugins"
+  dir: "./plugins"
+
+  # Explicit list of plugin names to load. Order determines priority.
+  # If empty, every .so file in dir is loaded.
+  # Type: []string | Default: [] (load all)
+  # names:
+  #   - "my-custom-processor"
+
+
+# =============================================================================
+# MULTI-SERVER MODE (commented out)
+# =============================================================================
+# Uncomment the "defaults:" and "servers:" blocks below (and comment out the
+# "server:" block at the top) to run multiple ICAP listeners in one process.
+#
+# When "servers:" is present, the top-level "server:" and "mock:" sections are
+# ignored. Each server entry inherits from "defaults:" and can override any
+# field individually.
+#
+# defaults:
+#   # Shared settings for all server instances. Any field here can be overridden
+#   # per-server in the servers map below.
+#   host: "0.0.0.0"            # Type: string  | Default: "0.0.0.0"
+#   read_timeout: 30s           # Type: duration | Default: 30s
+#   write_timeout: 30s          # Type: duration | Default: 30s
+#   max_connections: 15000      # Type: int      | Default: 15000
+#   max_body_size: 10485760     # Type: int64    | Default: 10485760 (10 MB)
+#   idle_timeout: 60s           # Type: duration | Default: 60s
+#   shutdown_timeout: 30s       # Type: duration | Default: 30s
+#
+# servers:
+#   # Each key is a logical server name (used in logs and metrics labels).
+#
+#   kata:
+#     port: 1344                           # Required. Type: int
+#     scenarios_dir: "./configs/scenarios/kata"  # Type: string
+#     service_id: "kata-icap"              # ICAP Service-ID header. Type: string
+#     # Per-server overrides (optional — falls back to defaults above):
+#     # host: "127.0.0.1"
+#     # max_connections: 5000
+#     # read_timeout: 60s
+#     #
+#     # Inline scenarios (v2 format, higher priority than file-based scenarios):
+#     # scenarios:
+#     #   quick-pass:
+#     #     status: 204
+#
+#   ptsandbox:
+#     port: 1488
+#     scenarios_dir: "./configs/scenarios/ptsandbox"
+#     service_id: "ptsandbox-icap"

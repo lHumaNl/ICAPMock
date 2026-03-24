@@ -1,0 +1,87 @@
+{{- /*
+ConfigMap that holds:
+  1. The server config.yaml (generated from values)
+  2. Any extra config files from .Values.extraConfigs
+  3. Scenario files from .Values.scenarios
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "icap-mock.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "icap-mock.labels" . | nindent 4 }}
+data:
+  # -------------------------------------------------------------------------
+  # Main server configuration (rendered from values)
+  # -------------------------------------------------------------------------
+  config.yaml: |
+    {{- if eq .Values.icap.mode "multi" }}
+    # Multi-server mode
+    defaults:
+      host: {{ .Values.icap.host | quote }}
+      read_timeout: {{ .Values.icap.readTimeout | quote }}
+      write_timeout: {{ .Values.icap.writeTimeout | quote }}
+      max_connections: {{ .Values.icap.maxConnections }}
+
+    servers:
+      {{- range $name, $srv := .Values.icap.servers }}
+      {{ $name }}:
+        port: {{ $srv.port }}
+        scenarios_dir: {{ $srv.scenariosDir | default (printf "/app/configs/scenarios/%s" $name) | quote }}
+      {{- end }}
+
+    {{- else }}
+    # Single-server mode
+    server:
+      host: {{ .Values.icap.host | quote }}
+      port: {{ .Values.icap.port }}
+      read_timeout: {{ .Values.icap.readTimeout | quote }}
+      write_timeout: {{ .Values.icap.writeTimeout | quote }}
+      max_connections: {{ .Values.icap.maxConnections }}
+      scenarios_dir: {{ .Values.icap.scenariosDir | quote }}
+
+    {{- end }}
+
+    health:
+      port: {{ .Values.health.port }}
+
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+      port: {{ .Values.metrics.port }}
+
+    logging:
+      level: {{ .Values.logging.level | quote }}
+      format: {{ .Values.logging.format | quote }}
+
+    storage:
+      enabled: {{ .Values.storage.enabled }}
+      {{- if .Values.storage.enabled }}
+      path: {{ .Values.storage.path | quote }}
+      {{- end }}
+
+    rate_limit:
+      enabled: {{ .Values.rateLimit.enabled }}
+
+    {{- if .Values.tls.enabled }}
+    tls:
+      enabled: true
+      cert_file: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
+      key_file: {{ printf "%s/tls.key" .Values.tls.mountPath | quote }}
+    {{- end }}
+
+  # -------------------------------------------------------------------------
+  # Extra config files
+  # -------------------------------------------------------------------------
+  {{- range $key, $value := .Values.extraConfigs }}
+  {{ $key }}: |
+    {{- $value | nindent 4 }}
+  {{- end }}
+
+  # -------------------------------------------------------------------------
+  # Scenario files
+  # -------------------------------------------------------------------------
+  {{- range $filename, $content := .Values.scenarios }}
+  {{ $filename }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}

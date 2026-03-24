@@ -1,0 +1,466 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "$$hashKey": "#,
+        "builtIn": 1,
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ],
+    "description": "ICAP Mock Server monitoring dashboard",
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {},
+            "links": [],
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "reqps"
+          },
+          "overrides": {}
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 23,
+          "x": 0,
+          "y": 0
+        },
+        "id": request-rate",
+        "options": {
+          "alertThresholds": null,
+          "colorBackground": null,
+          "legend": {
+            "calcs": [
+              "mean",
+              "sum"
+            ],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "linewidth": null,
+          "maxDataPoints": null,
+          "nullPointMode": "connected",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "calcs": [
+              "mean"
+            ],
+            "fields": null,
+            "values": false
+          },
+          "text": null,
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          },
+          "xAxis": {
+            "buckets": null,
+            "mode": "time"
+          },
+          "yAxis": {
+            "format": null,
+            "logBase": null,
+            "max": null,
+            "min": null
+          }
+        },
+        "pluginVersion": "10.0.0",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "rate(icap_requests_total[5m])",
+            "hide": false,
+            "legendFormat": "{{ instance }}",
+            "range": true,
+            "refId": "A"
+            "step": "",
+            "type": "timeserie"
+          }
+        ],
+        "title": "Request Rate (req/s)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {},
+            "links": [],
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "short"
+          },
+          "overrides": {}
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 23,
+          "x": 0,
+          "y": 7
+        },
+        "id": "request-latency",
+        "options": {
+          "alertThresholds": null,
+          "colorBackground": null,
+          "legend": {
+            "calcs": [
+              "mean",
+              "max"
+            ],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "linewidth": null,
+          "maxDataPoints": null,
+          "nullPointMode": "connected",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "calcs": [
+              "mean"
+            ],
+            "fields": null,
+            "values": false
+          },
+          "text": null,
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          },
+          "xAxis": {
+            "buckets": null,
+            "mode": "time"
+          },
+          "yAxis": {
+            "format": "s",
+            "logBase": null,
+            "max": null,
+            "min": null
+          }
+        },
+        "pluginVersion": "10.0.0",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "histogram_quantile(0.95, rate(icap_request_duration_seconds_bucket[5m]), le) > 0)",
+            "hide": false,
+            "legendFormat": "P95 Latency",
+            "range": true,
+            "refId": "B",
+            "step": "",
+            "type": "timeserie"
+          },
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "histogram_quantile(0.99, rate(icap_request_duration_seconds_bucket[5m]), le) > 0)",
+            "hide": false,
+            "legendFormat": "P99 Latency",
+            "range": true,
+            "refId": "C",
+            "step": "",
+            "type": "timeserie"
+          }
+        ],
+        "title": "Request Latency (95th/99th percentile)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {},
+            "links": [],
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "short"
+          },
+          "overrides": {}
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 23,
+          "x": 12,
+          "y": 0
+        },
+        "id": "active-connections",
+        "options": {
+          "alertThresholds": null,
+          "colorBackground": null,
+          "legend": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "linewidth": null,
+          "maxDataPoints": null,
+          "nullPointMode": "connected",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "calcs": [
+              "mean"
+            ],
+            "fields": null,
+            "values": false
+          },
+          "text": null,
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          },
+          "xAxis": {
+            "buckets": null,
+            "mode": "time"
+          },
+          "yAxis": {
+            "format": "short",
+            "logBase": null,
+            "max": null,
+            "min": "0"
+          }
+        },
+        "pluginVersion": "10.0.0",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "icap_active_connections",
+            "hide": false,
+            "legendFormat": "Active Connections",
+            "range": true,
+            "refId": "A",
+            "step": "",
+            "type": "timeserie"
+          }
+        ],
+        "title": "Active Connections",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {},
+            "links": [],
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "unit": "short"
+          },
+          "overrides": {}
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 23,
+          "x": 12,
+          "y": 7
+        },
+        "id": "error-rate",
+        "options": {
+          "alertThresholds": null,
+          "colorBackground": null,
+          "legend": {
+            "calcs": [
+              "mean",
+              "sum"
+            ],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "linewidth": null,
+          "maxDataPoints": null,
+          "nullPointMode": "connected",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "calcs": [
+              "mean"
+            ],
+            "fields": null,
+            "values": false
+          },
+          "text": null,
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          },
+          "xAxis": {
+            "buckets": null,
+            "mode": "time"
+          },
+          "yAxis": {
+            "format": "short",
+            "logBase": null,
+            "max": null,
+            "min": null
+          }
+        },
+        "pluginVersion": "10.0.0",
+        "targets": [
+          {
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "editorMode": "code",
+            "expr": "sum(rate(icap_errors_total[5m]))",
+            "hide": false,
+            "legendFormat": "{{ type }} - {{ error_type }}",
+            "range": true,
+            "refId": "A",
+            "step": "",
+            "type": "timeserie"
+          }
+        ],
+        "title": "Error Rate (errors/s)",
+        "type": "timeseries"
+      }
+    ],
+    "refresh": "1m",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": ["icap-mock", "monitoring"],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "datasource",
+            "value": "prometheus"
+          },
+          "hide": 0
+          "name": "datasource",
+          "options": {},
+          "query": "label",
+          "refresh": "1m",
+          "type": "constant"
+          "value": "ICAP Metrics"
+        },
+        {
+          "current": {
+            "selected": false,
+            "text": "Refresh Interval",
+            "value": "1m"
+          },
+          "hide": 5
+          "name": "refresh_interval",
+          "options": {
+            "values": [
+              "5s",
+              "15s",
+              "30s",
+              "1m"
+              "5m"
+              "10m"
+            ]
+          "label": "1m"
+          "title": "Dashboard Settings",
+          "type": "row"
+        }
+      ]
+    ],
+    "time": {
+      "from": "2024-01-01T00:00:00Z",
+      "to": "2025-01-01T00:00:00Z"
+    },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "ICAP Mock Server Metrics",
+    "uid": "icap-dashboard",
+    "version": 1
+    "weekStart": null
+  }
+  "timeUpdated": "2024-01-01T00:00:00Z"
+}
+  "time": {
+        "from": "now-6h ago",
+        "to": "now-6h"
+      }
+    },
+    "timeRange": {
+      "from": "now-24h",
+        "to": "now-24h",
+        "raw": {
+          "from": "now-168h",
+          "to": "now-168h"
+      }
+    }
+  }
+}

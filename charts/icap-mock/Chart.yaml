@@ -1,0 +1,18 @@
+apiVersion: v2
+name: icap-mock
+description: Production-ready ICAP mock server for testing and development
+type: application
+version: 0.1.0
+appVersion: "1.25.0"
+keywords:
+  - icap
+  - mock
+  - testing
+  - proxy
+home: https://github.com/icap-mock/icap-mock
+sources:
+  - https://github.com/icap-mock/icap-mock
+maintainers:
+  - name: ICAP Mock Team
+annotations:
+  artifacthub.io/license: MIT

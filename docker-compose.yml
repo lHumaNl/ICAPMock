@@ -1,0 +1,210 @@
+# ICAP Mock Server - Docker Compose Configuration
+# For local development and testing
+# Usage: docker-compose up -d
+
+    # For monitoring stack (Prometheus + Grafana):
+    #   docker-compose --profile monitoring up -d prometheus grafana
+
+services:
+  # ===========================================
+  # ICAP Mock Server (Main Service)
+  # ===========================================
+  icap-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-}
+    image: icap-mock:${ICAP_VERSION:-latest}
+    container_name: icap-mock-server
+    hostname: icap-mock
+    
+    # Port mappings: ICAP (1344), Metrics (9090), Health (8080)
+    ports:
+      - "${ICAP_PORT:-1344}:1344"     # ICAP protocol port
+      - "${METRICS_PORT:-9090}:9090"  # Prometheus metrics port
+      - "${HEALTH_PORT:-8080}:8080"   # Health check port
+    
+    # Volume mounts for configuration and data persistence
+    volumes:
+      - ./configs:/app/configs:ro                           # Read-only config files
+      - ./data:/app/data                                    # Persistent data storage
+      - ./configs/scenarios:/app/configs/scenarios:ro       # Scenario definitions
+    
+    # Environment variables
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TZ=${TIMEZONE:-UTC}
+      # Server configuration overrides (optional)
+      - ICAP_SERVER_HOST=0.0.0.0
+      - ICAP_SERVER_PORT=1344
+      - ICAP_HEALTH_PORT=8080
+      - ICAP_METRICS_PORT=9090
+      - ICAP_METRICS_ENABLED=true
+      - ICAP_STORAGE_ENABLED=true
+      - ICAP_RATE_LIMIT_ENABLED=true
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check configuration using wget to /health endpoint
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    
+    # Logging configuration (json-file driver with limits)
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service,environment"
+        tag: "{{.Name}}/{{.ID}}"
+    
+    # Resource limits (optional - adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    
+    # Network configuration
+    networks:
+      - icap-network
+    
+    # Dependencies (optional: prometheus is only present when the monitoring profile is active)
+    depends_on:
+      prometheus:
+        condition: service_started
+        required: false
+    
+    # Labels for organization
+    labels:
+      - "com.icap-mock.service=icap-server"
+      - "com.icap-mock.environment=development"
+      - "com.icap-mock.description=ICAP Mock Server for load testing"
+
+  # ===========================================
+  # Prometheus (Metrics Collection) - Optional
+  # ===========================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: icap-prometheus
+    hostname: prometheus
+    
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    networks:
+      - icap-network
+    
+    profiles:
+      - monitoring
+    labels:
+      - "com.icap-mock.service=prometheus"
+      - "com.icap-mock.component=monitoring"
+  # ===========================================
+  # Grafana (Visualization) - Optional
+  # ===========================================
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: icap-grafana
+    hostname: grafana
+    
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    networks:
+      - icap-network
+    
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+    labels:
+      - "com.icap-mock.service=grafana"
+      - "com.icap-mock.component=visualization"
+# ===========================================
+# Networks Configuration
+# ===========================================
+networks:
+  icap-network:
+    driver: bridge
+    name: icap-mock-network
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+    labels:
+      - "com.icap-mock.network=internal"
+# ===========================================
+# Volumes Configuration
+# ===========================================
+volumes:
+  prometheus_data:
+    driver: local
+    name: icap-prometheus-data
+  
+  grafana_data:
+    driver: local
+    name: icap-grafana-data

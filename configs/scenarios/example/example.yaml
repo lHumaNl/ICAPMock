@@ -1,0 +1,294 @@
+# =============================================================================
+# ICAP Mock Server — Example Scenario File (v2 format)
+# =============================================================================
+# Usage: point mock.scenarios_dir at the directory that contains this file.
+#   mock:
+#     scenarios_dir: "./configs/scenarios/example"
+#
+# HOW MATCHING WORKS
+# ------------------
+# 1. The server collects all scenarios whose "when:" conditions all match the
+#    incoming request headers.
+# 2. Among matching scenarios the one with the highest "priority:" wins.
+#    Scenarios without an explicit priority default to 0; higher numbers win.
+# 3. If no scenario matches, the server falls back to mock.default_mode.
+#
+# HEADER MATCHING ("when:" block)
+# --------------------------------
+# Every key under "when:" is an ICAP/HTTP request header name (case-insensitive).
+# The value is matched as a literal string unless it begins with "re:" —
+# in that case the remainder is treated as a Go regular expression.
+#
+#   when:
+#     X-Filename: "invoice.pdf"          # exact match
+#     Content-Type: "re:(?i)text/html"   # regex match (case-insensitive)
+#
+# A scenario with no "when:" block matches every request (use as a catch-all).
+#
+# RESPONSE HEADERS ("set:" block)
+# --------------------------------
+# Every key under "set:" becomes an ICAP response header.
+#
+# DELAYS
+# ------
+# Static:  delay: 200ms      — always wait exactly 200 ms
+# Range:   delay: 100ms-2s   — wait a random duration in [100 ms, 2 s]
+#
+# WEIGHTED RESPONSES ("responses:" list)
+# ----------------------------------------
+# Use "responses:" to return different answers with configurable probability.
+# Weights are relative integers; they do not need to sum to 100.
+# When a "responses:" list is present, top-level status/body/set/delay are
+# ignored — every variant must declare its own values.
+# =============================================================================
+
+
+# =============================================================================
+# DEFAULTS — applied to every scenario in this file that omits the field
+# =============================================================================
+# Any field listed here acts as a file-level default. Individual scenarios can
+# override any default by re-declaring the same field.
+defaults:
+  # ICAP method this file handles.
+  # Values: REQMOD, RESPMOD, OPTIONS
+  # (Can still be overridden per-scenario if needed.)
+  method: REQMOD
+
+  # ICAP service endpoint path (matched against the request URI).
+  endpoint: /example
+
+  # Default ICAP response status code sent when a scenario matches.
+  # 200 — modified response follows (with encapsulated HTTP response/body)
+  # 204 — no modification, client should use the original content
+  status: 204
+
+  # Response headers added to every ICAP reply (merged with per-scenario "set:").
+  headers:
+    Server: "ICAP Mock Server / example"
+    ISTag: '"example-2026"'
+
+
+# =============================================================================
+# SCENARIOS
+# =============================================================================
+scenarios:
+
+  # ---------------------------------------------------------------------------
+  # 1. EXACT MATCH — match a specific header value literally
+  # ---------------------------------------------------------------------------
+  # Trigger: the request carries the header X-Filename with value exactly
+  # "malware.exe". Returns ICAP 200 with a simulated AV block page.
+  exact-match-block:
+    # Conditions that must ALL be true for this scenario to activate.
+    # Header names are case-insensitive. Values are literal strings.
+    when:
+      X-Filename: "malware.exe"
+
+    # ICAP status code for this response.
+    # Overrides the defaults.status above.
+    # Type: int | Default: (from defaults)
+    status: 200
+
+    # HTTP status code embedded in the encapsulated HTTP response.
+    # Only meaningful when status is 200 (server modifies the content).
+    # Type: int | Default: 0 (not set)
+    http_status: 403
+
+    # Response headers specific to this scenario (merged with defaults.headers).
+    set:
+      Content-Type: "text/html; charset=utf-8"
+      X-Threat-Level: "DANGEROUS"
+      X-Virus-ID: "TROJAN"
+
+    # Inline response body. Multi-line YAML literal block (|) works well here.
+    # Use body_file instead if the body is large (see scenario below).
+    body: |
+      <html><body>
+        <h1>Access Denied</h1>
+        <p>The file <strong>malware.exe</strong> was blocked by the antivirus scanner.</p>
+      </body></html>
+
+    # Simulated processing delay (static value).
+    # Mimics a real AV scan taking ~300 ms.
+    # Type: duration string | Default: "" (no delay)
+    delay: 300ms
+
+
+  # ---------------------------------------------------------------------------
+  # 2. REGEX MATCH — match using a Go regular expression (re: prefix)
+  # ---------------------------------------------------------------------------
+  # Trigger: any file whose name ends with a known executable extension.
+  # The "re:" prefix switches to regex mode; the pattern is Go regexp syntax.
+  regex-match-executable:
+    when:
+      # Case-insensitive match for common executable extensions.
+      X-Filename: "re:(?i)\\.(exe|dll|bat|cmd|ps1|sh)$"
+
+    status: 200
+    http_status: 403
+
+    set:
+      Content-Type: "text/plain"
+      X-Threat-Level: "SUSPICIOUS"
+
+    body: "Executable file blocked by policy."
+
+    # Range delay: a random duration between 100 ms and 500 ms is chosen for
+    # each request. Format: <min>-<max>, any Go duration units.
+    delay: 100ms-500ms
+
+    # Priority: higher values win when multiple scenarios match the same request.
+    # Default priority is 0. Use positive integers to rank scenarios.
+    # Type: int | Default: 0
+    priority: 10
+
+
+  # ---------------------------------------------------------------------------
+  # 3. BODY FROM FILE — serve a large or binary response body from disk
+  # ---------------------------------------------------------------------------
+  # Trigger: Content-Type header matches "application/pdf" (case-insensitive).
+  regex-match-pdf:
+    when:
+      Content-Type: "re:(?i)application/pdf"
+
+    status: 200
+    http_status: 200
+
+    set:
+      Content-Type: "application/pdf"
+
+    # Load the response body from a file path.
+    # Relative paths are resolved from the working directory of the process
+    # (typically the repository root, not this scenario file's directory).
+    # Mutually exclusive with "body:". body_file takes precedence if both given.
+    # Type: string | Default: "" (not used)
+    body_file: "./configs/scenarios/example/sample_response.pdf"
+
+    delay: 50ms-200ms
+    priority: 5
+
+
+  # ---------------------------------------------------------------------------
+  # 4. WEIGHTED RESPONSES — probabilistic A/B behaviour
+  # ---------------------------------------------------------------------------
+  # Trigger: the request header X-Client-ID is present and matches the regex.
+  # The server randomly selects one response variant according to the weights.
+  #
+  # Use case: simulate a scanner that classifies 70% of files as clean,
+  # 20% as suspicious, and 10% as dangerous.
+  weighted-scan-result:
+    when:
+      X-Client-ID: "re:.+"    # matches any non-empty X-Client-ID header
+
+    # "responses:" overrides top-level status/set/body/delay for this scenario.
+    # Weights are arbitrary positive integers; probability = weight / sum(weights).
+    responses:
+      # Weight 70 out of 100 total → 70% of the time: clean pass (ICAP 204)
+      - weight: 70
+        status: 204
+        set:
+          X-Threat-Level: "CLEAN"
+        delay: 50ms-150ms
+
+      # Weight 20/100 → 20%: suspicious, allow but tag
+      - weight: 20
+        status: 200
+        http_status: 200
+        set:
+          X-Threat-Level: "SUSPICIOUS"
+          Content-Type: "text/plain"
+        body: "File flagged as suspicious but allowed."
+        delay: 200ms-600ms
+
+      # Weight 10/100 → 10%: block as dangerous
+      - weight: 10
+        status: 200
+        http_status: 403
+        set:
+          X-Threat-Level: "DANGEROUS"
+          Content-Type: "text/html"
+        body: "<html><body><h1>Blocked</h1></body></html>"
+        delay: 300ms-1s
+
+
+  # ---------------------------------------------------------------------------
+  # 5. MULTIPLE CONDITIONS — AND logic across several headers
+  # ---------------------------------------------------------------------------
+  # All "when:" entries must match simultaneously (logical AND).
+  # Trigger: a RESPMOD request for an email attachment from a specific service.
+  multi-condition-email-attachment:
+    # Override the default method for this single scenario.
+    method: RESPMOD
+
+    when:
+      Content-Type: "re:(?i)message/rfc822"
+      X-Service-Name: "re:(?i)mail-gateway"
+
+    status: 200
+    http_status: 403
+
+    set:
+      Content-Type: "text/plain"
+      X-Block-Reason: "Malicious email attachment"
+
+    body: "Email attachment blocked."
+    delay: 800ms-2s
+
+    # High priority ensures this matches before the generic email catch-all below.
+    priority: 20
+
+
+  # ---------------------------------------------------------------------------
+  # 6. CATCH-ALL — scenario with no "when:" block matches everything
+  # ---------------------------------------------------------------------------
+  # Useful as a default response for any request that did not match a more
+  # specific scenario. Put it last and give it the lowest priority.
+  catch-all-clean:
+    # No "when:" block → matches all requests.
+    status: 204
+    set:
+      X-Threat-Level: "CLEAN"
+    delay: 10ms-50ms
+
+    # Explicit low priority so any scenario with conditions wins over this one.
+    priority: -10
+
+
+  # ---------------------------------------------------------------------------
+  # 7. STATIC DELAY vs RANGE DELAY examples (side-by-side reference)
+  # ---------------------------------------------------------------------------
+  # These two scenarios are commented out — they exist as documentation only.
+
+  # Static delay: always waits exactly 1 second.
+  # static-delay-example:
+  #   status: 204
+  #   delay: 1s
+
+  # Range delay: waits a random duration between 250 ms and 2 s.
+  # range-delay-example:
+  #   status: 204
+  #   delay: 250ms-2s
+
+
+  # ---------------------------------------------------------------------------
+  # 8. INLINE WEIGHTED WITH HEADERS — full-featured weighted example
+  # ---------------------------------------------------------------------------
+  # Commented out — uncomment to try.
+  #
+  # full-weighted-example:
+  #   when:
+  #     X-Scan-Mode: "deep"
+  #   responses:
+  #     - weight: 1
+  #       status: 200
+  #       http_status: 403
+  #       set:
+  #         Content-Type: "text/html"
+  #         X-Verdict: "MALWARE"
+  #       body: "<html><body>Blocked by deep scan.</body></html>"
+  #       delay: 500ms-1500ms
+  #     - weight: 9
+  #       status: 204
+  #       set:
+  #         X-Verdict: "CLEAN"
+  #       delay: 100ms-300ms

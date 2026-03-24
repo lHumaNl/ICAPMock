@@ -1,0 +1,49 @@
+ICAP Mock Server has been deployed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Version:   {{ .Chart.AppVersion }}
+
+=============================================================================
+Service endpoints
+=============================================================================
+
+  ICAP:    {{ include "icap-mock.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.icapPort }}
+  Health:  {{ include "icap-mock.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.healthPort }}
+  Metrics: {{ include "icap-mock.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.metricsPort }}
+
+To forward ports locally:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "icap-mock.fullname" . }} \
+    {{ .Values.service.icapPort }}:{{ .Values.service.icapPort }} \
+    {{ .Values.service.healthPort }}:{{ .Values.service.healthPort }} \
+    {{ .Values.service.metricsPort }}:{{ .Values.service.metricsPort }}
+
+=============================================================================
+Health check
+=============================================================================
+
+  curl http://localhost:{{ .Values.service.healthPort }}/health
+  curl http://localhost:{{ .Values.service.healthPort }}/ready
+
+=============================================================================
+Prometheus metrics
+=============================================================================
+
+{{- if .Values.serviceMonitor.enabled }}
+  A ServiceMonitor has been created. Prometheus Operator will scrape
+  http://<pod>:{{ .Values.service.metricsPort }}/metrics automatically.
+{{- else }}
+  Prometheus scrape annotations are set on the pods. If you use the
+  Prometheus Operator, enable serviceMonitor.enabled=true instead.
+{{- end }}
+
+=============================================================================
+{{- if eq .Values.icap.mode "multi" }}
+Multi-server mode — additional ICAP ports
+=============================================================================
+{{- range $name, $srv := .Values.icap.servers }}
+  {{ $name }}: port {{ $srv.port }}
+{{- end }}
+=============================================================================
+{{- end }}

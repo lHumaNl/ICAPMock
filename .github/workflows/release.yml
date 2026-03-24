@@ -1,0 +1,275 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GO_VERSION: '1.26'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Cross-compile binaries for all target platforms
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            os: linux
+            arch: amd64
+          - goos: linux
+            goarch: arm64
+            os: linux
+            arch: arm64
+          - goos: windows
+            goarch: amd64
+            os: windows
+            arch: amd64
+            ext: .exe
+          - goos: darwin
+            goarch: amd64
+            os: darwin
+            arch: amd64
+          - goos: darwin
+            goarch: arm64
+            os: darwin
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        # Use go build directly with explicit cross-compilation env vars so the
+        # binary is always built for the target platform regardless of host OS.
+        run: |
+          mkdir -p bin
+          GOOS=${{ matrix.goos }} \
+          GOARCH=${{ matrix.goarch }} \
+          CGO_ENABLED=0 \
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o bin/icap-mock${{ matrix.ext }} \
+            ./cmd/icap-mock
+
+      - name: Create archive
+        run: |
+          cd bin
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            zip icap-mock-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}.zip \
+              icap-mock${{ matrix.ext }}
+          else
+            tar czf icap-mock-${{ steps.version.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz \
+              icap-mock
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: icap-mock-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            bin/icap-mock-*.zip
+            bin/icap-mock-*.tar.gz
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Generate changelog from git log
+  # ---------------------------------------------------------------------------
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "changelog=### Initial Release" >> "$GITHUB_OUTPUT"
+          else
+            CHANGELOG=$(git log --pretty=format:"- %h %s (%an)" "${PREVIOUS_TAG}..HEAD")
+            [ -z "$CHANGELOG" ] && CHANGELOG="- No changes in this release"
+            {
+              echo "changelog<<EOF"
+              echo "### Changes since ${PREVIOUS_TAG}"
+              echo ""
+              echo "$CHANGELOG"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Create GitHub Release with checksums and release notes
+  # ---------------------------------------------------------------------------
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, changelog]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" \) \
+            -exec sha256sum {} + | sort -k2 > SHA256SUMS.txt
+
+      - name: Write release notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DATE=$(date -u +"%Y-%m-%d")
+          cat > release_notes.md << EOF
+          # ICAP Mock Server ${VERSION}
+
+          Released: ${DATE}
+
+          ## Installation
+
+          ### Linux (amd64)
+          \`\`\`bash
+          wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/icap-mock-${VERSION}-linux-amd64.tar.gz
+          tar xzf icap-mock-${VERSION}-linux-amd64.tar.gz
+          sudo mv icap-mock /usr/local/bin/
+          \`\`\`
+
+          ### macOS
+          \`\`\`bash
+          # Apple Silicon
+          curl -L https://github.com/${{ github.repository }}/releases/download/${VERSION}/icap-mock-${VERSION}-darwin-arm64.tar.gz | tar xz
+          sudo mv icap-mock /usr/local/bin/
+
+          # Intel
+          curl -L https://github.com/${{ github.repository }}/releases/download/${VERSION}/icap-mock-${VERSION}-darwin-amd64.tar.gz | tar xz
+          sudo mv icap-mock /usr/local/bin/
+          \`\`\`
+
+          ### Windows
+          \`\`\`powershell
+          Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/${VERSION}/icap-mock-${VERSION}-windows-amd64.zip" -OutFile icap-mock.zip
+          Expand-Archive icap-mock.zip .
+          \`\`\`
+
+          ### Docker
+          \`\`\`bash
+          docker pull ghcr.io/${{ github.repository }}:${VERSION}
+          docker run -p 1344:1344 -p 9090:9090 -p 8080:8080 ghcr.io/${{ github.repository }}:${VERSION}
+          \`\`\`
+
+          ## Checksums
+          \`\`\`
+          $(cat artifacts/SHA256SUMS.txt)
+          \`\`\`
+
+          ## Changelog
+
+          ${{ needs.changelog.outputs.changelog }}
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+            artifacts/SHA256SUMS.txt
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Build and push multi-arch Docker image to Docker Hub + GHCR
+  # ---------------------------------------------------------------------------
+  docker-release:
+    name: Docker Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ github.repository_owner }}/icap-mock
+            ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

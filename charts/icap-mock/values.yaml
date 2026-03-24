@@ -1,0 +1,296 @@
+# =============================================================================
+# ICAP Mock Server — Helm Chart Values
+# =============================================================================
+
+# -- Number of replicas (for single-server mode; multi-server runs as 1 pod
+#    with multiple listening ports).
+replicaCount: 1
+
+image:
+  # -- Docker image repository
+  repository: ghcr.io/icap-mock/icap-mock
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag (defaults to chart appVersion)
+  tag: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+
+# -- Override the full resource name
+fullnameOverride: ""
+
+# =============================================================================
+# Server mode: "single" or "multi"
+# single — one ICAP port (icap.port below)
+# multi  — multiple servers defined under icap.servers
+# =============================================================================
+icap:
+  # -- Server mode: "single" or "multi"
+  mode: single
+
+  # -- Config file path inside the container (mounted from ConfigMap)
+  configFile: /app/configs/config.yaml
+
+  # Single-server settings (used when mode == "single")
+  # -- ICAP listen host
+  host: "0.0.0.0"
+  # -- ICAP listen port
+  port: 1344
+  # -- Read timeout
+  readTimeout: 30s
+  # -- Write timeout
+  writeTimeout: 30s
+  # -- Maximum simultaneous connections
+  maxConnections: 15000
+
+  # Multi-server settings (used when mode == "multi")
+  # Each entry becomes a named server in the config.
+  # servers:
+  #   kata:
+  #     port: 1344
+  #     scenariosDir: /app/configs/scenarios/kata
+  #   ptsandbox:
+  #     port: 1488
+  #     scenariosDir: /app/configs/scenarios/ptsandbox
+  servers: {}
+
+  # -- Directory path inside the container where scenario YAML files are stored
+  scenariosDir: /app/configs/scenarios
+
+# =============================================================================
+# Health / Readiness server
+# =============================================================================
+health:
+  # -- Port exposed by the health HTTP server
+  port: 8080
+
+# =============================================================================
+# Prometheus metrics
+# =============================================================================
+metrics:
+  # -- Enable the Prometheus /metrics endpoint
+  enabled: true
+  # -- Port exposed by the metrics HTTP server
+  port: 9090
+
+# =============================================================================
+# Logging
+# =============================================================================
+logging:
+  # -- Log level: debug, info, warn, error
+  level: info
+  # -- Log format: json or text
+  format: json
+
+# =============================================================================
+# Storage (request persistence)
+# =============================================================================
+storage:
+  # -- Enable on-disk request storage
+  enabled: false
+  # -- Path inside the container for stored requests
+  path: /app/data/requests
+
+# =============================================================================
+# Rate limiting
+# =============================================================================
+rateLimit:
+  # -- Enable rate limiting
+  enabled: false
+
+# =============================================================================
+# TLS (optional)
+# =============================================================================
+tls:
+  # -- Enable TLS on the ICAP port
+  enabled: false
+  # -- Name of an existing Secret containing tls.crt and tls.key
+  secretName: ""
+  # -- Mount path for TLS certificates inside the container
+  mountPath: /app/certs
+
+# =============================================================================
+# Scenario files mounted via ConfigMap
+# Each key becomes a file under scenariosDir.
+# Example:
+#   scenarios:
+#     allow.yaml: |
+#       name: allow-all
+#       ...
+# =============================================================================
+scenarios: {}
+
+# =============================================================================
+# Extra config files (arbitrary key→content map placed in the ConfigMap
+# and mounted at /app/configs/)
+# =============================================================================
+extraConfigs: {}
+
+# =============================================================================
+# Environment variable overrides
+# These are appended to the container env as-is.
+# =============================================================================
+extraEnv: []
+# - name: ICAP_SERVER_HOST
+#   value: "0.0.0.0"
+
+# -- Extra environment variables from ConfigMaps or Secrets
+extraEnvFrom: []
+# - secretRef:
+#     name: icap-mock-secret
+
+# =============================================================================
+# Service configuration
+# =============================================================================
+service:
+  # -- Kubernetes Service type
+  type: ClusterIP
+  # -- Primary ICAP port (single-server mode)
+  icapPort: 1344
+  # -- Health port
+  healthPort: 8080
+  # -- Metrics port
+  metricsPort: 9090
+  # -- Extra ports for multi-server mode
+  # extraPorts:
+  #   - name: ptsandbox
+  #     port: 1488
+  #     targetPort: 1488
+  #     protocol: TCP
+  extraPorts: []
+  # -- Annotations to add to the Service
+  annotations: {}
+
+# =============================================================================
+# Ingress (typically not used for ICAP, but available for health/metrics)
+# =============================================================================
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+# =============================================================================
+# Service Account
+# =============================================================================
+serviceAccount:
+  # -- Create a ServiceAccount for the pod
+  create: true
+  # -- Annotations for the ServiceAccount
+  annotations: {}
+  # -- Name override; if empty the chart fullname is used
+  name: ""
+  # -- Auto-mount the service account token
+  automount: false
+
+# =============================================================================
+# Pod settings
+# =============================================================================
+podAnnotations:
+  # Prometheus scrape annotations (used when serviceMonitor.enabled == false)
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# =============================================================================
+# Resource limits and requests
+# =============================================================================
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "2"
+    memory: 512Mi
+
+# =============================================================================
+# Liveness and readiness probes
+# =============================================================================
+livenessProbe:
+  httpGet:
+    path: /health
+    port: health
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# =============================================================================
+# Horizontal Pod Autoscaler (optional)
+# =============================================================================
+hpa:
+  # -- Enable the HPA resource
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  # -- Target CPU utilisation percentage
+  targetCPUUtilizationPercentage: 80
+  # -- Target memory utilisation percentage (optional; comment out to disable)
+  # targetMemoryUtilizationPercentage: 80
+
+# =============================================================================
+# Prometheus ServiceMonitor (requires Prometheus Operator)
+# =============================================================================
+serviceMonitor:
+  # -- Create a ServiceMonitor resource
+  enabled: false
+  # -- Namespace for the ServiceMonitor (defaults to Release.Namespace)
+  namespace: ""
+  # -- Additional labels to add to the ServiceMonitor (e.g. to match a Prometheus selector)
+  additionalLabels: {}
+  # -- Scrape interval
+  interval: 30s
+  # -- Scrape timeout
+  scrapeTimeout: 10s
+  # -- Path to scrape
+  path: /metrics
+
+# =============================================================================
+# Scheduling
+# =============================================================================
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# -- Priority class name
+priorityClassName: ""
+
+# -- Topology spread constraints
+topologySpreadConstraints: []
+
+# -- Extra volumes to mount into the pod
+extraVolumes: []
+
+# -- Extra volume mounts for the container
+extraVolumeMounts: []
