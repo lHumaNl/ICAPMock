@@ -1,4 +1,5 @@
-// Package components provides reusable UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -19,11 +20,11 @@ type Layout struct {
 
 // LayoutModel manages layout sections and sizing.
 type LayoutModel struct {
+	border    lipgloss.Border
 	sections  []Layout
 	width     int
 	height    int
-	direction lipgloss.Position // Vertical or Horizontal
-	border    lipgloss.Border
+	direction lipgloss.Position
 	padding   int
 	spacing   int
 }
@@ -294,12 +295,12 @@ func (m *LayoutModel) spacingString() string {
 
 // GridLayout represents a grid layout manager.
 type GridLayout struct {
+	border   lipgloss.Border
+	sections [][]Layout
 	rows     int
 	cols     int
-	sections [][]Layout
 	width    int
 	height   int
-	border   lipgloss.Border
 	padding  int
 	gap      int
 }

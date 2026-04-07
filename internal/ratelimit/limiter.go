@@ -1,24 +1,5 @@
-// Package ratelimit provides rate limiting implementations for the ICAP Mock Server.
-//
-// This package offers three rate limiting algorithms:
-//   - Token Bucket: Allows burst traffic up to a maximum bucket size, with tokens
-//     replenishing at a constant rate. Best for handling bursty traffic patterns.
-//   - Sliding Window: Tracks requests within a time window, providing smoother
-//     rate limiting without burst capacity. Best for strict rate enforcement.
-//   - Sharded Token Bucket: Distributes requests across 16 independent token buckets
-//     to eliminate mutex contention. Best for high-throughput scenarios (10,000+ RPS).
-//
-// All implementations are thread-safe and designed for high-performance scenarios
-// supporting 10,000+ requests per second.
-//
-// Example usage:
-//
-//	limiter := ratelimit.NewLimiter("token_bucket", 1000, 1500)
-//	if limiter.Allow() {
-//	    // Process request
-//	} else {
-//	    // Reject request with 429 Too Many Requests
-//	}
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -88,7 +69,7 @@ const (
 	// mutex contention in high-concurrency scenarios (10,000+ RPS).
 	// Best for high-throughput workloads where single-limiter contention
 	// becomes a bottleneck.
-	AlgorithmShardedTokenBucket = "sharded_token_bucket"
+	AlgorithmShardedTokenBucket = "sharded_token_bucket" //nolint:gosec // not credentials
 )
 
 // Config holds the configuration for creating a rate limiter.

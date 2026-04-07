@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -14,16 +14,19 @@ import (
 )
 
 const (
-	// DefaultShardCount - количество shard-ов по умолчанию
+	// DefaultShardCount - количество shard-ов по умолчанию.
 	DefaultShardCount = 16
-	// DefaultCacheSize - размер LRU кэша по умолчанию
+	// DefaultCacheSize - размер LRU кэша по умолчанию.
 	DefaultCacheSize = 1000
-	// MaxCacheSize - максимальный размер LRU кэша для защиты памяти
+	// MaxCacheSize - максимальный размер LRU кэша для защиты памяти.
 	MaxCacheSize = 10000
-	// MinShardCount - минимальное количество shard-ов
+	// MinShardCount - минимальное количество shard-ов.
 	MinShardCount = 1
-	// MaxShardCount - максимальное количество shard-ов
+	// MaxShardCount - максимальное количество shard-ов.
 	MaxShardCount = 256
+
+	defaultScenarioName = "default"
+	operationAdd        = "add"
 )
 
 // ShardingConfig содержит конфигурацию шардирования для оптимизации
@@ -62,24 +65,22 @@ func DefaultShardingConfig() ShardingConfig {
 //   - Graceful degradation при ошибках индекса
 //   - Интеграция с Prometheus metrics
 type ShardedScenarioRegistry struct {
-	shards           []*ScenarioShard
-	shardCount       int
-	config           ShardingConfig
-	mu               sync.RWMutex
-	filePath         string
 	cache            *ScenarioMatchCache
 	metrics          *shardingMetrics
-	metricsCollector *metrics.Collector // Prometheus metrics collector
+	metricsCollector *metrics.Collector
+	filePath         string
+	shards           []*ScenarioShard
+	config           ShardingConfig
+	shardCount       int
+	mu               sync.RWMutex
 }
 
 // ScenarioShard представляет один shard в шардированном индексе.
 // Каждый shard содержит свои сценарии и индекс для быстрого поиска.
 type ScenarioShard struct {
+	index     map[string][]*Scenario
 	scenarios []*Scenario
-	// Индекс: key = "METHOD:path_prefix" → []*Scenario
-	// Пример: "GET:/api" → scenarios that match GET /api/*
-	index map[string][]*Scenario
-	mu    sync.RWMutex
+	mu        sync.RWMutex
 }
 
 // ScenarioMatchCache реализует LRU кэш для результатов matching.
@@ -96,11 +97,11 @@ type ScenarioMatchCache struct {
 
 // cacheEntry представляет одну запись в LRU кэше.
 type cacheEntry struct {
-	key       string
+	timestamp time.Time
 	scenario  *Scenario
 	prev      *cacheEntry
 	next      *cacheEntry
-	timestamp time.Time
+	key       string
 }
 
 // shardingMetrics собирает метрики производительности шардирования (internal, atomic).
@@ -271,11 +272,11 @@ func (r *ShardedScenarioRegistry) hashString(s string) int {
 		h ^= uint32(s[i])
 		h *= 16777619
 	}
-	return int(h % uint32(r.shardCount))
+	return int(h % uint32(r.shardCount)) //nolint:gosec // safe range
 }
 
 // buildIndexKey строит ключ индекса для сценария.
-// Формат: "METHOD:path_prefix"
+// Формат: "METHOD:path_prefix".
 func (r *ShardedScenarioRegistry) buildIndexKey(s *Scenario) string {
 	method := s.Match.Method
 	if method == "" {
@@ -291,7 +292,7 @@ func (r *ShardedScenarioRegistry) buildIndexKey(s *Scenario) string {
 }
 
 // extractPathPrefix извлекает префикс пути из regex паттерна.
-// Для "^/api/v1/.*" возвращает "/api/v1/"
+// Для "^/api/v1/.*" возвращает "/api/v1/".
 func extractPathPrefix(pattern string) string {
 	if pattern == "" {
 		return ""
@@ -382,7 +383,7 @@ func (r *ShardedScenarioRegistry) matchInShard(shard *ScenarioShard, req *icap.R
 
 	checkedCount := 0
 	var bestMatch *Scenario
-	var bestPriority int = -9999
+	var bestPriority = -9999
 
 	// Проверяем все возможные ключи в индексе
 	for _, key := range keys {
@@ -460,7 +461,7 @@ func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, b
 	}
 
 	var bestMatch *Scenario
-	var bestPriority int = -9999
+	var bestPriority = -9999
 
 	// Iterate directly under RLock since matches() is read-only — no copy needed
 	for _, shard := range r.shards {
@@ -563,10 +564,10 @@ func (r *ShardedScenarioRegistry) List() []*Scenario {
 	result := make([]*Scenario, 0, len(all))
 
 	for _, s := range all {
-		if s.Name != "default" || !unique["default"] {
+		if s.Name != defaultScenarioName || !unique[defaultScenarioName] {
 			result = append(result, s)
-			if s.Name == "default" {
-				unique["default"] = true
+			if s.Name == defaultScenarioName {
+				unique[defaultScenarioName] = true
 			}
 		}
 	}
@@ -581,7 +582,7 @@ func (r *ShardedScenarioRegistry) List() []*Scenario {
 func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 	if scenario == nil {
 		return &ScenarioError{
-			Operation:  "add",
+			Operation:  operationAdd,
 			Message:    "cannot add nil scenario",
 			Suggestion: "provide a valid scenario with at least a name field",
 		}
@@ -592,11 +593,11 @@ func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 	if err := baseReg.validateAndCompile(scenario); err != nil {
 		var se *ScenarioError
 		if AsScenarioError(err, &se) {
-			se.Operation = "add"
+			se.Operation = operationAdd
 			return se
 		}
 		return &ScenarioError{
-			Operation:    "add",
+			Operation:    operationAdd,
 			ScenarioName: scenario.Name,
 			Message:      err.Error(),
 			Suggestion:   "fix the validation error before adding the scenario",
@@ -604,7 +605,7 @@ func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 	}
 
 	// Удаляем существующий сценарий с тем же именем
-	r.Remove(scenario.Name)
+	_ = r.Remove(scenario.Name)
 
 	// Индексируем новый сценарий
 	r.indexScenario(scenario)

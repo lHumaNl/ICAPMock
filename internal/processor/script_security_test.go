@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -7,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/storage"
-	"github.com/icap-mock/icap-mock/pkg/icap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/icap-mock/icap-mock/internal/storage"
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 // TestScriptSecurity_TimeoutEnforced tests that script timeout is enforced correctly.
@@ -83,8 +86,8 @@ func TestScriptSecurity_EvalBlocked(t *testing.T) {
 	tests := []struct {
 		name          string
 		script        string
-		shouldBlock   bool
 		errorContains []string
+		shouldBlock   bool
 	}{
 		{
 			name:          "direct eval call",
@@ -202,8 +205,8 @@ func TestScriptSecurity_SetTimeoutSetIntervalBlocked(t *testing.T) {
 	tests := []struct {
 		name          string
 		script        string
-		shouldBlock   bool
 		errorContains []string
+		shouldBlock   bool
 	}{
 		{
 			name:          "setTimeout",
@@ -459,9 +462,9 @@ func TestScriptSecurity_CustomAllowedFunctions(t *testing.T) {
 // TestScriptSecurity_SafeBuiltInsAvailable tests that safe built-ins are available.
 func TestScriptSecurity_SafeBuiltInsAvailable(t *testing.T) {
 	tests := []struct {
+		check  func(*testing.T, *icap.Response)
 		name   string
 		script string
-		check  func(*testing.T, *icap.Response)
 	}{
 		{
 			name:   "Math functions available",
@@ -782,8 +785,8 @@ func TestScriptSecurity_IsSecurityViolation(t *testing.T) {
 	proc := NewScriptProcessor(nil, nil, 5*time.Second)
 
 	tests := []struct {
-		name     string
 		err      error
+		name     string
 		expected bool
 	}{
 		{

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -283,7 +285,7 @@ func selectWeightedResponse(responses []storage.WeightedResponse) *storage.Weigh
 	if totalWeight == 0 {
 		return &responses[0]
 	}
-	n := rand.Intn(totalWeight)
+	n := rand.Intn(totalWeight) //nolint:gosec // crypto not needed here
 	cumulative := 0
 	for i := range responses {
 		w := responses[i].Weight

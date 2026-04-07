@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -118,7 +120,7 @@ func TestEchoProcessor_ContextCancellation(t *testing.T) {
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
-	// EchoProcessor should still return 204 even with cancelled context
+	// EchoProcessor should still return 204 even with canceled context
 	// since it's a fast, non-blocking operation
 	resp, err := processor.Process(ctx, req)
 

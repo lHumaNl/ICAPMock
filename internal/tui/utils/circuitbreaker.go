@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package utils
 
 import (
@@ -39,11 +41,11 @@ type CircuitBreakerConfig struct {
 }
 
 type CircuitBreaker struct {
+	lastFailure time.Time
 	config      CircuitBreakerConfig
 	state       CircuitState
 	failures    int
 	successes   int
-	lastFailure time.Time
 	mu          sync.RWMutex
 }
 
@@ -104,7 +106,8 @@ func (cb *CircuitBreaker) RecordSuccess() {
 }
 
 func (cb *CircuitBreaker) RecordSuccessLocked() {
-	if cb.state == StateHalfOpen {
+	switch cb.state {
+	case StateHalfOpen:
 		cb.successes++
 		if cb.successes >= cb.config.SuccessThreshold {
 			cb.state = StateClosed
@@ -112,7 +115,7 @@ func (cb *CircuitBreaker) RecordSuccessLocked() {
 			cb.successes = 0
 			log.Printf("[CircuitBreaker] Transition: HalfOpen -> Closed (after %d successes)", cb.config.SuccessThreshold)
 		}
-	} else if cb.state == StateClosed {
+	case StateClosed:
 		cb.failures = max(0, cb.failures-1)
 	}
 }
@@ -126,14 +129,15 @@ func (cb *CircuitBreaker) RecordFailure() {
 func (cb *CircuitBreaker) RecordFailureLocked() {
 	cb.lastFailure = time.Now()
 
-	if cb.state == StateClosed {
+	switch cb.state {
+	case StateClosed:
 		cb.failures++
 		if cb.failures >= cb.config.FailureThreshold {
 			cb.state = StateOpen
 			cb.successes = 0
 			log.Printf("[CircuitBreaker] Transition: Closed -> Open (after %d failures)", cb.config.FailureThreshold)
 		}
-	} else if cb.state == StateHalfOpen {
+	case StateHalfOpen:
 		cb.state = StateOpen
 		cb.successes = 0
 		log.Printf("[CircuitBreaker] Transition: HalfOpen -> Open (failure in half-open state)")

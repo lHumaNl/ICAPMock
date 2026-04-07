@@ -1,4 +1,5 @@
-// Package replay provides request replay functionality for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package replay
 
 import (
@@ -42,13 +43,13 @@ func TestClientDoContextCancellation(t *testing.T) {
 
 	// Verify we got an error (context timeout or network timeout)
 	if err == nil {
-		t.Error("Expected error from cancelled context, got nil")
+		t.Error("Expected error from canceled context, got nil")
 	}
 
 	// Verify it timed out within reasonable time (not the full 30s dial timeout)
 	// This proves context cancellation was respected
 	if elapsed > 500*time.Millisecond {
-		t.Errorf("Dial took too long: %v (context should have cancelled it)", elapsed)
+		t.Errorf("Dial took too long: %v (context should have canceled it)", elapsed)
 	}
 
 	// Wait for any cleanup
@@ -63,7 +64,7 @@ func TestClientDoContextCancellation(t *testing.T) {
 }
 
 // TestClientDialContextCancellation verifies that DialContext properly cancels
-// the dial operation when context is cancelled.
+// the dial operation when context is canceled.
 func TestClientDialContextCancellation(t *testing.T) {
 	client := NewClient(30 * time.Second)
 
@@ -76,7 +77,7 @@ func TestClientDialContextCancellation(t *testing.T) {
 		t.Fatalf("Failed to create request: %v", err)
 	}
 
-	// Dial should fail immediately due to cancelled context
+	// Dial should fail immediately due to canceled context
 	start := time.Now()
 	_, err = client.Do(ctx, "icap://localhost:1344/options", req)
 	elapsed := time.Since(start)
@@ -88,12 +89,12 @@ func TestClientDialContextCancellation(t *testing.T) {
 
 	// Should fail quickly (within 100ms), not wait for the 30s timeout
 	if elapsed > 100*time.Millisecond {
-		t.Errorf("Dial took too long with cancelled context: %v", elapsed)
+		t.Errorf("Dial took too long with canceled context: %v", elapsed)
 	}
 }
 
 // TestClientNoGoroutineLeakOnMultipleCancellations runs multiple concurrent
-// dial attempts with cancelled contexts to verify no goroutine leaks.
+// dial attempts with canceled contexts to verify no goroutine leaks.
 func TestClientNoGoroutineLeakOnMultipleCancellations(t *testing.T) {
 	const numAttempts = 10
 
@@ -200,7 +201,7 @@ func TestClientContextDeadlineRespected(t *testing.T) {
 	}
 }
 
-// handleMockConnectionSimple handles a mock ICAP connection (helper for tests)
+// handleMockConnectionSimple handles a mock ICAP connection (helper for tests).
 func handleMockConnectionSimple(conn net.Conn) {
 	defer conn.Close()
 

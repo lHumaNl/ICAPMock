@@ -1,5 +1,5 @@
-// Package icap provides ICAP (Internet Content Adaptation Protocol) data structures
-// and utilities per RFC 3507.
+// Copyright 2026 ICAP Mock
+
 package icap
 
 import (
@@ -36,9 +36,9 @@ var crlfPool = sync.Pool{
 // ChunkedReader implements io.Reader for chunked transfer encoding.
 // It reads chunked data and provides O(1) memory usage for streaming.
 type ChunkedReader struct {
-	r        *bufio.Reader
-	n        int64 // remaining bytes in current chunk
 	err      error
+	r        *bufio.Reader
+	n        int64
 	finished bool
 }
 
@@ -126,7 +126,7 @@ func (cr *ChunkedReader) readChunkHeader() (int64, error) {
 
 // readCRLF reads the trailing \r\n after chunk data.
 func (cr *ChunkedReader) readCRLF() error {
-	bp := crlfPool.Get().(*[]byte)
+	bp := crlfPool.Get().(*[]byte) //nolint:errcheck
 	defer crlfPool.Put(bp)
 	b := *bp
 
@@ -161,9 +161,9 @@ func (cr *ChunkedReader) readTrailer() error {
 // ChunkedWriter implements io.WriteCloser for chunked transfer encoding.
 type ChunkedWriter struct {
 	w       io.Writer
-	closed  bool
-	buf     *bytes.Buffer
 	flusher interface{ Flush() error }
+	buf     *bytes.Buffer
+	closed  bool
 }
 
 // NewChunkedWriter creates a new ChunkedWriter that writes to w.

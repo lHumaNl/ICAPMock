@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package circuitbreaker
 
 import (
@@ -12,8 +14,8 @@ import (
 // mockMetricsRecorder implements MetricsRecorder for testing.
 type mockMetricsRecorder struct {
 	states      map[string]string
-	transitions []transition
 	failures    map[string]int
+	transitions []transition
 	mu          sync.Mutex
 }
 
@@ -129,7 +131,7 @@ func TestCircuitBreakerClosedToOpen(t *testing.T) {
 		err := cb.Call(ctx, func() error {
 			return testErr
 		})
-		if err != testErr {
+		if !errors.Is(err, testErr) {
 			t.Errorf("iteration %d: expected error, got %v", i, err)
 		}
 	}
@@ -177,7 +179,7 @@ func TestCircuitBreakerOpenToHalfOpen(t *testing.T) {
 		return nil
 	})
 
-	if err == ErrCircuitOpen {
+	if errors.Is(err, ErrCircuitOpen) {
 		t.Error("expected request to be allowed after timeout, got circuit open error")
 	}
 
@@ -218,7 +220,7 @@ func TestCircuitBreakerHalfOpenToClosed(t *testing.T) {
 		return nil
 	})
 
-	if err == ErrCircuitOpen {
+	if errors.Is(err, ErrCircuitOpen) {
 		t.Error("expected first HALF_OPEN request to succeed, got circuit open error")
 	}
 
@@ -231,7 +233,7 @@ func TestCircuitBreakerHalfOpenToClosed(t *testing.T) {
 		return nil
 	})
 
-	if err == ErrCircuitOpen {
+	if errors.Is(err, ErrCircuitOpen) {
 		t.Error("expected second HALF_OPEN request to succeed, got circuit open error")
 	}
 
@@ -308,7 +310,7 @@ func TestCircuitBreakerRejectsRequestsWhenOpen(t *testing.T) {
 			callCount++
 			return nil
 		})
-		if err != ErrCircuitOpen {
+		if !errors.Is(err, ErrCircuitOpen) {
 			t.Errorf("iteration %d: expected ErrCircuitOpen, got %v", i, err)
 		}
 	}
@@ -390,7 +392,7 @@ func TestCircuitBreakerDisabled(t *testing.T) {
 		err := cb.Call(ctx, func() error {
 			return testErr
 		})
-		if err != testErr {
+		if !errors.Is(err, testErr) {
 			t.Errorf("iteration %d: expected test error, got %v", i, err)
 		}
 	}
@@ -579,7 +581,7 @@ func TestCircuitBreakerHalfOpenMaxRequests(t *testing.T) {
 		return nil
 	})
 
-	if err != ErrCircuitOpen {
+	if !errors.Is(err, ErrCircuitOpen) {
 		t.Errorf("expected ErrCircuitOpen after max requests, got %v", err)
 	}
 }
@@ -587,8 +589,8 @@ func TestCircuitBreakerHalfOpenMaxRequests(t *testing.T) {
 // TestCircuitBreakerStateString tests State.String() method.
 func TestCircuitBreakerStateString(t *testing.T) {
 	tests := []struct {
-		state    State
 		expected string
+		state    State
 	}{
 		{StateClosed, "CLOSED"},
 		{StateHalfOpen, "HALF_OPEN"},

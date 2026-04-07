@@ -1,8 +1,11 @@
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,9 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/tui/utils"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -21,7 +25,7 @@ const (
 	maxFilePathLen = 260             // Windows max path length
 )
 
-// ConfigClient provides HTTP client for configuration operations
+// ConfigClient provides HTTP client for configuration operations.
 type ConfigClient struct {
 	baseURL     string
 	httpClient  *http.Client
@@ -29,7 +33,7 @@ type ConfigClient struct {
 	retryConfig utils.RetryConfig
 }
 
-// NewConfigClient creates a new config client with connection pooling
+// NewConfigClient creates a new config client with connection pooling.
 func NewConfigClient(host string, port int) *ConfigClient {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
@@ -50,7 +54,7 @@ func NewConfigClient(host string, port int) *ConfigClient {
 	}
 }
 
-// validateConfigInput validates configuration input
+// validateConfigInput validates configuration input.
 func validateConfigInput(content, filePath string) error {
 	// Validate content is not empty
 	if strings.TrimSpace(content) == "" {
@@ -81,32 +85,32 @@ func validateConfigInput(content, filePath string) error {
 	return nil
 }
 
-// ConfigResponse represents the response from the server config endpoint
+// ConfigResponse represents the response from the server config endpoint.
 type ConfigResponse struct {
-	Success  bool   `json:"success"`
 	Message  string `json:"message"`
-	Config   string `json:"config"` // YAML or JSON string
+	Config   string `json:"config"`
 	FilePath string `json:"file_path"`
 	Error    string `json:"error,omitempty"`
+	Success  bool   `json:"success"`
 }
 
-// ValidationResponse represents the response from validation endpoint
+// ValidationResponse represents the response from validation endpoint.
 type ValidationResponse struct {
-	Success bool   `json:"success"`
-	Valid   bool   `json:"valid"`
 	Message string `json:"message"`
 	Error   string `json:"error,omitempty"`
+	Success bool   `json:"success"`
+	Valid   bool   `json:"valid"`
 }
 
-// SaveResponse represents the response from save endpoint
+// SaveResponse represents the response from save endpoint.
 type SaveResponse struct {
-	Success  bool   `json:"success"`
 	Message  string `json:"message"`
 	FilePath string `json:"file_path"`
 	Error    string `json:"error,omitempty"`
+	Success  bool   `json:"success"`
 }
 
-// doRequestWithRetry executes an HTTP request with exponential backoff retry
+// doRequestWithRetry executes an HTTP request with exponential backoff retry.
 func (c *ConfigClient) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit error: %w", err)
@@ -115,10 +119,10 @@ func (c *ConfigClient) doRequestWithRetry(ctx context.Context, req *http.Request
 	return utils.DoWithRetryHTTP(ctx, c.retryConfig, c.httpClient, req)
 }
 
-// GetConfig retrieves the current server configuration
+// GetConfig retrieves the current server configuration.
 func (c *ConfigClient) GetConfig(ctx context.Context) (string, string, error) {
 	url := fmt.Sprintf("%s/api/config", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create config request: %w", err)
 	}
@@ -127,7 +131,7 @@ func (c *ConfigClient) GetConfig(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("failed to fetch config from server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Validate status code
 	if resp.StatusCode == http.StatusNotFound {
@@ -143,7 +147,7 @@ func (c *ConfigClient) GetConfig(ctx context.Context) (string, string, error) {
 	// Limit body size
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxConfigSize))
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return "", "", fmt.Errorf("unexpected EOF while reading config body")
 		}
 		return "", "", fmt.Errorf("failed to read config response body: %w", err)
@@ -161,7 +165,7 @@ func (c *ConfigClient) GetConfig(ctx context.Context) (string, string, error) {
 	return response.Config, response.FilePath, nil
 }
 
-// SaveConfig saves the configuration to the server
+// SaveConfig saves the configuration to the server.
 func (c *ConfigClient) SaveConfig(ctx context.Context, content, filePath string) (string, error) {
 	if err := validateConfigInput(content, filePath); err != nil {
 		return "", fmt.Errorf("config validation failed: %w", err)
@@ -196,11 +200,11 @@ func (c *ConfigClient) SaveConfig(ctx context.Context, content, filePath string)
 	if err != nil {
 		return "", fmt.Errorf("failed to save config to server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxConfigSize))
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return "", fmt.Errorf("unexpected EOF while reading save response")
 		}
 		return "", fmt.Errorf("failed to read save response body: %w", err)
@@ -228,7 +232,7 @@ func (c *ConfigClient) SaveConfig(ctx context.Context, content, filePath string)
 	return response.FilePath, nil
 }
 
-// ValidateConfig validates the configuration without saving
+// ValidateConfig validates the configuration without saving.
 func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (bool, string, error) {
 	if err := validateConfigInput(content, ""); err != nil {
 		return false, err.Error(), fmt.Errorf("config validation failed: %w", err)
@@ -262,11 +266,11 @@ func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (bool
 	if err != nil {
 		return false, "", fmt.Errorf("failed to validate config on server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxConfigSize))
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return false, "unexpected EOF while reading validation response", nil
 		}
 		return false, "", fmt.Errorf("failed to read validation response body: %w", err)
@@ -294,7 +298,7 @@ func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (bool
 	return response.Valid, response.Message, nil
 }
 
-// LoadConfigFile loads configuration from a local file (client-side)
+// LoadConfigFile loads configuration from a local file (client-side).
 func (c *ConfigClient) LoadConfigFile(ctx context.Context, filePath string) (string, error) {
 	if filePath == "" {
 		return "", fmt.Errorf("file path cannot be empty")
@@ -309,7 +313,7 @@ func (c *ConfigClient) LoadConfigFile(ctx context.Context, filePath string) (str
 		return "", fmt.Errorf("invalid file extension %s, expected .yaml, .yml, or .json", ext)
 	}
 
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(filePath) //nolint:gosec // path is validated
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", filePath)
@@ -331,7 +335,7 @@ func (c *ConfigClient) LoadConfigFile(ctx context.Context, filePath string) (str
 	return string(content), nil
 }
 
-// ValidateConfigYAML validates YAML configuration locally (client-side)
+// ValidateConfigYAML validates YAML configuration locally (client-side).
 func (c *ConfigClient) ValidateConfigYAML(content string) (bool, string, error) {
 	// Validate input
 	if strings.TrimSpace(content) == "" {
@@ -357,7 +361,7 @@ func (c *ConfigClient) ValidateConfigYAML(content string) (bool, string, error) 
 	return true, "YAML configuration is valid", nil
 }
 
-// ValidateConfigJSON validates JSON configuration locally (client-side)
+// ValidateConfigJSON validates JSON configuration locally (client-side).
 func (c *ConfigClient) ValidateConfigJSON(content string) (bool, string, error) {
 	// Validate input
 	if strings.TrimSpace(content) == "" {
@@ -383,12 +387,12 @@ func (c *ConfigClient) ValidateConfigJSON(content string) (bool, string, error) 
 	return true, "JSON configuration is valid", nil
 }
 
-// bytesReader creates an io.Reader from byte slice
+// bytesReader creates an io.Reader from byte slice.
 func bytesReader(b []byte) io.Reader {
 	return &byteReader{data: b}
 }
 
-// byteReader implements io.Reader for byte slice
+// byteReader implements io.Reader for byte slice.
 type byteReader struct {
 	data []byte
 	pos  int

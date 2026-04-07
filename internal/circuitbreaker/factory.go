@@ -1,5 +1,5 @@
-// Package circuitbreaker provides factory functions for creating circuit breakers
-// from configuration.
+// Copyright 2026 ICAP Mock
+
 package circuitbreaker
 
 import (

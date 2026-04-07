@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -13,8 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/icap-mock/icap-mock/pkg/icap"
 	"gopkg.in/yaml.v3"
+
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 // Error definitions for scenario operations.
@@ -67,43 +68,25 @@ type ScenarioRegistry interface {
 
 // Scenario defines a mock response scenario.
 type Scenario struct {
-	// Name is a unique identifier for the scenario.
-	Name string `yaml:"name" json:"name"`
-
-	// Match defines the matching criteria for the scenario.
-	Match MatchRule `yaml:"match" json:"match"`
-
-	// Response defines the response to return when matched.
-	Response ResponseTemplate `yaml:"response" json:"response"`
-
-	// Priority determines matching order (higher = checked first).
-	Priority int `yaml:"priority" json:"priority"`
-
-	// WeightedResponses defines multiple response variants with proportional weights.
-	// When non-empty, one response is randomly selected based on weights.
+	compiledPath      *regexp.Regexp
+	compiledBody      *regexp.Regexp
+	compiledHeaders   map[string]*regexp.Regexp
+	Response          ResponseTemplate   `yaml:"response" json:"response"`
+	Name              string             `yaml:"name" json:"name"`
+	Match             MatchRule          `yaml:"match" json:"match"`
 	WeightedResponses []WeightedResponse `yaml:"-" json:"-"`
-
-	// compiledPath is the compiled regex for Path matching.
-	compiledPath *regexp.Regexp
-
-	// compiledBody is the compiled regex for BodyPattern matching.
-	compiledBody *regexp.Regexp
-
-	// compiledCIDRs is the parsed CIDR ranges for matching.
-	compiledCIDRs []*net.IPNet
-
-	// compiledHeaders stores compiled regex patterns for headers with re: prefix.
-	compiledHeaders map[string]*regexp.Regexp
+	compiledCIDRs     []*net.IPNet
+	Priority          int `yaml:"priority" json:"priority"`
 }
 
 // WeightedResponse is a single weighted response variant used for random selection.
 type WeightedResponse struct {
-	Weight     int               `yaml:"weight" json:"weight"`
 	Headers    map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	ICAPStatus int               `yaml:"icap_status,omitempty" json:"icap_status,omitempty"`
-	HTTPStatus int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 	Body       string            `yaml:"body,omitempty" json:"body,omitempty"`
 	Delay      DelayConfig       `yaml:"-" json:"-"`
+	Weight     int               `yaml:"weight" json:"weight"`
+	ICAPStatus int               `yaml:"icap_status,omitempty" json:"icap_status,omitempty"`
+	HTTPStatus int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 }
 
 // CompiledPath returns the compiled path regex, or nil if not set.
@@ -146,41 +129,16 @@ type MatchRule struct {
 
 // ResponseTemplate defines the mock response to return.
 type ResponseTemplate struct {
-	// ICAPStatus is the ICAP response status code.
-	// Common values: 200 (OK), 204 (No Content Needed), 400 (Bad Request)
-	ICAPStatus int `yaml:"icap_status" json:"icap_status"`
-
-	// HTTPStatus is the HTTP status code to include in the response.
-	// Only used for REQMOD responses that modify the request.
-	HTTPStatus int `yaml:"http_status,omitempty" json:"http_status,omitempty"`
-
-	// Headers contains ICAP headers to include in the response.
-	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-
-	// HTTPHeaders contains HTTP headers to add/modify in the response.
+	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	HTTPHeaders map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
-
-	// Body is the response body content.
-	Body string `yaml:"body,omitempty" json:"body,omitempty"`
-
-	// BodyFile is a path to a file containing the response body.
-	// Mutually exclusive with Body.
-	BodyFile string `yaml:"body_file,omitempty" json:"body_file,omitempty"`
-
-	// Delay is the simulated processing delay.
-	Delay time.Duration `yaml:"delay,omitempty" json:"delay,omitempty"`
-
-	// DelayRange stores the parsed delay config (static or range).
-	// When set, takes precedence over Delay.
-	DelayRange *DelayConfig `yaml:"-" json:"-"`
-
-	// Error simulates an error response.
-	Error string `yaml:"error,omitempty" json:"error,omitempty"`
-
-	// Script is a JavaScript or Lua script to execute.
-	// The script receives variables: req, headers, body, config
-	// and should return an object with response fields.
-	Script string `yaml:"script,omitempty" json:"script,omitempty"`
+	DelayRange  *DelayConfig      `yaml:"-" json:"-"`
+	Body        string            `yaml:"body,omitempty" json:"body,omitempty"`
+	BodyFile    string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	Error       string            `yaml:"error,omitempty" json:"error,omitempty"`
+	Script      string            `yaml:"script,omitempty" json:"script,omitempty"`
+	ICAPStatus  int               `yaml:"icap_status" json:"icap_status"`
+	HTTPStatus  int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
+	Delay       time.Duration     `yaml:"delay,omitempty" json:"delay,omitempty"`
 }
 
 // ScenarioFile represents the YAML structure for scenario files.
@@ -191,7 +149,7 @@ type ScenarioFile struct {
 // DefaultScenario returns a default scenario that returns 204 No Content.
 func DefaultScenario() *Scenario {
 	return &Scenario{
-		Name: "default",
+		Name: defaultScenarioName,
 		Response: ResponseTemplate{
 			ICAPStatus: 204,
 		},
@@ -201,9 +159,9 @@ func DefaultScenario() *Scenario {
 
 // scenarioRegistry implements the ScenarioRegistry interface.
 type scenarioRegistry struct {
-	mu        sync.RWMutex
-	scenarios []*Scenario
 	filePath  string
+	scenarios []*Scenario
+	mu        sync.RWMutex
 }
 
 // NewScenarioRegistry creates a new scenario registry.
@@ -217,7 +175,7 @@ func NewScenarioRegistry() ScenarioRegistry {
 // It provides detailed error messages with file path, scenario name,
 // field name, and suggestions for fixing issues.
 func (r *scenarioRegistry) Load(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is validated
 	if err != nil {
 		return NewScenarioLoadError(path, err)
 	}
@@ -279,7 +237,7 @@ func (r *scenarioRegistry) Load(path string) error {
 	// Add default scenario if not present
 	hasDefault := false
 	for _, s := range scenarios {
-		if s.Name == "default" {
+		if s.Name == defaultScenarioName {
 			hasDefault = true
 			break
 		}
@@ -613,7 +571,7 @@ func (r *scenarioRegistry) List() []*Scenario {
 func (r *scenarioRegistry) Add(scenario *Scenario) error {
 	if scenario == nil {
 		return &ScenarioError{
-			Operation:  "add",
+			Operation:  operationAdd,
 			Message:    "cannot add nil scenario",
 			Suggestion: "provide a valid scenario with at least a name field",
 		}
@@ -623,11 +581,11 @@ func (r *scenarioRegistry) Add(scenario *Scenario) error {
 		// Wrap the error with additional context
 		var se *ScenarioError
 		if AsScenarioError(err, &se) {
-			se.Operation = "add"
+			se.Operation = operationAdd
 			return se
 		}
 		return &ScenarioError{
-			Operation:    "add",
+			Operation:    operationAdd,
 			ScenarioName: scenario.Name,
 			Message:      err.Error(),
 			Suggestion:   "fix the validation error before adding the scenario",

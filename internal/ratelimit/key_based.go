@@ -1,7 +1,5 @@
-// Package ratelimit provides key-based sharded rate limiting with global key wrapper.
-//
-// This file provides GlobalKeyBasedLimiter which wraps KeyBasedShardedTokenBucketLimiter
-// with a default key to implement the Limiter interface for backward compatibility.
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (

@@ -1,4 +1,5 @@
-// Package main provides the entry point for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -20,18 +21,16 @@ import (
 
 // ReplayCommand handles the replay subcommand.
 type ReplayCommand struct {
-	fs *flag.FlagSet
-
-	// Replay options
+	fs         *flag.FlagSet
 	dir        string
 	from       string
 	to         string
 	method     string
-	speed      float64
 	target     string
-	loop       bool
-	parallel   int
 	configFile string
+	speed      float64
+	parallel   int
+	loop       bool
 }
 
 // NewReplayCommand creates a new replay command.
@@ -56,7 +55,7 @@ func NewReplayCommand() *ReplayCommand {
 
 // Name returns the command name.
 func (c *ReplayCommand) Name() string {
-	return "replay"
+	return "replay" //nolint:goconst
 }
 
 // Description returns a short description of the command.
@@ -83,7 +82,7 @@ func (c *ReplayCommand) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("initializing logger: %w", err)
 		}
-		defer log.Close()
+		defer log.Close() //nolint:errcheck
 	} else {
 		// Use default text logger
 		log = logger.MustNew(config.LoggingConfig{

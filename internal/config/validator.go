@@ -1,4 +1,5 @@
-// Package config provides configuration validation
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (
@@ -10,14 +11,9 @@ import (
 
 // ValidationError represents a configuration validation error.
 type ValidationError struct {
-	// Field is the configuration field that failed validation.
-	Field string
-
-	// Message describes the validation error.
+	Value   interface{}
+	Field   string
 	Message string
-
-	// Value is the invalid value that was provided.
-	Value interface{}
 }
 
 // Error implements the error interface.

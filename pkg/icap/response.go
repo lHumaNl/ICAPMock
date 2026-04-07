@@ -1,10 +1,11 @@
-// Package icap provides ICAP (Internet Content Adaptation Protocol) data structures
-// and utilities per RFC 3507.
+// Copyright 2026 ICAP Mock
+
 package icap
 
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/textproto"
@@ -58,17 +59,13 @@ func StatusText(code int) string {
 
 // Response represents an ICAP response.
 type Response struct {
-	StatusCode int    // ICAP status code
-	Proto      string // ICAP version (ICAP/1.0)
-	Header     Header // ICAP headers
-	Body       []byte // Response body
-
-	// Encapsulated HTTP message (returned to ICAP client)
-	HTTPRequest  *HTTPMessage // Modified HTTP request (for REQMOD)
-	HTTPResponse *HTTPMessage // Modified HTTP response (for RESPMOD)
-
-	// Body reader for streaming
-	BodyReader io.Reader
+	BodyReader   io.Reader
+	Header       Header
+	HTTPRequest  *HTTPMessage
+	HTTPResponse *HTTPMessage
+	Proto        string
+	Body         []byte
+	StatusCode   int
 }
 
 // NewResponse creates a new ICAP response with the given status code.
@@ -398,7 +395,7 @@ func ReadResponse(r io.Reader) (*Response, error) {
 	// Use textproto to parse ICAP headers
 	tp := textproto.NewReader(bufio.NewReader(bytes.NewReader(lines[1])))
 	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("reading headers: %w", err)
 	}
 

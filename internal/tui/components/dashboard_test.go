@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -6,8 +8,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 func TestNewDashboardModel(t *testing.T) {
@@ -342,8 +345,8 @@ func TestConnectionsModel_SetMetrics(t *testing.T) {
 func TestFormatBytes(t *testing.T) {
 	tests := []struct {
 		name  string
-		bytes int64
 		want  string
+		bytes int64
 	}{
 		{"bytes", 512, "512 B"},
 		{"kilobytes", 1024, "1.0 KiB"},
@@ -363,8 +366,8 @@ func TestTruncate(t *testing.T) {
 	tests := []struct {
 		name   string
 		s      string
-		maxLen int
 		want   string
+		maxLen int
 	}{
 		{"no truncation", "hello world", 20, "hello world"},
 		{"truncation", "this is a very long string that needs to be truncated", 20, "this is a very lo..."},
@@ -587,8 +590,8 @@ func TestDashboardModel_Update_EmptyMessages(t *testing.T) {
 func TestFormatBytes_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name  string
-		bytes int64
 		want  string
+		bytes int64
 	}{
 		{"zero bytes", 0, "0 B"},
 		{"exactly 1KB", 1024, "1.0 KiB"},

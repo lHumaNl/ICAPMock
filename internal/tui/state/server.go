@@ -1,34 +1,37 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
-// ServerStatus manages server status information
+// ServerStatus manages server status information.
 type ServerStatus struct {
-	mu            sync.RWMutex
-	status        ServerStatusInfo
-	healthHistory []HealthCheckResult
 	client        *StatusClient
 	ctrl          *ControlClient
 	config        *ClientConfig
+	status        ServerStatusInfo
+	healthHistory []HealthCheckResult
+	mu            sync.RWMutex
 }
 
-// ControlClient provides HTTP client for server control operations
+// ControlClient provides HTTP client for server control operations.
 type ControlClient struct {
-	baseURL     string
 	httpClient  *http.Client
 	rateLimiter *RateLimiter
+	baseURL     string
 }
 
-// NewControlClient creates a new server control client
+// NewControlClient creates a new server control client.
 func NewControlClient(cfg *ClientConfig) *ControlClient {
 	return &ControlClient{
 		baseURL: cfg.StatusURL,
@@ -39,7 +42,7 @@ func NewControlClient(cfg *ClientConfig) *ControlClient {
 	}
 }
 
-// Start starts the ICAP server
+// Start starts the ICAP server.
 func (c *ControlClient) Start(ctx context.Context) error {
 	// Acquire rate limit token
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
@@ -47,7 +50,7 @@ func (c *ControlClient) Start(ctx context.Context) error {
 	}
 
 	url := fmt.Sprintf("%s/control/start", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -56,7 +59,7 @@ func (c *ControlClient) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to start server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -66,7 +69,7 @@ func (c *ControlClient) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the ICAP server
+// Stop stops the ICAP server.
 func (c *ControlClient) Stop(ctx context.Context) error {
 	// Acquire rate limit token
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
@@ -74,7 +77,7 @@ func (c *ControlClient) Stop(ctx context.Context) error {
 	}
 
 	url := fmt.Sprintf("%s/control/stop", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -83,7 +86,7 @@ func (c *ControlClient) Stop(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to stop server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -93,7 +96,7 @@ func (c *ControlClient) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Restart restarts the ICAP server
+// Restart restarts the ICAP server.
 func (c *ControlClient) Restart(ctx context.Context) error {
 	// Acquire rate limit token
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
@@ -101,7 +104,7 @@ func (c *ControlClient) Restart(ctx context.Context) error {
 	}
 
 	url := fmt.Sprintf("%s/control/restart", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -110,7 +113,7 @@ func (c *ControlClient) Restart(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to restart server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -120,7 +123,7 @@ func (c *ControlClient) Restart(ctx context.Context) error {
 	return nil
 }
 
-// GetConfig retrieves the current server configuration
+// GetConfig retrieves the current server configuration.
 func (c *ControlClient) GetConfig(ctx context.Context) (map[string]interface{}, error) {
 	// Acquire rate limit token
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
@@ -128,7 +131,7 @@ func (c *ControlClient) GetConfig(ctx context.Context) (map[string]interface{}, 
 	}
 
 	url := fmt.Sprintf("%s/config", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -137,7 +140,7 @@ func (c *ControlClient) GetConfig(ctx context.Context) (map[string]interface{}, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch config: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -159,30 +162,30 @@ func (c *ControlClient) GetConfig(ctx context.Context) (map[string]interface{}, 
 
 // ServerStatusInfo represents server status information
 
-// HealthCheckResult represents a health check result
+// HealthCheckResult represents a health check result.
 type HealthCheckResult struct {
 	Timestamp     time.Time
-	Healthy       bool
-	Ready         bool
 	ICAPStatus    string
 	StorageStatus string
-	Scenarios     int
 	Error         string
+	Scenarios     int
+	Healthy       bool
+	Ready         bool
 }
 
-// HealthResponse represents the response from the /health endpoint
+// HealthResponse represents the response from the /health endpoint.
 type HealthResponse struct {
-	Status string    `json:"status"`
 	Time   time.Time `json:"time"`
+	Status string    `json:"status"`
 }
 
-// ReadyResponse represents the response from the /ready endpoint
+// ReadyResponse represents the response from the /ready endpoint.
 type ReadyResponse struct {
-	Status string                 `json:"status"`
 	Checks map[string]interface{} `json:"checks"`
+	Status string                 `json:"status"`
 }
 
-// NewServerStatus creates a new server status with provided configuration
+// NewServerStatus creates a new server status with provided configuration.
 func NewServerStatus(cfg *ClientConfig) *ServerStatus {
 	return &ServerStatus{
 		status: ServerStatusInfo{
@@ -197,7 +200,7 @@ func NewServerStatus(cfg *ClientConfig) *ServerStatus {
 	}
 }
 
-// Check performs a server health check
+// Check performs a server health check.
 func (s *ServerStatus) Check() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -216,7 +219,7 @@ func (s *ServerStatus) Check() tea.Cmd {
 	}
 }
 
-// CheckHealth performs health and readiness checks
+// CheckHealth performs health and readiness checks.
 func (s *ServerStatus) CheckHealth() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -258,10 +261,10 @@ func (s *ServerStatus) CheckHealth() tea.Cmd {
 	}
 }
 
-// checkHealthEndpoint checks the /health endpoint
+// checkHealthEndpoint checks the /health endpoint.
 func (s *ServerStatus) checkHealthEndpoint(ctx context.Context) (bool, error) {
 	url := fmt.Sprintf("%s/health", s.client.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -270,7 +273,7 @@ func (s *ServerStatus) checkHealthEndpoint(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch health: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return false, nil
@@ -289,10 +292,10 @@ func (s *ServerStatus) checkHealthEndpoint(ctx context.Context) (bool, error) {
 	return healthResp.Status == "healthy", nil
 }
 
-// checkReadyEndpoint checks the /ready endpoint
+// checkReadyEndpoint checks the /ready endpoint.
 func (s *ServerStatus) checkReadyEndpoint(ctx context.Context) (*ReadyResponse, error) {
 	url := fmt.Sprintf("%s/ready", s.client.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -301,7 +304,7 @@ func (s *ServerStatus) checkReadyEndpoint(ctx context.Context) (*ReadyResponse, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch readiness: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -316,7 +319,7 @@ func (s *ServerStatus) checkReadyEndpoint(ctx context.Context) (*ReadyResponse, 
 	return &readyResp, nil
 }
 
-// parseCheckStatus parses a check status from the ready response
+// parseCheckStatus parses a check status from the ready response.
 func parseCheckStatus(check interface{}) string {
 	if check == nil {
 		return "unknown"
@@ -327,7 +330,7 @@ func parseCheckStatus(check interface{}) string {
 	return "unknown"
 }
 
-// addHealthHistory adds a health check result to history
+// addHealthHistory adds a health check result to history.
 func (s *ServerStatus) addHealthHistory(result HealthCheckResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -340,14 +343,14 @@ func (s *ServerStatus) addHealthHistory(result HealthCheckResult) {
 	}
 }
 
-// GetHealthHistory returns the health check history
+// GetHealthHistory returns the health check history.
 func (s *ServerStatus) GetHealthHistory() []HealthCheckResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]HealthCheckResult{}, s.healthHistory...)
 }
 
-// GetLastHealthCheck returns the most recent health check
+// GetLastHealthCheck returns the most recent health check.
 func (s *ServerStatus) GetLastHealthCheck() *HealthCheckResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -358,7 +361,7 @@ func (s *ServerStatus) GetLastHealthCheck() *HealthCheckResult {
 	return &s.healthHistory[len(s.healthHistory)-1]
 }
 
-// Start starts the server
+// Start starts the server.
 func (s *ServerStatus) Start() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -388,7 +391,7 @@ func (s *ServerStatus) Start() tea.Cmd {
 	}
 }
 
-// Stop stops the server
+// Stop stops the server.
 func (s *ServerStatus) Stop() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -418,7 +421,7 @@ func (s *ServerStatus) Stop() tea.Cmd {
 	}
 }
 
-// Restart restarts the server
+// Restart restarts the server.
 func (s *ServerStatus) Restart() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -448,7 +451,7 @@ func (s *ServerStatus) Restart() tea.Cmd {
 	}
 }
 
-// GetConfig retrieves the server configuration
+// GetConfig retrieves the server configuration.
 func (s *ServerStatus) GetConfig() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -463,50 +466,50 @@ func (s *ServerStatus) GetConfig() tea.Cmd {
 	}
 }
 
-// Update updates the server status
+// Update updates the server status.
 func (s *ServerStatus) Update(status ServerStatusInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.status = status
 }
 
-// Current returns the current server status
+// Current returns the current server status.
 func (s *ServerStatus) Current() ServerStatusInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.status
 }
 
-// Shutdown releases all resources
+// Shutdown releases all resources.
 func (s *ServerStatus) Shutdown() {
 	// No resources to clean up
 	// Server is optionally stopped by the user, not automatically on shutdown
 }
 
-// ServerStatusMsg is sent when server status changes
+// ServerStatusMsg is sent when server status changes.
 type ServerStatusMsg struct {
 	Status ServerStatusInfo
 }
 
-// ServerControlMsg is sent when server control operation completes
+// ServerControlMsg is sent when server control operation completes.
 type ServerControlMsg struct {
-	Action  string
-	Success bool
 	Status  ServerStatusInfo
+	Action  string
 	Error   string
+	Success bool
 }
 
-// ServerConfigMsg is sent when server configuration is retrieved
+// ServerConfigMsg is sent when server configuration is retrieved.
 type ServerConfigMsg struct {
 	Config map[string]interface{}
 }
 
-// ErrorMessage represents an error message
+// ErrorMessage represents an error message.
 type ErrorMessage struct {
 	Err error
 }
 
-// HealthCheckMsg is sent when a health check is completed
+// HealthCheckMsg is sent when a health check is completed.
 type HealthCheckMsg struct {
 	Result HealthCheckResult
 }

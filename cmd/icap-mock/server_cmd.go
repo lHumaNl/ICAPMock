@@ -1,4 +1,5 @@
-// Package main provides the server subcommand for the ICAP Mock Server CLI.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -14,88 +15,60 @@ import (
 
 // ServerCommand handles the server subcommand.
 type ServerCommand struct {
-	fs *flag.FlagSet
-
-	// TUIRunner launches the TUI. Injected to avoid import cycles.
-	TUIRunner func(cfg interface{}) error
-
-	// Global flags (shared across all commands)
-	configFile   string
-	validateFlag bool
-	versionFlag  bool
-	tuiFlag      bool
-	debugFlag    bool
-
-	// Server flags
-	host            string
-	port            int
-	readTimeout     string
-	writeTimeout    string
-	shutdownTimeout string
-	maxConns        int
-	maxBodySize     int64
-	streaming       bool
-
-	// TLS flags
-	tlsEnable bool
-	tlsCert   string
-	tlsKey    string
-
-	// Logging flags
-	logLevel      string
-	logFormat     string
-	logOutput     string
-	logMaxSize    int
-	logMaxBackups int
-	logMaxAge     int
-
-	// Metrics flags
-	metricsEnabled bool
-	metricsHost    string
-	metricsPort    int
-	metricsPath    string
-
-	// Mock flags
-	mockMode     string
-	scenariosDir string
-	mockTimeout  string
-
-	// Chaos flags
-	chaosEnabled            bool
+	fs                      *flag.FlagSet
+	TUIRunner               func(cfg interface{}) error
+	writeTimeout            string
+	shutdownTimeout         string
+	readyPath               string
+	healthPath              string
+	rateLimitAlgo           string
+	host                    string
+	storageDir              string
+	readTimeout             string
+	metricsHost             string
+	pluginDir               string
+	mockTimeout             string
+	configFile              string
+	scenariosDir            string
+	mockMode                string
+	tlsCert                 string
+	tlsKey                  string
+	logLevel                string
+	logFormat               string
+	logOutput               string
+	metricsPath             string
+	maxBodySize             int64
+	rateLimitRPS            float64
+	replaySpeed             float64
+	logMaxBackups           int
+	metricsPort             int
+	logMaxSize              int
+	healthPort              int
+	rateLimitBurst          int
+	maxConns                int
+	storageRotate           int
 	chaosErrorRate          float64
 	chaosTimeoutRate        float64
 	chaosMinLatencyMs       int
 	chaosMaxLatencyMs       int
 	chaosConnectionDropRate float64
-
-	// Storage flags
-	storageEnabled bool
-	storageDir     string
-	storageMaxSize int64
-	storageRotate  int
-
-	// Rate limit flags
-	rateLimitEnabled bool
-	rateLimitRPS     float64
-	rateLimitBurst   int
-	rateLimitAlgo    string
-
-	// Health flags
-	healthEnabled bool
-	healthPort    int
-	healthPath    string
-	readyPath     string
-
-	// Replay flags
-	replayEnabled bool
-	replaySpeed   float64
-
-	// Plugin flags
-	pluginEnabled bool
-	pluginDir     string
-
-	// Pprof flags
-	pprofEnabled bool
+	logMaxAge               int
+	port                    int
+	storageMaxSize          int64
+	storageEnabled          bool
+	rateLimitEnabled        bool
+	chaosEnabled            bool
+	streaming               bool
+	debugFlag               bool
+	healthEnabled           bool
+	tlsEnable               bool
+	tuiFlag                 bool
+	versionFlag             bool
+	replayEnabled           bool
+	metricsEnabled          bool
+	pluginEnabled           bool
+	validateFlag            bool
+	pprofEnabled            bool
 }
 
 // NewServerCommand creates a new server command.
@@ -240,7 +213,7 @@ func NewServerCommand() *ServerCommand {
 
 // Name returns the command name.
 func (c *ServerCommand) Name() string {
-	return "server"
+	return "server" //nolint:goconst
 }
 
 // Description returns a short description of the command.
@@ -460,7 +433,7 @@ func (c *ServerCommand) applyOverrides(cfg *config.Config) {
 	}
 
 	if c.debugFlag {
-		cfg.Logging.Level = "debug"
+		cfg.Logging.Level = "debug" //nolint:goconst
 	} else if c.logLevel != "" {
 		cfg.Logging.Level = c.logLevel
 	}
@@ -533,8 +506,8 @@ func (c *ServerCommand) applyOverrides(cfg *config.Config) {
 
 // PrintValidationErrors prints validation errors to the given writer.
 func PrintValidationErrors(w io.Writer, errors []config.ValidationError) {
-	fmt.Fprintln(w, "Configuration validation failed:")
+	fmt.Fprintln(w, "Configuration validation failed:") //nolint:errcheck
 	for _, e := range errors {
-		fmt.Fprintf(w, "  - %s\n", e.Error())
+		fmt.Fprintf(w, "  - %s\n", e.Error()) //nolint:errcheck
 	}
 }

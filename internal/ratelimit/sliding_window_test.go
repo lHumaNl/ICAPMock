@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -547,7 +549,7 @@ func BenchmarkSlidingWindowLimiter_Wait(b *testing.B) {
 	}
 }
 
-// Comparison benchmark: O(1) sliding window vs different window sizes
+// Comparison benchmark: O(1) sliding window vs different window sizes.
 func BenchmarkSlidingWindowLimiter_WindowSizes(b *testing.B) {
 	windows := []time.Duration{
 		100 * time.Millisecond,

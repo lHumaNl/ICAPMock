@@ -1,5 +1,5 @@
-// Package handler provides ICAP request handlers for the ICAP Mock Server.
-// This file contains retry middleware with exponential backoff for transient errors.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -11,9 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // JitterStrategy defines the jitter strategy for retry backoff.
@@ -127,43 +128,15 @@ func findSubstring(s, substr string) bool {
 
 // RetryConfig holds configuration for the retry middleware.
 type RetryConfig struct {
-	// MaxRetries is the maximum number of retry attempts.
-	// Default is 3. Set to 0 to disable retries.
-	MaxRetries int
-
-	// InitialBackoff is the initial backoff duration before the first retry.
-	// Default is 100ms.
-	InitialBackoff time.Duration
-
-	// MaxBackoff is the maximum backoff duration between retries.
-	// Default is 5 seconds.
-	MaxBackoff time.Duration
-
-	// BackoffMultiplier is the multiplier for exponential backoff.
-	// Default is 2.0 (doubling each retry).
+	MetricsCollector  *metrics.Collector
+	Logger            *slog.Logger
+	RetryableErrors   []error
+	MaxRetries        int
+	InitialBackoff    time.Duration
+	MaxBackoff        time.Duration
 	BackoffMultiplier float64
-
-	// JitterStrategy is the jitter strategy to prevent thundering herd problem.
-	// Default is JitterEqual with 25% variation.
-	// Options: JitterNone, JitterFull, JitterEqual.
-	JitterStrategy JitterStrategy
-
-	// JitterPercent is the percentage of jitter to apply (0.0 to 1.0).
-	// Default is 0.25 (25% variation).
-	// Only applies to JitterEqual strategy.
-	JitterPercent float64
-
-	// RetryableErrors is a list of error types that should trigger retries.
-	// If nil, the default IsRetryable function is used.
-	RetryableErrors []error
-
-	// MetricsCollector is the Prometheus metrics collector for tracking retry attempts.
-	// If nil, retry attempts are not recorded.
-	MetricsCollector *metrics.Collector
-
-	// Logger is the logger for retry attempts.
-	// If nil, no logging occurs.
-	Logger *slog.Logger
+	JitterStrategy    JitterStrategy
+	JitterPercent     float64
 }
 
 // DefaultRetryConfig returns the default retry configuration.
@@ -189,7 +162,7 @@ func DefaultRetryConfig() RetryConfig {
 //
 // Non-retryable errors are returned immediately without retry.
 //
-// Context cancellation is respected - if the context is cancelled during
+// Context cancellation is respected - if the context is canceled during
 // backoff, the retry loop stops immediately.
 //
 // Example:
@@ -238,7 +211,7 @@ func RetryMiddleware(cfg RetryConfig) Middleware {
 		if err := prometheus.Register(retryAttemptsTotal); err != nil {
 			var are prometheus.AlreadyRegisteredError
 			if errors.As(err, &are) {
-				retryAttemptsTotal = are.ExistingCollector.(*prometheus.CounterVec)
+				retryAttemptsTotal = are.ExistingCollector.(*prometheus.CounterVec) //nolint:errcheck
 			}
 		}
 	}
@@ -343,12 +316,12 @@ func RetryMiddleware(cfg RetryConfig) Middleware {
 				case <-time.After(backoff):
 					// Continue to next retry
 				case <-ctx.Done():
-					// Context cancelled, abort retry
+					// Context canceled, abort retry
 					if cfg.MetricsCollector != nil && retryAttemptsTotal != nil {
-						retryAttemptsTotal.WithLabelValues(component, "cancelled", getErrorType(ctx.Err())).Inc()
+						retryAttemptsTotal.WithLabelValues(component, "canceled", getErrorType(ctx.Err())).Inc()
 					}
 					if cfg.Logger != nil {
-						cfg.Logger.Warn("retry cancelled by context",
+						cfg.Logger.Warn("retry canceled by context",
 							"component", component,
 							"attempt", attempt+1,
 							"error", ctx.Err(),
@@ -392,7 +365,7 @@ func applyJitter(backoff time.Duration, strategy JitterStrategy, jitterPercent f
 	case JitterFull:
 		// Full jitter: random value between 0 and backoff
 		// This is the most aggressive jitter strategy
-		jitter := rand.Float64()
+		jitter := rand.Float64() //nolint:gosec // crypto not needed here
 		return time.Duration(float64(backoff) * jitter)
 
 	case JitterEqual:
@@ -402,7 +375,7 @@ func applyJitter(backoff time.Duration, strategy JitterStrategy, jitterPercent f
 			jitterPercent = 0.25 // Default to 25%
 		}
 		jitterRange := float64(backoff) * jitterPercent
-		jitter := (rand.Float64() - 0.5) * 2 * jitterRange
+		jitter := (rand.Float64() - 0.5) * 2 * jitterRange //nolint:gosec // crypto not needed here
 		return time.Duration(float64(backoff) + jitter)
 
 	default:

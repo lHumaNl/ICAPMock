@@ -1,4 +1,5 @@
-// Package main provides tests for CLI flag definitions.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (

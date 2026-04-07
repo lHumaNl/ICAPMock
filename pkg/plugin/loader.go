@@ -1,4 +1,5 @@
-// Package plugin provides plugin loading functionality for dynamic .so plugins.
+// Copyright 2026 ICAP Mock
+
 package plugin
 
 import (
@@ -23,9 +24,9 @@ const PluginInfoSymbol = "PluginInfo"
 
 // LoadError represents an error that occurred during plugin loading.
 type LoadError struct {
-	Path     string // Path to the plugin file
-	Phase    string // Phase where the error occurred (open, lookup, init)
-	Internal error  // Underlying error
+	Internal error
+	Path     string
+	Phase    string
 }
 
 // Error implements the error interface.
@@ -56,10 +57,10 @@ type PluginLoader interface {
 
 // Loader implements PluginLoader for dynamic .so plugins.
 type Loader struct {
-	mu       sync.RWMutex
-	loaded   map[string]string // path -> plugin name
+	loaded   map[string]string
 	plugins  map[string]*plugin.Plugin
 	registry *Registry
+	mu       sync.RWMutex
 }
 
 // LoaderOption is a function that configures the Loader.

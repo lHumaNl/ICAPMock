@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (

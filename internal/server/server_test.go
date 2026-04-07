@@ -1,9 +1,11 @@
-// Package server provides the ICAP server implementation.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,14 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// mockHandler is a simple handler for testing
+// mockHandler is a simple handler for testing.
 type mockHandler struct {
 	response string
 	method   string
@@ -309,7 +312,7 @@ func TestServerConcurrentRequests(t *testing.T) {
 			if err != nil {
 				// io.EOF and connection reset are expected when connection closes
 				// On Windows, "wsarecv: An existing connection was forcibly closed" is common
-				if err != io.EOF && !strings.Contains(err.Error(), "forcibly closed") &&
+				if !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "forcibly closed") &&
 					!strings.Contains(err.Error(), "connection reset") {
 					errChan <- fmt.Errorf("request %d: read error: %w", id, err)
 					return
@@ -470,7 +473,7 @@ func TestServerContextCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	// Server should stop when context is cancelled
+	// Server should stop when context is canceled
 	// Give it time to process the cancellation
 	time.Sleep(200 * time.Millisecond)
 
@@ -481,7 +484,7 @@ func TestServerContextCancellation(t *testing.T) {
 	}
 }
 
-// panicHandler is a handler that panics on every request
+// panicHandler is a handler that panics on every request.
 type panicHandler struct{}
 
 func (p *panicHandler) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
@@ -1128,7 +1131,7 @@ func TestContextTimeout_SetFromWriteTimeout(t *testing.T) {
 	})
 }
 
-// TestContextIsCancelledAfterRequest tests that request-scoped context is cancelled.
+// TestContextIsCancelledAfterRequest tests that request-scoped context is canceled.
 func TestContextIsCancelledAfterRequest(t *testing.T) {
 	cfg := &config.ServerConfig{
 		Host:           "127.0.0.1",
@@ -1163,7 +1166,7 @@ func TestContextIsCancelledAfterRequest(t *testing.T) {
 	buf := make([]byte, 1024)
 	n, err := conn.Read(buf)
 
-	// After request is processed, the context should be cancelled
+	// After request is processed, the context should be canceled
 	// We verify this by checking that we got a response
 	if err == nil {
 		assert.Greater(t, n, 0, "Should have received response data")
@@ -1203,7 +1206,7 @@ func TestContextWithTimeout(t *testing.T) {
 			"Deadline should be approximately WriteTimeout from now")
 	})
 
-	t.Run("context is cancelled after timeout", func(t *testing.T) {
+	t.Run("context is canceled after timeout", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 

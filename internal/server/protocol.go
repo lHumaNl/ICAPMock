@@ -1,33 +1,5 @@
-// Package server provides the ICAP server implementation for handling
-// ICAP (Internet Content Adaptation Protocol) requests per RFC 3507.
-//
-// This package implements:
-//   - ICAP server with graceful shutdown support
-//   - Connection management with pooling and limiting
-//   - Protocol parsing for ICAP requests and responses
-//   - Full streaming support for large bodies (O(1) memory)
-//   - TLS support for secure connections
-//
-// Example usage:
-//
-//	cfg := &config.ServerConfig{
-//	    Host:           "0.0.0.0",
-//	    Port:           1344,
-//	    ReadTimeout:    30 * time.Second,
-//	    WriteTimeout:   30 * time.Second,
-//	    MaxConnections: 1000,
-//	    Streaming:      true,
-//	}
-//
-//	srv, err := server.NewServer(cfg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	if err := srv.Start(ctx); err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer srv.Stop(ctx)
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -132,7 +104,7 @@ func parseHeaders(reader BufferedReader) (icap.Header, error) {
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, fmt.Errorf("reading headers: %w", err)
@@ -164,7 +136,7 @@ func parseHeaders(reader BufferedReader) (icap.Header, error) {
 }
 
 // parseHeaderLine parses a single header line.
-// Format: Key: Value
+// Format: Key: Value.
 func parseHeaderLine(line string) (key, value string, err error) {
 	idx := strings.Index(line, ":")
 	if idx == -1 {
@@ -295,7 +267,7 @@ func parseEmbeddedHTTPRequestStreaming(req *icap.Request) error {
 	// Parse HTTP request line
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// No body content, nothing to parse
 			return nil
 		}
@@ -402,7 +374,7 @@ func parseEmbeddedHTTPResponseStreaming(req *icap.Request) error {
 	// Parse HTTP status line
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// No body content, nothing to parse
 			return nil
 		}

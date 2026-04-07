@@ -1,33 +1,5 @@
-// Package handler provides ICAP request handlers for the ICAP Mock Server.
-// It defines the Handler interface and implementations for REQMOD, RESPMOD, and OPTIONS methods.
-//
-// The Handler interface is the core abstraction for processing ICAP requests:
-//
-//	type Handler interface {
-//	    Handle(ctx context.Context, req *icap.Request) (*icap.Response, error)
-//	    Method() string
-//	}
-//
-// Available handlers:
-//   - ReqmodHandler: Handles REQMOD requests (HTTP request modification)
-//   - RespmodHandler: Handles RESPMOD requests (HTTP response modification)
-//   - OptionsHandler: Handles OPTIONS requests (server capabilities)
-//
-// Example usage:
-//
-//	previewRateLimiter := handler.NewPreviewRateLimiter(
-//	    handler.PreviewRateLimiterConfig{
-//	        Enabled:       true,
-//	        MaxRequests:   100,
-//	        WindowSeconds: 60,
-//	    },
-//	    metrics, logger,
-//	)
-//	handler := handler.NewReqmodHandler(processor, metrics, logger, previewRateLimiter)
-//	resp, err := handler.Handle(ctx, req)
-//	if err != nil {
-//	    // handle error
-//	}
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -102,8 +74,8 @@ func WrapHandler(hf HandlerFunc, method string) Handler {
 
 // chainHandler chains multiple handlers together.
 type chainHandler struct {
-	handlers []Handler
 	method   string
+	handlers []Handler
 }
 
 // Handle implements the Handler interface for chainHandler.

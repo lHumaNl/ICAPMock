@@ -1,4 +1,5 @@
-// Package components provides UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -9,51 +10,52 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// LogViewerModel represents the log viewer component
+// LogViewerModel represents the log viewer component.
 type LogViewerModel struct {
-	viewport    viewport.Model
-	entries     []*state.LogEntry
 	filter      *LogFilter
 	searchQuery string
-	searching   bool
+	entries     []*state.LogEntry
 	searchInput textinput.Model
+	viewport    viewport.Model
 	selectedIdx int
+	width       int
+	height      int
+	searching   bool
 	autoScroll  bool
 	showDetails bool
 	ready       bool
-	width       int
-	height      int
 }
 
-// LogFilter defines filters for log entries
+// LogFilter defines filters for log entries.
 type LogFilter struct {
 	Level string
 }
 
-// LogFilterMsg is sent when filter changes
+// LogFilterMsg is sent when filter changes.
 type LogFilterMsg struct {
 	Filter *LogFilter
 }
 
-// LogSearchMsg is sent when search query changes
+// LogSearchMsg is sent when search query changes.
 type LogSearchMsg struct {
 	Query string
 }
 
-// LogAutoScrollMsg is sent when auto-scroll toggle changes
+// LogAutoScrollMsg is sent when auto-scroll toggle changes.
 type LogAutoScrollMsg struct {
 	Enabled bool
 }
 
-// LogSelectMsg is sent when a log entry is selected
+// LogSelectMsg is sent when a log entry is selected.
 type LogSelectMsg struct {
 	Entry *state.LogEntry
 }
 
-// NewLogViewerModel creates a new log viewer model
+// NewLogViewerModel creates a new log viewer model.
 func NewLogViewerModel() *LogViewerModel {
 	si := textinput.New()
 	si.Placeholder = "Search logs..."
@@ -71,14 +73,14 @@ func NewLogViewerModel() *LogViewerModel {
 	}
 }
 
-// Init initializes the log viewer model
+// Init initializes the log viewer model.
 func (m *LogViewerModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates the log viewer model
+// Update handles messages and updates the log viewer model.
 func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
-	var cmds []tea.Cmd
+	var cmds []tea.Cmd //nolint:prealloc
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -168,7 +170,7 @@ func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
 				// Go to bottom
 				m.viewport.GotoBottom()
 
-			case "enter":
+			case keyEnter:
 				// Show log details
 				if m.selectedIdx >= 0 && m.selectedIdx < len(m.entries) {
 					m.showDetails = true
@@ -177,7 +179,7 @@ func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
 		} else {
 			// Handle detail view keys
 			switch msg.String() {
-			case "q", "esc":
+			case "q", keyEsc:
 				// Close detail view
 				m.showDetails = false
 			}
@@ -192,7 +194,7 @@ func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// SetEntries updates the log entries
+// SetEntries updates the log entries.
 func (m *LogViewerModel) SetEntries(entries []*state.LogEntry) {
 	m.entries = entries
 	m.updateViewportContent()
@@ -203,24 +205,24 @@ func (m *LogViewerModel) SetEntries(entries []*state.LogEntry) {
 	}
 }
 
-// SetFilter sets the log level filter
+// SetFilter sets the log level filter.
 func (m *LogViewerModel) SetFilter(filter *LogFilter) {
 	m.filter = filter
 	m.updateViewportContent()
 }
 
-// SetSearch sets the search query
+// SetSearch sets the search query.
 func (m *LogViewerModel) SetSearch(query string) {
 	m.searchQuery = query
 	m.updateViewportContent()
 }
 
-// SetAutoScroll sets the auto-scroll state
+// SetAutoScroll sets the auto-scroll state.
 func (m *LogViewerModel) SetAutoScroll(enabled bool) {
 	m.autoScroll = enabled
 }
 
-// cycleFilter cycles through available filter levels
+// cycleFilter cycles through available filter levels.
 func (m *LogViewerModel) cycleFilter() {
 	levels := []string{"", "DEBUG", "INFO", "WARN", "ERROR"}
 	for i, level := range levels {
@@ -232,7 +234,7 @@ func (m *LogViewerModel) cycleFilter() {
 	m.filter.Level = levels[0]
 }
 
-// updateViewportContent updates the viewport content
+// updateViewportContent updates the viewport content.
 func (m *LogViewerModel) updateViewportContent() {
 	filtered := m.filterEntries()
 
@@ -249,7 +251,7 @@ func (m *LogViewerModel) updateViewportContent() {
 	m.viewport.SetContent(strings.Join(lines, "\n"))
 }
 
-// filterEntries filters log entries based on current filter and search
+// filterEntries filters log entries based on current filter and search.
 func (m *LogViewerModel) filterEntries() []*state.LogEntry {
 	var filtered []*state.LogEntry
 
@@ -270,7 +272,7 @@ func (m *LogViewerModel) filterEntries() []*state.LogEntry {
 	return filtered
 }
 
-// containsSearch checks if entry contains the search query
+// containsSearch checks if entry contains the search query.
 func (m *LogViewerModel) containsSearch(entry *state.LogEntry) bool {
 	if m.searchQuery == "" {
 		return true
@@ -303,7 +305,7 @@ func (m *LogViewerModel) containsSearch(entry *state.LogEntry) bool {
 	return false
 }
 
-// renderLogLine renders a single log line
+// renderLogLine renders a single log line.
 func (m *LogViewerModel) renderLogLine(idx int, entry *state.LogEntry) string {
 	style := getLogLevelStyle(entry.Level)
 	timestamp := entry.Timestamp.Format("2006-01-02 15:04:05")
@@ -335,7 +337,7 @@ func (m *LogViewerModel) renderLogLine(idx int, entry *state.LogEntry) string {
 	return line
 }
 
-// highlightSearch highlights search matches in text
+// highlightSearch highlights search matches in text.
 func (m *LogViewerModel) highlightSearch(text string) string {
 	if m.searchQuery == "" {
 		return text
@@ -367,7 +369,7 @@ func (m *LogViewerModel) highlightSearch(text string) string {
 	return result.String()
 }
 
-// View renders the log viewer
+// View renders the log viewer.
 func (m *LogViewerModel) View() string {
 	if !m.ready {
 		return "Loading log viewer..."
@@ -381,8 +383,7 @@ func (m *LogViewerModel) View() string {
 	toolbar := m.renderToolbar()
 
 	// Render viewport content
-	var content string
-	content = m.viewport.View()
+	var content string = m.viewport.View()
 
 	// Render status bar
 	statusBar := m.renderStatusBar()
@@ -398,7 +399,7 @@ func (m *LogViewerModel) View() string {
 	)
 }
 
-// renderToolbar renders the toolbar
+// renderToolbar renders the toolbar.
 func (m *LogViewerModel) renderToolbar() string {
 	if m.searching {
 		return "Search: " + m.searchInput.View() + "  (Enter to apply, Esc to cancel)"
@@ -437,7 +438,7 @@ func (m *LogViewerModel) renderToolbar() string {
 	return toolbarStyle.Render(strings.Join(itemsStyled, "   "))
 }
 
-// renderFilter renders the filter status
+// renderFilter renders the filter status.
 func (m *LogViewerModel) renderFilter() string {
 	if m.filter.Level == "" {
 		return "All"
@@ -446,7 +447,7 @@ func (m *LogViewerModel) renderFilter() string {
 	return style.Render(m.filter.Level)
 }
 
-// renderAutoScroll renders the auto-scroll status
+// renderAutoScroll renders the auto-scroll status.
 func (m *LogViewerModel) renderAutoScroll() string {
 	if m.autoScroll {
 		return lipgloss.NewStyle().
@@ -459,7 +460,7 @@ func (m *LogViewerModel) renderAutoScroll() string {
 		Render("Off")
 }
 
-// renderStatusBar renders the status bar with key hints
+// renderStatusBar renders the status bar with key hints.
 func (m *LogViewerModel) renderStatusBar() string {
 	hints := []string{
 		"f: filter",
@@ -490,7 +491,7 @@ func (m *LogViewerModel) renderStatusBar() string {
 	return statusStyle.Render(strings.Join(hintsStyled, "   "))
 }
 
-// renderDetails renders the log entry details
+// renderDetails renders the log entry details.
 func (m *LogViewerModel) renderDetails() string {
 	if m.selectedIdx < 0 || m.selectedIdx >= len(m.entries) {
 		return "No entry selected"
@@ -529,7 +530,7 @@ func (m *LogViewerModel) renderDetails() string {
 	return panelStyle.Render(details)
 }
 
-// renderDetailField renders a detail field
+// renderDetailField renders a detail field.
 func (m *LogViewerModel) renderDetailField(key, value string) string {
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240")).
@@ -541,22 +542,22 @@ func (m *LogViewerModel) renderDetailField(key, value string) string {
 	return labelStyle.Render(key+": ") + valueStyle.Render(value)
 }
 
-// GetFilter returns the current filter
+// GetFilter returns the current filter.
 func (m *LogViewerModel) GetFilter() *LogFilter {
 	return m.filter
 }
 
-// GetSearch returns the current search query
+// GetSearch returns the current search query.
 func (m *LogViewerModel) GetSearch() string {
 	return m.searchQuery
 }
 
-// IsSearching returns whether the log viewer is in search mode
+// IsSearching returns whether the log viewer is in search mode.
 func (m *LogViewerModel) IsSearching() bool {
 	return m.searching
 }
 
-// IsAutoScrollEnabled returns whether auto-scroll is enabled
+// IsAutoScrollEnabled returns whether auto-scroll is enabled.
 func (m *LogViewerModel) IsAutoScrollEnabled() bool {
 	return m.autoScroll
 }

@@ -1,9 +1,10 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -119,7 +120,7 @@ func TestRequestReader_ISPCompliance(t *testing.T) {
 
 		// Verify deletion
 		_, err := store.GetRequest(ctx, sr2.ID)
-		if err != ErrRequestNotFound {
+		if !errors.Is(err, ErrRequestNotFound) {
 			t.Errorf("GetRequest() after delete should return ErrRequestNotFound, got %v", err)
 		}
 	})
@@ -179,7 +180,7 @@ func TestRequestWriter_ISPCompliance(t *testing.T) {
 			ResponseStatus: 204,
 		}
 		err := store.SaveRequest(ctx, sr)
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("SaveRequest() after close should return ErrStorageClosed, got %v", err)
 		}
 	})
@@ -386,13 +387,13 @@ func TestDisabledStorage_ISPCompliance(t *testing.T) {
 
 	// SaveRequest should return ErrStorageDisabled
 	err = store.SaveRequest(ctx, &StoredRequest{ID: "test"})
-	if err != ErrStorageDisabled {
+	if !errors.Is(err, ErrStorageDisabled) {
 		t.Errorf("SaveRequest() on disabled storage should return ErrStorageDisabled, got %v", err)
 	}
 
 	// GetRequest should return ErrStorageDisabled
 	_, err = store.GetRequest(ctx, "test")
-	if err != ErrStorageDisabled {
+	if !errors.Is(err, ErrStorageDisabled) {
 		t.Errorf("GetRequest() on disabled storage should return ErrStorageDisabled, got %v", err)
 	}
 
@@ -435,49 +436,49 @@ func TestClosedStorage_Operations(t *testing.T) {
 	// All operations should return ErrStorageClosed
 	t.Run("SaveRequest", func(t *testing.T) {
 		err := store.SaveRequest(ctx, &StoredRequest{ID: "test"})
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})
 
 	t.Run("GetRequest", func(t *testing.T) {
 		_, err := store.GetRequest(ctx, "test")
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})
 
 	t.Run("ListRequests", func(t *testing.T) {
 		_, err := store.ListRequests(ctx, RequestFilter{})
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})
 
 	t.Run("DeleteRequest", func(t *testing.T) {
 		err := store.DeleteRequest(ctx, "test")
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})
 
 	t.Run("DeleteRequests", func(t *testing.T) {
 		_, err := store.DeleteRequests(ctx, RequestFilter{})
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})
 
 	t.Run("Clear", func(t *testing.T) {
 		_, err := store.Clear(ctx)
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})
 
 	t.Run("Flush", func(t *testing.T) {
 		err := store.Flush(ctx)
-		if err != ErrStorageClosed {
+		if !errors.Is(err, ErrStorageClosed) {
 			t.Errorf("expected ErrStorageClosed, got %v", err)
 		}
 	})

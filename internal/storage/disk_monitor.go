@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -22,25 +22,21 @@ import (
 //
 // Thread-safety:
 // - All methods are safe for concurrent use
-// - State is protected by mutex and atomic operations
+// - State is protected by mutex and atomic operations.
 type DiskMonitor struct {
-	cfg     config.DiskMonitorConfig
-	metrics *prometheusmetrics.Collector
-	mu      sync.RWMutex
-	logger  *slog.Logger
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-
-	// Monitoring state
+	ctx           context.Context
+	lastError     atomic.Value
+	currentUsage  atomic.Value
+	lastCheckTime atomic.Value
+	logger        *slog.Logger
+	cancel        context.CancelFunc
+	metrics       *prometheusmetrics.Collector
 	path          string
-	lastCheckTime atomic.Value // time.Time
-	currentUsage  atomic.Value // DiskUsage
+	cfg           config.DiskMonitorConfig
+	wg            sync.WaitGroup
+	mu            sync.RWMutex
+	checkMu       sync.Mutex
 	isRunning     atomic.Bool
-	lastError     atomic.Value // error
-
-	// Rate limiting - prevents multiple concurrent disk checks
-	checkMu sync.Mutex
 }
 
 // DiskUsage represents the current disk usage statistics.
@@ -254,7 +250,7 @@ func (dm *DiskMonitor) IsRunning() bool {
 }
 
 // monitorLoop periodically checks disk space usage.
-// It runs in a separate goroutine until Stop() is called or context is cancelled.
+// It runs in a separate goroutine until Stop() is called or context is canceled.
 func (dm *DiskMonitor) monitorLoop() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -438,9 +434,9 @@ func (dm *DiskMonitor) getDiskUsageSyscalls() (DiskUsage, error) {
 	}
 
 	return DiskUsage{
-		Total:        int64(total),
-		Used:         int64(used),
-		Available:    int64(available),
+		Total:        int64(total),     //nolint:gosec // safe range
+		Used:         int64(used),      //nolint:gosec // safe range
+		Available:    int64(available), //nolint:gosec // safe range
 		UsagePercent: usagePercent,
 	}, nil
 }

@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -12,29 +12,14 @@ import (
 // operations such as loading, validation, or matching.
 // It provides rich context to help diagnose and fix configuration issues.
 type ScenarioError struct {
-	// Operation is the operation that failed (e.g., "load", "validate", "match").
-	Operation string
-
-	// FilePath is the path to the scenario file, if applicable.
-	FilePath string
-
-	// ScenarioName is the name of the scenario that caused the error.
+	Value        interface{}
+	Cause        error
+	Operation    string
+	FilePath     string
 	ScenarioName string
-
-	// Field is the specific field that has an issue (e.g., "match.path_pattern").
-	Field string
-
-	// Value is the invalid value that was provided.
-	Value interface{}
-
-	// Message describes what went wrong.
-	Message string
-
-	// Suggestion provides guidance on how to fix the issue.
-	Suggestion string
-
-	// Cause is the underlying error, if any.
-	Cause error
+	Field        string
+	Message      string
+	Suggestion   string
 }
 
 // Error implements the error interface and returns a formatted error string.
@@ -192,26 +177,26 @@ func FormatError(err error) string {
 
 		sb.WriteString("=== Scenario Error ===\n")
 		if se.Operation != "" {
-			sb.WriteString(fmt.Sprintf("  Operation:   %s\n", se.Operation))
+			fmt.Fprintf(&sb, "  Operation:   %s\n", se.Operation)
 		}
 		if se.FilePath != "" {
-			sb.WriteString(fmt.Sprintf("  File:        %s\n", se.FilePath))
+			fmt.Fprintf(&sb, "  File:        %s\n", se.FilePath)
 		}
 		if se.ScenarioName != "" {
-			sb.WriteString(fmt.Sprintf("  Scenario:    %s\n", se.ScenarioName))
+			fmt.Fprintf(&sb, "  Scenario:    %s\n", se.ScenarioName)
 		}
 		if se.Field != "" {
-			sb.WriteString(fmt.Sprintf("  Field:       %s\n", se.Field))
+			fmt.Fprintf(&sb, "  Field:       %s\n", se.Field)
 		}
 		if se.Value != nil {
-			sb.WriteString(fmt.Sprintf("  Value:       %v\n", se.Value))
+			fmt.Fprintf(&sb, "  Value:       %v\n", se.Value)
 		}
-		sb.WriteString(fmt.Sprintf("  Error:       %s\n", se.Message))
+		fmt.Fprintf(&sb, "  Error:       %s\n", se.Message)
 		if se.Suggestion != "" {
-			sb.WriteString(fmt.Sprintf("  Suggestion:  %s\n", se.Suggestion))
+			fmt.Fprintf(&sb, "  Suggestion:  %s\n", se.Suggestion)
 		}
 		if se.Cause != nil {
-			sb.WriteString(fmt.Sprintf("  Cause:       %v\n", se.Cause))
+			fmt.Fprintf(&sb, "  Cause:       %v\n", se.Cause)
 		}
 		sb.WriteString("======================")
 
@@ -228,7 +213,8 @@ func AsScenarioError(err error, target **ScenarioError) bool {
 		return false
 	}
 
-	if se, ok := err.(*ScenarioError); ok {
+	se := &ScenarioError{}
+	if errors.As(err, &se) {
 		*target = se
 		return true
 	}

@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -17,18 +17,9 @@ import (
 
 // HotReloadConfig contains configuration for scenario hot-reloading.
 type HotReloadConfig struct {
-	// Enabled enables automatic hot-reload of scenario files.
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// Debounce is the duration to wait before reloading after a file change.
-	// This prevents multiple reloads when a file is saved multiple times quickly.
-	// Default: 1s
-	Debounce time.Duration `yaml:"debounce" json:"debounce"`
-
-	// WatchDirectory enables watching the entire directory for changes.
-	// If false, only watches the specific scenario file.
-	// Default: true
-	WatchDirectory bool `yaml:"watch_directory" json:"watch_directory"`
+	Debounce       time.Duration `yaml:"debounce" json:"debounce"`
+	Enabled        bool          `yaml:"enabled" json:"enabled"`
+	WatchDirectory bool          `yaml:"watch_directory" json:"watch_directory"`
 }
 
 // SetDefaults sets default values for HotReloadConfig.
@@ -42,20 +33,20 @@ func (c *HotReloadConfig) SetDefaults() {
 // It uses fsnotify for efficient filesystem monitoring and supports debouncing
 // to prevent rapid consecutive reloads.
 type ScenarioWatcher struct {
-	mu          sync.RWMutex
-	watcher     *fsnotify.Watcher
 	registry    ScenarioRegistry
-	config      HotReloadConfig
-	filePath    string
-	watchedDir  string
-	logger      *slog.Logger
-	debounceMu  sync.Mutex
-	debounceTim map[string]*time.Timer
 	ctx         context.Context
+	logger      *slog.Logger
+	debounceTim map[string]*time.Timer
+	watcher     *fsnotify.Watcher
 	cancel      context.CancelFunc
-	wg          sync.WaitGroup
 	events      chan fsnotify.Event
 	errors      chan error
+	filePath    string
+	watchedDir  string
+	config      HotReloadConfig
+	wg          sync.WaitGroup
+	mu          sync.RWMutex
+	debounceMu  sync.Mutex
 }
 
 // WatcherOption is a functional option for configuring the scenario watcher.
@@ -315,17 +306,10 @@ func (sw *ScenarioWatcher) IsRunning() bool {
 
 // WatcherStats contains statistics about the watcher.
 type WatcherStats struct {
-	// IsRunning indicates if the watcher is active.
-	IsRunning bool `json:"is_running"`
-
-	// WatchedPath is the path being watched.
-	WatchedPath string `json:"watched_path"`
-
-	// PendingReloads is the number of pending debounced reloads.
-	PendingReloads int `json:"pending_reloads"`
-
-	// Config is the current configuration.
-	Config HotReloadConfig `json:"config"`
+	WatchedPath    string          `json:"watched_path"`
+	Config         HotReloadConfig `json:"config"`
+	PendingReloads int             `json:"pending_reloads"`
+	IsRunning      bool            `json:"is_running"`
 }
 
 // Stats returns current watcher statistics.

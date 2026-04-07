@@ -1,4 +1,5 @@
-// Package config provides configuration structures and loading mechanisms.
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (

@@ -1,14 +1,5 @@
-// Package errors provides custom error types for the ICAP Mock Server.
-// It supports error codes, ICAP status codes, HTTP status codes, and error wrapping
-// with full compatibility with the standard library's errors package.
-//
-// Example usage:
-//
-//	err := NewICAPError(1001, "invalid request", 400, nil)
-//	fmt.Println(err.Error()) // [1001] invalid request
-//
-//	err = Wrap(err, 1002, "request processing failed", 500)
-//	root := Cause(err)
+// Copyright 2026 ICAP Mock
+
 package errors
 
 import (
@@ -19,16 +10,11 @@ import (
 // Error represents a structured error with ICAP-specific fields.
 // It implements the error interface and supports error wrapping and comparison.
 type Error struct {
-	// Code is the internal error code used for categorization and lookup.
-	Code int
-	// Message is the human-readable error description.
-	Message string
-	// ICAPStatus is the ICAP response status code (e.g., 400, 500, 503).
+	Cause      error
+	Message    string
+	Code       int
 	ICAPStatus int
-	// HTTPStatus is the HTTP status code if applicable (0 if not applicable).
 	HTTPStatus int
-	// Cause is the underlying error that caused this error (may be nil).
-	Cause error
 }
 
 // Predefined errors for common ICAP error conditions.
@@ -127,7 +113,7 @@ var (
 )
 
 // Error implements the error interface and returns a formatted error string.
-// The format is: [code] message
+// The format is: [code] message.
 func (e *Error) Error() string {
 	if e == nil {
 		return ""
@@ -175,24 +161,24 @@ func (e *Error) Format(f fmt.State, verb rune) {
 	case 'v':
 		if f.Flag('+') {
 			// Verbose format
-			fmt.Fprintf(f, "Code: %d\nMessage: %s\nICAPStatus: %d", e.Code, e.Message, e.ICAPStatus)
+			fmt.Fprintf(f, "Code: %d\nMessage: %s\nICAPStatus: %d", e.Code, e.Message, e.ICAPStatus) //nolint:errcheck
 			if e.HTTPStatus != 0 {
-				fmt.Fprintf(f, "\nHTTPStatus: %d", e.HTTPStatus)
+				fmt.Fprintf(f, "\nHTTPStatus: %d", e.HTTPStatus) //nolint:errcheck
 			}
 			if e.Cause != nil {
-				fmt.Fprintf(f, "\nCause: %v", e.Cause)
+				fmt.Fprintf(f, "\nCause: %v", e.Cause) //nolint:errcheck
 			}
 			return
 		}
 		fallthrough
 	case 's', 'q':
 		if verb == 'q' {
-			fmt.Fprintf(f, `"%s"`, e.Error())
+			fmt.Fprintf(f, `"%s"`, e.Error()) //nolint:errcheck
 		} else {
-			fmt.Fprintf(f, "[%d] %s", e.Code, e.Message)
+			fmt.Fprintf(f, "[%d] %s", e.Code, e.Message) //nolint:errcheck
 		}
 	default:
-		fmt.Fprintf(f, "[%d] %s", e.Code, e.Message)
+		fmt.Fprintf(f, "[%d] %s", e.Code, e.Message) //nolint:errcheck
 	}
 }
 

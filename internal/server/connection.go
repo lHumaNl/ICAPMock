@@ -1,4 +1,5 @@
-// Package server provides the ICAP server implementation.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -45,13 +46,13 @@ func (s ConnectionState) String() string {
 // The buffer is returned to the pool when close is called.
 // This replaces bufio.Reader/Writer to allow buffer pooling.
 type pooledBuffer struct {
-	buf    []byte          // underlying buffer from pool
-	bufPtr *[]byte         // pointer to return to pool
-	rpos   int             // current read position
-	wpos   int             // current write position
-	rw     io.ReadWriter   // underlying connection
-	pool   *pool.SlicePool // pool to return buffer to
-	err    error           // saved error from previous read
+	rw     io.ReadWriter
+	err    error
+	bufPtr *[]byte
+	pool   *pool.SlicePool
+	buf    []byte
+	rpos   int
+	wpos   int
 }
 
 // newPooledReadBuffer creates a new pooled buffer for reading.
@@ -299,10 +300,10 @@ func (pb *pooledBuffer) close() {
 // fewer larger writes. For typical ICAP responses with many small header
 // lines, this can reduce syscalls by 10-20x.
 type bufferedWriter struct {
-	w      io.Writer       // underlying writer (net.Conn)
-	buf    []byte          // write buffer (from pool, len tracks used, cap is buffer size)
-	bufPtr *[]byte         // pointer to return to pool
-	pool   *pool.SlicePool // pool for buffers
+	w      io.Writer
+	bufPtr *[]byte
+	pool   *pool.SlicePool
+	buf    []byte
 }
 
 // newBufferedWriter creates a new buffered writer with a pooled 8KB buffer.
@@ -685,7 +686,7 @@ func (p *ConnectionPool) CloseAll(ctx context.Context) {
 
 	// Close all connections
 	for _, conn := range conns {
-		conn.Close()
+		_ = conn.Close()
 		// Mark as done in wait group
 		p.wg.Done()
 	}

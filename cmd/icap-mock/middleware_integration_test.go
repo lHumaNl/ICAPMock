@@ -1,6 +1,5 @@
-// Package main provides integration tests for middleware chain.
-// These tests verify that RateLimiterMiddleware and StorageMiddleware
-// are properly integrated with the request handlers.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -301,8 +300,8 @@ func TestMiddlewareChain_StorageSavesRequests(t *testing.T) {
 
 // mockStorage is a simple in-memory storage for testing.
 type mockStorage struct {
-	mu       sync.RWMutex
 	requests []*storage.StoredRequest
+	mu       sync.RWMutex
 }
 
 func (m *mockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {

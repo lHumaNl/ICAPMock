@@ -1,4 +1,5 @@
-// Package server provides integration tests for circuit breaker.
+// Copyright 2026 ICAP Mock
+
 package server_test
 
 import (
@@ -8,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/server"
 	itesting "github.com/icap-mock/icap-mock/internal/testing"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TestServerCircuitBreakerIntegration tests circuit breaker integration with server.
@@ -109,7 +111,7 @@ func TestServerCircuitBreakerStateTransitions(t *testing.T) {
 		err := cb.Call(testCtx, func() error {
 			return testErr
 		})
-		if err != testErr {
+		if !errors.Is(err, testErr) {
 			t.Errorf("iteration %d: expected test error, got %v", i, err)
 		}
 	}
@@ -133,8 +135,7 @@ func TestServerCircuitBreakerStateTransitions(t *testing.T) {
 	}
 
 	// HALF_OPEN -> CLOSED (success)
-	var callErr error
-	callErr = cb.Call(testCtx, func() error {
+	var callErr error = cb.Call(testCtx, func() error {
 		return nil
 	})
 	if callErr != nil {

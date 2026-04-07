@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -440,7 +440,7 @@ func TestFromICAPRequest(t *testing.T) {
 
 // TestFileStorageCloseRaceCondition tests concurrent Close() and SaveRequest()
 // to ensure no "send on closed channel" panic occurs.
-// Run with: go test -race -v ./internal/storage/
+// Run with: go test -race -v ./internal/storage/.
 func TestFileStorageCloseRaceCondition(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -618,7 +618,7 @@ func TestFileStorageOperationsAfterClose(t *testing.T) {
 	}
 }
 
-// Helper function to serialize StoredRequest to JSON
+// Helper function to serialize StoredRequest to JSON.
 func serializeStoredRequest(sr *StoredRequest) ([]byte, error) {
 	return json.MarshalIndent(sr, "", "  ")
 }

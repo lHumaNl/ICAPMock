@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
@@ -11,34 +13,34 @@ import (
 	"github.com/icap-mock/icap-mock/internal/tui/utils"
 )
 
-// LogsState manages log entries for the TUI
+// LogsState manages log entries for the TUI.
 type LogsState struct {
-	mu         sync.RWMutex
 	entries    *utils.RingBuffer[*LogEntry]
-	maxLines   int
 	filter     *LogFilter
-	search     string
-	autoScroll bool
-	streaming  bool
 	client     *LogsClient
 	cancel     context.CancelFunc
+	search     string
+	maxLines   int
+	mu         sync.RWMutex
+	autoScroll bool
+	streaming  bool
 }
 
-// LogEntry represents a single log entry
+// LogEntry represents a single log entry.
 type LogEntry struct {
 	Timestamp time.Time
+	Fields    map[string]interface{}
 	Level     string
 	Message   string
-	Fields    map[string]interface{}
 }
 
-// LogFilter defines filters for log entries
+// LogFilter defines filters for log entries.
 type LogFilter struct {
 	Level  string
 	Search string
 }
 
-// NewLogsState creates a new logs state with provided configuration
+// NewLogsState creates a new logs state with provided configuration.
 func NewLogsState(cfg *ClientConfig) *LogsState {
 	// Validate configuration
 	if cfg == nil {
@@ -82,7 +84,7 @@ func NewLogsState(cfg *ClientConfig) *LogsState {
 	}
 }
 
-// StartStreaming begins streaming log updates
+// StartStreaming begins streaming log updates.
 func (s *LogsState) StartStreaming() tea.Cmd {
 	s.mu.Lock()
 	s.streaming = true
@@ -107,7 +109,7 @@ func (s *LogsState) StartStreaming() tea.Cmd {
 	}
 }
 
-// StreamLogs periodically fetches new logs
+// StreamLogs periodically fetches new logs.
 func (s *LogsState) StreamLogs() tea.Cmd {
 	return func() tea.Msg {
 		s.mu.RLock()
@@ -148,12 +150,12 @@ func (s *LogsState) StreamLogs() tea.Cmd {
 	}
 }
 
-// LogStreamErrorMsg is sent when there's an error during log streaming
+// LogStreamErrorMsg is sent when there's an error during log streaming.
 type LogStreamErrorMsg struct {
 	Error error
 }
 
-// AddEntry adds a new log entry
+// AddEntry adds a new log entry.
 func (s *LogsState) AddEntry(entry *LogEntry) tea.Msg {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +165,7 @@ func (s *LogsState) AddEntry(entry *LogEntry) tea.Msg {
 	return LogEntryMsg{Entry: entry}
 }
 
-// GetEntries returns log entries with optional filtering
+// GetEntries returns log entries with optional filtering.
 func (s *LogsState) GetEntries(filter *LogFilter, limit int) []*LogEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -193,7 +195,7 @@ func (s *LogsState) GetEntries(filter *LogFilter, limit int) []*LogEntry {
 	return filtered
 }
 
-// matchesFilter checks if an entry matches the filter
+// matchesFilter checks if an entry matches the filter.
 func (s *LogsState) matchesFilter(entry *LogEntry, filter *LogFilter) bool {
 	if entry == nil {
 		return false
@@ -210,7 +212,7 @@ func (s *LogsState) matchesFilter(entry *LogEntry, filter *LogFilter) bool {
 	return true
 }
 
-// SetFilter sets the log level filter
+// SetFilter sets the log level filter.
 func (s *LogsState) SetFilter(level string) tea.Cmd {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -222,7 +224,7 @@ func (s *LogsState) SetFilter(level string) tea.Cmd {
 	}
 }
 
-// SetSearch sets the search query
+// SetSearch sets the search query.
 func (s *LogsState) SetSearch(query string) tea.Cmd {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,7 +237,7 @@ func (s *LogsState) SetSearch(query string) tea.Cmd {
 	}
 }
 
-// SetAutoScroll sets the auto-scroll state
+// SetAutoScroll sets the auto-scroll state.
 func (s *LogsState) SetAutoScroll(enabled bool) tea.Cmd {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -247,7 +249,7 @@ func (s *LogsState) SetAutoScroll(enabled bool) tea.Cmd {
 	}
 }
 
-// IsAutoScrollEnabled returns whether auto-scroll is enabled
+// IsAutoScrollEnabled returns whether auto-scroll is enabled.
 func (s *LogsState) IsAutoScrollEnabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -255,7 +257,7 @@ func (s *LogsState) IsAutoScrollEnabled() bool {
 	return s.autoScroll
 }
 
-// GetFilter returns the current filter
+// GetFilter returns the current filter.
 func (s *LogsState) GetFilter() *LogFilter {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -263,7 +265,7 @@ func (s *LogsState) GetFilter() *LogFilter {
 	return s.filter
 }
 
-// GetSearch returns the current search query
+// GetSearch returns the current search query.
 func (s *LogsState) GetSearch() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -271,22 +273,22 @@ func (s *LogsState) GetSearch() string {
 	return s.search
 }
 
-// LogFilterMsg is sent when filter changes
+// LogFilterMsg is sent when filter changes.
 type LogFilterMsg struct {
 	Level string
 }
 
-// LogSearchMsg is sent when search query changes
+// LogSearchMsg is sent when search query changes.
 type LogSearchMsg struct {
 	Query string
 }
 
-// LogAutoScrollMsg is sent when auto-scroll toggle changes
+// LogAutoScrollMsg is sent when auto-scroll toggle changes.
 type LogAutoScrollMsg struct {
 	Enabled bool
 }
 
-// Refresh fetches the latest logs
+// Refresh fetches the latest logs.
 func (s *LogsState) Refresh() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -303,17 +305,17 @@ func (s *LogsState) Refresh() tea.Cmd {
 	}
 }
 
-// LogRefreshErrorMsg is sent when there's an error during log refresh
+// LogRefreshErrorMsg is sent when there's an error during log refresh.
 type LogRefreshErrorMsg struct {
 	Error error
 }
 
-// LogsUpdatedMsg is sent when logs are refreshed
+// LogsUpdatedMsg is sent when logs are refreshed.
 type LogsUpdatedMsg struct {
 	Entries []*LogEntry
 }
 
-// UpdateEntries updates the log entries with new data
+// UpdateEntries updates the log entries with new data.
 func (s *LogsState) UpdateEntries(entries []*LogEntry) {
 	if entries == nil {
 		return
@@ -342,12 +344,12 @@ func (s *LogsState) UpdateEntries(entries []*LogEntry) {
 	// RingBuffer automatically enforces max limit
 }
 
-// containsString checks if a string contains a substring
+// containsString checks if a string contains a substring.
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (substr == "" || indexOfString(s, substr) >= 0)
 }
 
-// indexOfString finds the index of a substring
+// indexOfString finds the index of a substring.
 func indexOfString(s, substr string) int {
 	n := len(substr)
 	if n == 0 {
@@ -361,12 +363,12 @@ func indexOfString(s, substr string) int {
 	return -1
 }
 
-// LogEntryMsg is sent when a new log entry arrives
+// LogEntryMsg is sent when a new log entry arrives.
 type LogEntryMsg struct {
 	Entry *LogEntry
 }
 
-// StopStreaming stops the log streaming
+// StopStreaming stops the log streaming.
 func (s *LogsState) StopStreaming() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -378,7 +380,7 @@ func (s *LogsState) StopStreaming() {
 	}
 }
 
-// Shutdown releases all resources
+// Shutdown releases all resources.
 func (s *LogsState) Shutdown() {
 	s.StopStreaming()
 }

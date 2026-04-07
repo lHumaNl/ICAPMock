@@ -1,4 +1,5 @@
-// Package icap_test provides tests for ICAP Response.
+// Copyright 2026 ICAP Mock
+
 package icap_test
 
 import (
@@ -56,8 +57,8 @@ func TestNewResponse(t *testing.T) {
 // TestResponseStatusText tests getting status text for status codes.
 func TestResponseStatusText(t *testing.T) {
 	tests := []struct {
-		code     int
 		wantText string
+		code     int
 	}{
 		{200, "OK"},
 		{204, "No Content Needed"},
@@ -288,9 +289,9 @@ func TestResponseClone(t *testing.T) {
 // TestResponseError tests creating error responses.
 func TestResponseError(t *testing.T) {
 	tests := []struct {
-		code         int
 		message      string
 		wantInOutput string
+		code         int
 	}{
 		{400, "Invalid request format", "Invalid request format"},
 		{404, "Service not found", "Service not found"},
@@ -467,12 +468,12 @@ func TestResponseSetHTTPResponse(t *testing.T) {
 // TestReadResponse tests parsing an ICAP response from raw bytes.
 func TestReadResponse(t *testing.T) {
 	tests := []struct {
+		wantHeader     map[string]string
 		name           string
 		input          string
-		wantStatus     int
 		wantProto      string
-		wantHeader     map[string]string
 		wantBodyPrefix string
+		wantStatus     int
 		wantErr        bool
 	}{
 		{

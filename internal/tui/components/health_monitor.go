@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -6,17 +8,20 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// HealthMonitorModel manages the health monitor component
+const statusStarting = "starting"
+
+// HealthMonitorModel manages the health monitor component.
 type HealthMonitorModel struct {
-	mu           sync.RWMutex
 	healthChecks []state.HealthCheckResult
 	alerts       []string
+	mu           sync.RWMutex
 }
 
-// NewHealthMonitorModel creates a new health monitor model
+// NewHealthMonitorModel creates a new health monitor model.
 func NewHealthMonitorModel() *HealthMonitorModel {
 	return &HealthMonitorModel{
 		healthChecks: make([]state.HealthCheckResult, 0),
@@ -24,7 +29,7 @@ func NewHealthMonitorModel() *HealthMonitorModel {
 	}
 }
 
-// UpdateHealthCheck updates the health monitor with a new check result
+// UpdateHealthCheck updates the health monitor with a new check result.
 func (m *HealthMonitorModel) UpdateHealthCheck(result state.HealthCheckResult) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -41,15 +46,15 @@ func (m *HealthMonitorModel) UpdateHealthCheck(result state.HealthCheckResult) {
 	if !result.Ready {
 		m.addAlert("Server is not ready to accept traffic")
 	}
-	if result.ICAPStatus != "ok" && result.ICAPStatus != "starting" {
+	if result.ICAPStatus != "ok" && result.ICAPStatus != statusStarting {
 		m.addAlert(fmt.Sprintf("ICAP server issue: %s", result.ICAPStatus))
 	}
-	if result.StorageStatus != "ok" && result.StorageStatus != "starting" {
+	if result.StorageStatus != "ok" && result.StorageStatus != statusStarting {
 		m.addAlert(fmt.Sprintf("Storage issue: %s", result.StorageStatus))
 	}
 }
 
-// addAlert adds an alert message
+// addAlert adds an alert message.
 func (m *HealthMonitorModel) addAlert(message string) {
 	// Add alert with timestamp
 	alert := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), message)
@@ -61,14 +66,14 @@ func (m *HealthMonitorModel) addAlert(message string) {
 	}
 }
 
-// ClearAlerts clears all alerts
+// ClearAlerts clears all alerts.
 func (m *HealthMonitorModel) ClearAlerts() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.alerts = make([]string, 0)
 }
 
-// View renders the health monitor component
+// View renders the health monitor component.
 func (m *HealthMonitorModel) View() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -76,7 +81,7 @@ func (m *HealthMonitorModel) View() string {
 	return PanelStyle.Render(content)
 }
 
-// renderContent renders the health monitor content
+// renderContent renders the health monitor content.
 func (m *HealthMonitorModel) renderContent() string {
 	var sections []string
 
@@ -105,7 +110,7 @@ func (m *HealthMonitorModel) renderContent() string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-// renderCurrentHealth renders the current health status
+// renderCurrentHealth renders the current health status.
 func (m *HealthMonitorModel) renderCurrentHealth(result state.HealthCheckResult) string {
 	var lines []string
 
@@ -142,9 +147,9 @@ func (m *HealthMonitorModel) renderCurrentHealth(result state.HealthCheckResult)
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// renderAlerts renders the alerts section
+// renderAlerts renders the alerts section.
 func (m *HealthMonitorModel) renderAlerts() string {
-	var lines []string
+	var lines []string //nolint:prealloc
 	lines = append(lines, TitleStyle.Render("Alerts"))
 
 	for _, alert := range m.alerts {
@@ -154,7 +159,7 @@ func (m *HealthMonitorModel) renderAlerts() string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// renderHistory renders the health check history
+// renderHistory renders the health check history.
 func (m *HealthMonitorModel) renderHistory() string {
 	var lines []string
 	lines = append(lines, TitleStyle.Render("Recent Health Checks"))
@@ -178,7 +183,7 @@ func (m *HealthMonitorModel) renderHistory() string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// getStatusStyle returns the style for the overall status
+// getStatusStyle returns the style for the overall status.
 func (m *HealthMonitorModel) getStatusStyle(healthy, ready bool) lipgloss.Style {
 	if !healthy {
 		return StatusStoppedStyle
@@ -189,12 +194,12 @@ func (m *HealthMonitorModel) getStatusStyle(healthy, ready bool) lipgloss.Style 
 	return StatusRunningStyle
 }
 
-// getComponentStyle returns the style for a component status
+// getComponentStyle returns the style for a component status.
 func (m *HealthMonitorModel) getComponentStyle(status string) lipgloss.Style {
 	switch status {
 	case "ok":
 		return StatusRunningStyle
-	case "starting":
+	case statusStarting:
 		return StatusWarningStyle
 	default:
 		return StatusStoppedStyle

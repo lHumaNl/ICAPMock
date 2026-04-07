@@ -1,4 +1,5 @@
-// Package replay provides request replay functionality for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package replay
 
 import (
@@ -15,11 +16,8 @@ import (
 
 // Client is an ICAP client for sending requests to ICAP servers.
 type Client struct {
-	// Timeout is the maximum time to wait for a response.
+	Dialer  *net.Dialer
 	Timeout time.Duration
-
-	// Dialer is used to create connections.
-	Dialer *net.Dialer
 }
 
 // NewClient creates a new ICAP client with the specified timeout.
@@ -68,7 +66,7 @@ func (c *Client) Do(ctx context.Context, targetURL string, req *icap.Request) (*
 		return nil, fmt.Errorf("connecting to %s: %w", host, err)
 	}
 
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	// Set deadlines based on context
 	if deadline, ok := ctx.Deadline(); ok {
@@ -175,7 +173,7 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// ensure Reader interface
+// ensure Reader interface.
 var _ io.Reader = (*responseReader)(nil)
 
 type responseReader struct {

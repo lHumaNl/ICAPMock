@@ -1,12 +1,5 @@
-// Package ratelimit provides race condition tests for the sharded token bucket limiter.
-//
-// These tests verify that the sharded limiter is thread-safe and has no race conditions
-// when multiple goroutines concurrently:
-//   - Call Allow() for the same key (verifying no duplicate limiter creation)
-//   - Call SetRate() and SetBurst() (verifying atomic operations)
-//   - Mix Allow() and SetRate()/SetBurst() calls (verifying no data races)
-//
-// Run with: go test -race -run TestRaceCondition
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (

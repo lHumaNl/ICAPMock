@@ -1,4 +1,5 @@
-// Package main provides the subcommand framework for the ICAP Mock Server CLI.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (

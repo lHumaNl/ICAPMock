@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -331,8 +333,8 @@ func TestReplayPanelModel_getStatusIcon(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		success bool
 		want    string
+		success bool
 	}{
 		{"success", true, "✓"},
 		{"failure", false, "✗"},
@@ -365,8 +367,8 @@ func TestReplayRequestItem_FilterValue(t *testing.T) {
 func TestReplayRequestItem_Title(t *testing.T) {
 	tests := []struct {
 		name     string
-		selected bool
 		want     string
+		selected bool
 	}{
 		{"selected", true, "[✓]"},
 		{"not selected", false, "[ ]"},

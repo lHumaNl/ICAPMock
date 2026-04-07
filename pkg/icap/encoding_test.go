@@ -1,8 +1,10 @@
-// Package icap_test provides tests for ICAP chunked encoding.
+// Copyright 2026 ICAP Mock
+
 package icap_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -152,7 +154,7 @@ func TestChunkedReaderStreaming(t *testing.T) {
 		if n > maxMemory {
 			maxMemory = n
 		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -232,8 +234,8 @@ func TestParseChunkSize(t *testing.T) {
 // TestFormatChunkSize tests formatting size as hex string.
 func TestFormatChunkSize(t *testing.T) {
 	tests := []struct {
-		input int64
 		want  string
+		input int64
 	}{
 		{0, "0"},
 		{5, "5"},

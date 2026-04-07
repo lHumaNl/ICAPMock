@@ -1,10 +1,12 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
 	"github.com/charmbracelet/bubbles/key"
 )
 
-// keyMap defines the global key bindings
+// keyMap defines the global key bindings.
 type keyMap struct {
 	Quit      key.Binding
 	Save      key.Binding
@@ -22,7 +24,7 @@ type keyMap struct {
 	Screen6   key.Binding
 }
 
-// defaultKeyMap returns the default key bindings
+// defaultKeyMap returns the default key bindings.
 func defaultKeyMap() keyMap {
 	return keyMap{
 		Quit: key.NewBinding(
@@ -84,7 +86,7 @@ func defaultKeyMap() keyMap {
 	}
 }
 
-// ShortHelp returns context-sensitive help for the current screen
+// ShortHelp returns context-sensitive help for the current screen.
 func (m *Model) ShortHelp() []key.Binding {
 	keys := defaultKeyMap()
 	common := []key.Binding{keys.Quit, keys.Help}
@@ -125,7 +127,7 @@ func (m *Model) ShortHelp() []key.Binding {
 	}
 }
 
-// FullHelp returns full help text
+// FullHelp returns full help text.
 func (m *Model) FullHelp() [][]key.Binding {
 	keys := defaultKeyMap()
 	return [][]key.Binding{

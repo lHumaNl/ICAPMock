@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -12,48 +14,48 @@ import (
 	"github.com/icap-mock/icap-mock/internal/tui/utils"
 )
 
-// ReplayRequest represents a recorded request for replay
+// ReplayRequest represents a recorded request for replay.
 type ReplayRequest struct {
-	ID         string            `json:"id"`
 	Timestamp  time.Time         `json:"timestamp"`
+	Headers    map[string]string `json:"headers"`
+	ID         string            `json:"id"`
 	Method     string            `json:"method"`
 	Path       string            `json:"path"`
-	Headers    map[string]string `json:"headers"`
 	Body       string            `json:"body"`
-	StatusCode int               `json:"status_code"`
 	Response   string            `json:"response"`
+	StatusCode int               `json:"status_code"`
 	Duration   time.Duration     `json:"duration"`
 }
 
-// ReplayConfig represents replay configuration
+// ReplayConfig represents replay configuration.
 type ReplayConfig struct {
-	Speed     float64 `json:"speed"` // 0.5, 1, 2, 5
 	TargetURL string  `json:"target_url"`
+	Speed     float64 `json:"speed"`
 	Async     bool    `json:"async"`
 }
 
-// ReplayResult represents the result of a single request replay
+// ReplayResult represents the result of a single request replay.
 type ReplayResult struct {
 	ID         string        `json:"id"`
-	Success    bool          `json:"success"`
+	Error      string        `json:"error,omitempty"`
 	StatusCode int           `json:"status_code"`
 	Duration   time.Duration `json:"duration"`
-	Error      string        `json:"error,omitempty"`
+	Success    bool          `json:"success"`
 }
 
-// ReplaySummary represents the summary of a replay session
+// ReplaySummary represents the summary of a replay session.
 type ReplaySummary struct {
+	StartTime      time.Time      `json:"start_time"`
+	EndTime        time.Time      `json:"end_time"`
+	RequestResults []ReplayResult `json:"request_results"`
 	TotalRequests  int            `json:"total_requests"`
 	SuccessCount   int            `json:"success_count"`
 	FailureCount   int            `json:"failure_count"`
 	TotalDuration  time.Duration  `json:"total_duration"`
 	AverageLatency time.Duration  `json:"average_latency"`
-	StartTime      time.Time      `json:"start_time"`
-	EndTime        time.Time      `json:"end_time"`
-	RequestResults []ReplayResult `json:"request_results"`
 }
 
-// ReplayClient provides HTTP client for replay operations
+// ReplayClient provides HTTP client for replay operations.
 type ReplayClient struct {
 	baseURL     string
 	httpClient  *http.Client
@@ -61,7 +63,7 @@ type ReplayClient struct {
 	retryConfig utils.RetryConfig
 }
 
-// NewReplayClient creates a new replay client with connection pooling
+// NewReplayClient creates a new replay client with connection pooling.
 func NewReplayClient(host string, port int) *ReplayClient {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
@@ -82,7 +84,7 @@ func NewReplayClient(host string, port int) *ReplayClient {
 	}
 }
 
-// doRequestWithRetry executes an HTTP request with exponential backoff retry
+// doRequestWithRetry executes an HTTP request with exponential backoff retry.
 func (c *ReplayClient) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit error: %w", err)
@@ -91,10 +93,10 @@ func (c *ReplayClient) doRequestWithRetry(ctx context.Context, req *http.Request
 	return utils.DoWithRetryHTTP(ctx, c.retryConfig, c.httpClient, req)
 }
 
-// ListRequests fetches all recorded requests from the server
+// ListRequests fetches all recorded requests from the server.
 func (c *ReplayClient) ListRequests(ctx context.Context) ([]ReplayRequest, error) {
 	url := fmt.Sprintf("%s/replay/requests", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -103,7 +105,7 @@ func (c *ReplayClient) ListRequests(ctx context.Context) ([]ReplayRequest, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch requests: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("replay endpoint not found (status %d)", resp.StatusCode)
@@ -125,7 +127,7 @@ func (c *ReplayClient) ListRequests(ctx context.Context) ([]ReplayRequest, error
 	return requests, nil
 }
 
-// StartReplay starts replaying selected requests
+// StartReplay starts replaying selected requests.
 func (c *ReplayClient) StartReplay(ctx context.Context, requestIDs []string, config ReplayConfig) (string, error) {
 	// Validate requestIDs
 	if len(requestIDs) == 0 {
@@ -165,7 +167,7 @@ func (c *ReplayClient) StartReplay(ctx context.Context, requestIDs []string, con
 	if err != nil {
 		return "", fmt.Errorf("failed to start replay: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Read response body once
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB
@@ -193,10 +195,10 @@ func (c *ReplayClient) StartReplay(ctx context.Context, requestIDs []string, con
 	return result.ReplayID, nil
 }
 
-// StopReplay stops an ongoing replay
+// StopReplay stops an ongoing replay.
 func (c *ReplayClient) StopReplay(ctx context.Context, replayID string) error {
 	url := fmt.Sprintf("%s/replay/%s/stop", c.baseURL, replayID)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -205,7 +207,7 @@ func (c *ReplayClient) StopReplay(ctx context.Context, replayID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to stop replay: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Read response body once
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB
@@ -226,10 +228,10 @@ func (c *ReplayClient) StopReplay(ctx context.Context, replayID string) error {
 	return nil
 }
 
-// GetReplayStatus retrieves the current status of a replay
+// GetReplayStatus retrieves the current status of a replay.
 func (c *ReplayClient) GetReplayStatus(ctx context.Context, replayID string) (*ReplaySummary, error) {
 	url := fmt.Sprintf("%s/replay/%s/status", c.baseURL, replayID)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -238,7 +240,7 @@ func (c *ReplayClient) GetReplayStatus(ctx context.Context, replayID string) (*R
 	if err != nil {
 		return nil, fmt.Errorf("failed to get replay status: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("replay not found (status %d)", resp.StatusCode)
@@ -258,10 +260,10 @@ func (c *ReplayClient) GetReplayStatus(ctx context.Context, replayID string) (*R
 	return &summary, nil
 }
 
-// ExportReport exports a replay report
+// ExportReport exports a replay report.
 func (c *ReplayClient) ExportReport(ctx context.Context, replayID string, format string) ([]byte, error) {
 	url := fmt.Sprintf("%s/replay/%s/export?format=%s", c.baseURL, replayID, format)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -270,7 +272,7 @@ func (c *ReplayClient) ExportReport(ctx context.Context, replayID string, format
 	if err != nil {
 		return nil, fmt.Errorf("failed to export report: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("report not found (status %d)", resp.StatusCode)

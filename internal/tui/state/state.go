@@ -1,2 +1,3 @@
-// Package state provides shared state management for TUI components.
+// Copyright 2026 ICAP Mock
+
 package state

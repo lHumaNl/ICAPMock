@@ -1,5 +1,5 @@
-// Package storage provides benchmarks for scenario matching in both the basic
-// and sharded scenario registries.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (

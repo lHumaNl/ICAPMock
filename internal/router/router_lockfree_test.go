@@ -1,4 +1,5 @@
-// Package router tests for lock-free router implementation.
+// Copyright 2026 ICAP Mock
+
 package router
 
 import (
@@ -14,11 +15,11 @@ import (
 
 // mockHandler is a test handler implementation with atomic counter.
 type atomicMockHandler struct {
-	method  string
-	called  int64 // atomic counter
-	lastReq atomic.Pointer[icap.Request]
 	err     error
+	lastReq atomic.Pointer[icap.Request]
 	resp    *icap.Response
+	method  string
+	called  int64
 }
 
 // Handle implements Handler interface.
@@ -113,9 +114,9 @@ func runConcurrentWithResults(t *testing.T, n, iterations int, fn func(goroutine
 
 // concurrentResult represents the result of a concurrent operation.
 type concurrentResult struct {
+	Error       error
 	GoroutineID int
 	Iteration   int
-	Error       error
 	Duration    time.Duration
 }
 

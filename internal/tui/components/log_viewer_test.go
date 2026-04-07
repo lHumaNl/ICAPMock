@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -5,8 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 func TestNewLogViewerModel(t *testing.T) {

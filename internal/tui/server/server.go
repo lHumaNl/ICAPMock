@@ -1,2 +1,3 @@
-// Package server provides server integration for the TUI.
+// Copyright 2026 ICAP Mock
+
 package server

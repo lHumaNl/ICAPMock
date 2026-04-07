@@ -1,4 +1,5 @@
-// Package components provides UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -7,29 +8,30 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// Shared styles for components (exported for other components to use)
+// Shared styles for components (exported for other components to use).
 var (
-	// Title style - bold, primary color with padding
+	// Title style - bold, primary color with padding.
 	TitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "125", Dark: "205"}).
 			Bold(true).
 			Padding(0, 1)
 
-	// Subtitle style - muted color with padding
+	// Subtitle style - muted color with padding.
 	SubtitleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "240"}).
 			Padding(0, 1)
 
-	// Panel style - bordered with padding
+	// Panel style - bordered with padding.
 	PanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.AdaptiveColor{Light: "250", Dark: "245"}).
 			Padding(1)
 
-	// Status styles
+	// Status styles.
 	StatusRunningStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "46"}).
 				Bold(true)
@@ -42,26 +44,24 @@ var (
 				Foreground(lipgloss.AdaptiveColor{Light: "130", Dark: "208"}).
 				Bold(true)
 
-	// Error style
+	// Error style.
 	ErrorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "124", Dark: "196"}).
 			Bold(true)
 )
 
-// DashboardModel represents the dashboard screen model
+// DashboardModel represents the dashboard screen model.
 type DashboardModel struct {
-	width  int
-	height int
-	ready  bool
-
-	// Sub-components
 	metricsCards *MetricsCardsModel
 	metricsGraph *MetricsGraphModel
 	logPreview   *LogPreviewModel
 	connections  *ConnectionsModel
+	width        int
+	height       int
+	ready        bool
 }
 
-// NewDashboardModel creates a new dashboard model
+// NewDashboardModel creates a new dashboard model.
 func NewDashboardModel() *DashboardModel {
 	return &DashboardModel{
 		metricsCards: NewMetricsCardsModel(),
@@ -71,7 +71,7 @@ func NewDashboardModel() *DashboardModel {
 	}
 }
 
-// Init initializes the dashboard model
+// Init initializes the dashboard model.
 func (m *DashboardModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.metricsCards.Init(),
@@ -81,9 +81,9 @@ func (m *DashboardModel) Init() tea.Cmd {
 	)
 }
 
-// Update handles messages and updates the dashboard model
+// Update handles messages and updates the dashboard model.
 func (m *DashboardModel) Update(msg tea.Msg) (*DashboardModel, tea.Cmd) {
-	var cmds []tea.Cmd
+	var cmds []tea.Cmd //nolint:prealloc
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -109,19 +109,19 @@ func (m *DashboardModel) Update(msg tea.Msg) (*DashboardModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// SetMetrics updates metrics in dashboard components
+// SetMetrics updates metrics in dashboard components.
 func (m *DashboardModel) SetMetrics(snapshot *state.MetricsSnapshot) {
 	m.metricsCards.SetMetrics(snapshot)
 	m.metricsGraph.SetMetrics(snapshot)
 	m.connections.SetMetrics(snapshot)
 }
 
-// AddLogEntry adds a log entry to the preview
+// AddLogEntry adds a log entry to the preview.
 func (m *DashboardModel) AddLogEntry(entry *state.LogEntry) {
 	m.logPreview.AddEntry(entry)
 }
 
-// View renders the dashboard
+// View renders the dashboard.
 func (m *DashboardModel) View() string {
 	if !m.ready {
 		return "Loading dashboard..."
@@ -195,34 +195,34 @@ func (m *DashboardModel) View() string {
 	)
 }
 
-// MetricsCardsModel displays metric cards
+// MetricsCardsModel displays metric cards.
 type MetricsCardsModel struct {
 	metrics *state.MetricsSnapshot
 }
 
-// NewMetricsCardsModel creates a new metrics cards model
+// NewMetricsCardsModel creates a new metrics cards model.
 func NewMetricsCardsModel() *MetricsCardsModel {
 	return &MetricsCardsModel{
 		metrics: &state.MetricsSnapshot{},
 	}
 }
 
-// Init initializes metrics cards model
+// Init initializes metrics cards model.
 func (m *MetricsCardsModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates metrics cards model
+// Update handles messages and updates metrics cards model.
 func (m *MetricsCardsModel) Update(msg tea.Msg) (*MetricsCardsModel, tea.Cmd) {
 	return m, nil
 }
 
-// SetMetrics updates the current metrics
+// SetMetrics updates the current metrics.
 func (m *MetricsCardsModel) SetMetrics(snapshot *state.MetricsSnapshot) {
 	m.metrics = snapshot
 }
 
-// View renders the metrics cards
+// View renders the metrics cards.
 func (m *MetricsCardsModel) View() string {
 	// Define metric cards
 	cards := []struct {
@@ -240,7 +240,7 @@ func (m *MetricsCardsModel) View() string {
 	}
 
 	// Render each card
-	var renderedCards []string
+	var renderedCards []string //nolint:prealloc
 	for _, card := range cards {
 		cardStyle := lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
@@ -270,7 +270,7 @@ func (m *MetricsCardsModel) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, renderedCards...)
 }
 
-// getErrorColor returns color based on error count
+// getErrorColor returns color based on error count.
 func (m *MetricsCardsModel) getErrorColor() lipgloss.AdaptiveColor {
 	if m.metrics.Errors > 0 {
 		return lipgloss.AdaptiveColor{Light: "124", Dark: "196"} // Red
@@ -278,7 +278,7 @@ func (m *MetricsCardsModel) getErrorColor() lipgloss.AdaptiveColor {
 	return lipgloss.AdaptiveColor{Light: "28", Dark: "46"} // Green
 }
 
-// MetricsGraphModel displays ASCII charts for metrics trends
+// MetricsGraphModel displays ASCII charts for metrics trends.
 type MetricsGraphModel struct {
 	history    []*state.MetricsSnapshot
 	maxHistory int
@@ -286,7 +286,7 @@ type MetricsGraphModel struct {
 	height     int
 }
 
-// NewMetricsGraphModel creates a new metrics graph model
+// NewMetricsGraphModel creates a new metrics graph model.
 func NewMetricsGraphModel() *MetricsGraphModel {
 	return &MetricsGraphModel{
 		history:    make([]*state.MetricsSnapshot, 0),
@@ -296,12 +296,12 @@ func NewMetricsGraphModel() *MetricsGraphModel {
 	}
 }
 
-// Init initializes metrics graph model
+// Init initializes metrics graph model.
 func (m *MetricsGraphModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates metrics graph model
+// Update handles messages and updates metrics graph model.
 func (m *MetricsGraphModel) Update(msg tea.Msg) (*MetricsGraphModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -314,7 +314,7 @@ func (m *MetricsGraphModel) Update(msg tea.Msg) (*MetricsGraphModel, tea.Cmd) {
 	return m, nil
 }
 
-// SetMetrics updates the history with new snapshot
+// SetMetrics updates the history with new snapshot.
 func (m *MetricsGraphModel) SetMetrics(snapshot *state.MetricsSnapshot) {
 	m.history = append(m.history, snapshot)
 	if len(m.history) > m.maxHistory {
@@ -322,7 +322,7 @@ func (m *MetricsGraphModel) SetMetrics(snapshot *state.MetricsSnapshot) {
 	}
 }
 
-// View renders the metrics graph
+// View renders the metrics graph.
 func (m *MetricsGraphModel) View() string {
 	if len(m.history) == 0 {
 		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "240"}).Render("Waiting for metrics data...")
@@ -352,7 +352,7 @@ func (m *MetricsGraphModel) View() string {
 	)
 }
 
-// extractRPS extracts RPS values from history
+// extractRPS extracts RPS values from history.
 func (m *MetricsGraphModel) extractRPS() []float64 {
 	values := make([]float64, len(m.history))
 	for i, snapshot := range m.history {
@@ -361,7 +361,7 @@ func (m *MetricsGraphModel) extractRPS() []float64 {
 	return values
 }
 
-// extractLatency extracts latency values from history
+// extractLatency extracts latency values from history.
 func (m *MetricsGraphModel) extractLatency() []float64 {
 	values := make([]float64, len(m.history))
 	for i, snapshot := range m.history {
@@ -370,7 +370,7 @@ func (m *MetricsGraphModel) extractLatency() []float64 {
 	return values
 }
 
-// createGraph creates an ASCII chart from values
+// createGraph creates an ASCII chart from values.
 func (m *MetricsGraphModel) createGraph(values []float64, title string, color lipgloss.AdaptiveColor) string {
 	if len(values) == 0 {
 		return SubtitleStyle.Render("No data available")
@@ -393,7 +393,7 @@ func (m *MetricsGraphModel) createGraph(values []float64, title string, color li
 	}
 
 	// Generate ASCII chart
-	var lines []string
+	var lines []string //nolint:prealloc
 	lines = append(lines, fmt.Sprintf("%s: %s", title, colorValue(m.currentValue(values), color)))
 
 	chartLine := m.generateChartLine(values, min, max, graphWidth, color)
@@ -408,7 +408,7 @@ func (m *MetricsGraphModel) createGraph(values []float64, title string, color li
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// findMinMax finds minimum and maximum values
+// findMinMax finds minimum and maximum values.
 func (m *MetricsGraphModel) findMinMax(values []float64) (float64, float64) {
 	if len(values) == 0 {
 		return 0, 0
@@ -429,7 +429,7 @@ func (m *MetricsGraphModel) findMinMax(values []float64) (float64, float64) {
 	return min, max
 }
 
-// currentValue returns the most recent value
+// currentValue returns the most recent value.
 func (m *MetricsGraphModel) currentValue(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
@@ -437,7 +437,7 @@ func (m *MetricsGraphModel) currentValue(values []float64) float64 {
 	return values[len(values)-1]
 }
 
-// generateChartLine generates a single line of ASCII chart
+// generateChartLine generates a single line of ASCII chart.
 func (m *MetricsGraphModel) generateChartLine(values []float64, min, max float64, width int, color lipgloss.AdaptiveColor) string {
 	if len(values) == 0 {
 		return ""
@@ -489,19 +489,19 @@ func (m *MetricsGraphModel) generateChartLine(values []float64, min, max float64
 	return colorStyle.Render(line)
 }
 
-// colorValue formats a value with color
+// colorValue formats a value with color.
 func colorValue(value float64, color lipgloss.AdaptiveColor) string {
 	style := lipgloss.NewStyle().Foreground(color).Bold(true)
 	return style.Render(fmt.Sprintf("%.2f", value))
 }
 
-// LogPreviewModel displays recent log entries
+// LogPreviewModel displays recent log entries.
 type LogPreviewModel struct {
 	entries  []*state.LogEntry
 	maxLines int
 }
 
-// NewLogPreviewModel creates a new log preview model
+// NewLogPreviewModel creates a new log preview model.
 func NewLogPreviewModel() *LogPreviewModel {
 	return &LogPreviewModel{
 		entries:  make([]*state.LogEntry, 0),
@@ -509,17 +509,17 @@ func NewLogPreviewModel() *LogPreviewModel {
 	}
 }
 
-// Init initializes log preview model
+// Init initializes log preview model.
 func (m *LogPreviewModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates log preview model
+// Update handles messages and updates log preview model.
 func (m *LogPreviewModel) Update(msg tea.Msg) (*LogPreviewModel, tea.Cmd) {
 	return m, nil
 }
 
-// AddEntry adds a log entry
+// AddEntry adds a log entry.
 func (m *LogPreviewModel) AddEntry(entry *state.LogEntry) {
 	m.entries = append(m.entries, entry)
 	if len(m.entries) > m.maxLines {
@@ -527,7 +527,7 @@ func (m *LogPreviewModel) AddEntry(entry *state.LogEntry) {
 	}
 }
 
-// View renders the log preview
+// View renders the log preview.
 func (m *LogPreviewModel) View() string {
 	if len(m.entries) == 0 {
 		return SubtitleStyle.Render("No recent logs")
@@ -556,7 +556,7 @@ func (m *LogPreviewModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, rendered...)
 }
 
-// truncate truncates a string to max length
+// truncate truncates a string to max length.
 func truncate(s string, maxLen int) string {
 	if maxLen < 0 || len(s) == 0 {
 		return ""
@@ -570,34 +570,34 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// ConnectionsModel displays connection information
+// ConnectionsModel displays connection information.
 type ConnectionsModel struct {
 	metrics *state.MetricsSnapshot
 }
 
-// NewConnectionsModel creates a new connections model
+// NewConnectionsModel creates a new connections model.
 func NewConnectionsModel() *ConnectionsModel {
 	return &ConnectionsModel{
 		metrics: &state.MetricsSnapshot{},
 	}
 }
 
-// Init initializes connections model
+// Init initializes connections model.
 func (m *ConnectionsModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates connections model
+// Update handles messages and updates connections model.
 func (m *ConnectionsModel) Update(msg tea.Msg) (*ConnectionsModel, tea.Cmd) {
 	return m, nil
 }
 
-// SetMetrics updates the current metrics
+// SetMetrics updates the current metrics.
 func (m *ConnectionsModel) SetMetrics(snapshot *state.MetricsSnapshot) {
 	m.metrics = snapshot
 }
 
-// View renders the connections panel
+// View renders the connections panel.
 func (m *ConnectionsModel) View() string {
 	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "46"}).Bold(true)
 	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "240"})
@@ -614,7 +614,7 @@ func (m *ConnectionsModel) View() string {
 	)
 }
 
-// formatBytes formats bytes into human-readable string
+// formatBytes formats bytes into human-readable string.
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -628,7 +628,7 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// getLogLevelStyle returns style for log level
+// getLogLevelStyle returns style for log level.
 func getLogLevelStyle(level string) lipgloss.Style {
 	switch level {
 	case "ERROR":

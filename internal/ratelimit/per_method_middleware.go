@@ -1,15 +1,5 @@
-// Package ratelimit provides middleware for per-method rate limiting.
-//
-// This file implements middleware that:
-//   - Extracts ICAP method from requests
-//   - Applies per-method rate limiting
-//   - Integrates with per-client limiting for combined client+method limiting
-//   - Records Prometheus metrics
-//
-// The middleware supports:
-//   - Per-method only rate limiting
-//   - Per-client+per-method combined rate limiting
-//   - Graceful fallback to global rate limiting
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -97,7 +87,7 @@ func (m *PerMethodMiddleware) Allow(ctx context.Context, req *icap.Request) (all
 
 		// If both per-method and per-client are enabled,
 		// check combined client+method rate limiting
-		if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && req.ClientIP != "unknown" {
+		if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && req.ClientIP != clientIPUnknown {
 			clientMethodKey := ClientMethodKey(req.ClientIP, method)
 			allowed, ok := m.perClientLimiter.Allow(req.ClientIP)
 
@@ -158,7 +148,7 @@ func (m *PerMethodMiddleware) Wait(ctx context.Context, req *icap.Request) error
 
 		// If both per-method and per-client are enabled,
 		// check combined limiting
-		if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && req.ClientIP != "unknown" {
+		if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && req.ClientIP != clientIPUnknown {
 			clientMethodKey := ClientMethodKey(req.ClientIP, method)
 			allowed, _ := m.perClientLimiter.Allow(req.ClientIP)
 

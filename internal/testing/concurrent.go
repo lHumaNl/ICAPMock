@@ -1,4 +1,5 @@
-// Package testing provides concurrent test utilities for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package testing
 
 import (
@@ -278,17 +279,10 @@ func RunConcurrentStress(t *testing.T, cfg StressConfig, fn func(goroutineID, it
 
 // ConcurrentResult represents the result of a concurrent operation.
 type ConcurrentResult struct {
-	// GoroutineID is the ID of the goroutine that produced this result
+	Error       error
 	GoroutineID int
-
-	// Iteration is the iteration number (for multi-iteration tests)
-	Iteration int
-
-	// Error is any error that occurred during the operation
-	Error error
-
-	// Duration is the time taken for the operation
-	Duration time.Duration
+	Iteration   int
+	Duration    time.Duration
 }
 
 // RunConcurrentWithResults executes a function concurrently and collects results.

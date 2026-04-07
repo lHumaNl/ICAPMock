@@ -1,4 +1,5 @@
-// Package main provides the entry point for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -15,16 +16,15 @@ import (
 
 // MatchTestCommand handles the match-test subcommand.
 type MatchTestCommand struct {
-	fs *flag.FlagSet
-
+	fs           *flag.FlagSet
 	scenariosDir string
 	method       string
 	uri          string
 	path         string
 	body         string
-	headers      stringSlice
 	clientIP     string
 	httpMethod   string
+	headers      stringSlice
 	verbose      bool
 }
 
@@ -127,66 +127,66 @@ func (c *MatchTestCommand) Run(ctx context.Context) error {
 	}
 
 	// Print request summary
-	fmt.Fprintf(os.Stdout, "Request: %s %s\n", c.method, uri)
+	fmt.Fprintf(os.Stdout, "Request: %s %s\n", c.method, uri) //nolint:errcheck
 	if c.httpMethod != "" {
-		fmt.Fprintf(os.Stdout, "  HTTP method: %s\n", c.httpMethod)
+		fmt.Fprintf(os.Stdout, "  HTTP method: %s\n", c.httpMethod) //nolint:errcheck
 	}
 	if c.body != "" {
 		bodyPreview := c.body
 		if len(bodyPreview) > 80 {
 			bodyPreview = bodyPreview[:80] + "..."
 		}
-		fmt.Fprintf(os.Stdout, "  Body: %s\n", bodyPreview)
+		fmt.Fprintf(os.Stdout, "  Body: %s\n", bodyPreview) //nolint:errcheck
 	}
 	if c.clientIP != "" {
-		fmt.Fprintf(os.Stdout, "  Client IP: %s\n", c.clientIP)
+		fmt.Fprintf(os.Stdout, "  Client IP: %s\n", c.clientIP) //nolint:errcheck
 	}
 	for _, h := range c.headers {
-		fmt.Fprintf(os.Stdout, "  Header: %s\n", h)
+		fmt.Fprintf(os.Stdout, "  Header: %s\n", h) //nolint:errcheck
 	}
-	fmt.Fprintln(os.Stdout)
+	fmt.Fprintln(os.Stdout) //nolint:errcheck
 
 	// Test each scenario
-	fmt.Fprintf(os.Stdout, "Scenarios (%d loaded):\n\n", len(scenarios))
+	fmt.Fprintf(os.Stdout, "Scenarios (%d loaded):\n\n", len(scenarios)) //nolint:errcheck
 
 	matched := false
 	for _, s := range scenarios {
 		result := explainMatch(s, req)
 		if result.matched {
-			fmt.Fprintf(os.Stdout, "  >>> MATCH: %s (priority: %d)\n", s.Name, s.Priority)
-			fmt.Fprintf(os.Stdout, "      Response: ICAP %d", s.Response.ICAPStatus)
+			fmt.Fprintf(os.Stdout, "  >>> MATCH: %s (priority: %d)\n", s.Name, s.Priority) //nolint:errcheck
+			fmt.Fprintf(os.Stdout, "      Response: ICAP %d", s.Response.ICAPStatus)       //nolint:errcheck
 			if s.Response.HTTPStatus != 0 {
-				fmt.Fprintf(os.Stdout, ", HTTP %d", s.Response.HTTPStatus)
+				fmt.Fprintf(os.Stdout, ", HTTP %d", s.Response.HTTPStatus) //nolint:errcheck
 			}
 			if s.Response.Delay > 0 {
-				fmt.Fprintf(os.Stdout, ", delay %s", s.Response.Delay)
+				fmt.Fprintf(os.Stdout, ", delay %s", s.Response.Delay) //nolint:errcheck
 			}
-			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(os.Stdout) //nolint:errcheck
 			if c.verbose {
 				for _, check := range result.checks {
-					fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check)
+					fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
 				}
 			}
-			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(os.Stdout) //nolint:errcheck
 			matched = true
 			break // first match wins (sorted by priority)
 		} else if c.verbose {
-			fmt.Fprintf(os.Stdout, "  --- SKIP: %s (priority: %d)\n", s.Name, s.Priority)
+			fmt.Fprintf(os.Stdout, "  --- SKIP: %s (priority: %d)\n", s.Name, s.Priority) //nolint:errcheck
 			for _, check := range result.checks {
 				if strings.HasPrefix(check, "FAIL") {
-					fmt.Fprintf(os.Stdout, "      [FAIL] %s\n", check[5:])
+					fmt.Fprintf(os.Stdout, "      [FAIL] %s\n", check[5:]) //nolint:errcheck
 				} else {
-					fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check)
+					fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
 				}
 			}
-			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(os.Stdout) //nolint:errcheck
 		}
 	}
 
 	if !matched {
-		fmt.Fprintln(os.Stdout, "  No scenario matched.")
+		fmt.Fprintln(os.Stdout, "  No scenario matched.") //nolint:errcheck
 		if !c.verbose {
-			fmt.Fprintln(os.Stdout, "  Tip: use --verbose to see why each scenario was skipped.")
+			fmt.Fprintln(os.Stdout, "  Tip: use --verbose to see why each scenario was skipped.") //nolint:errcheck
 		}
 		return fmt.Errorf("no matching scenario found")
 	}
@@ -195,8 +195,8 @@ func (c *MatchTestCommand) Run(ctx context.Context) error {
 }
 
 type matchResult struct {
-	matched bool
 	checks  []string
+	matched bool
 }
 
 func explainMatch(s *storage.Scenario, req *icap.Request) matchResult {
@@ -267,7 +267,7 @@ func explainMatch(s *storage.Scenario, req *icap.Request) matchResult {
 				return matchResult{matched: false, checks: checks}
 			}
 		} else {
-			checks = append(checks, fmt.Sprintf("FAIL body_pattern: no HTTP body to match against"))
+			checks = append(checks, "FAIL body_pattern: no HTTP body to match against")
 			return matchResult{matched: false, checks: checks}
 		}
 	}

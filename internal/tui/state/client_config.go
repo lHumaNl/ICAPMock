@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
@@ -5,22 +7,22 @@ import (
 	"time"
 )
 
-// ClientConfig holds configuration for TUI clients
+// ClientConfig holds configuration for TUI clients.
 type ClientConfig struct {
-	ServerHost            string // ICAP server host (default: localhost)
-	ServerPort            int    // ICAP server port (default: 1344)
+	ServerHost            string
 	MetricsURL            string
 	LogsURL               string
 	StatusURL             string
-	Timeout               int           // timeout in seconds
-	MaxConcurrentRequests int           // maximum concurrent requests
-	RequestInterval       time.Duration // minimum interval between requests
-	RetryMax              int           // maximum retry attempts
-	MaxHistory            int           // maximum metrics history entries (default: 100)
-	MaxLogs               int           // maximum log entries (default: 100)
+	ServerPort            int
+	Timeout               int
+	MaxConcurrentRequests int
+	RequestInterval       time.Duration
+	RetryMax              int
+	MaxHistory            int
+	MaxLogs               int
 }
 
-// DefaultClientConfig returns default client configuration
+// DefaultClientConfig returns default client configuration.
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
 		ServerHost:            "localhost",
@@ -37,7 +39,7 @@ func DefaultClientConfig() *ClientConfig {
 	}
 }
 
-// Validate validates the client configuration
+// Validate validates the client configuration.
 func (c *ClientConfig) Validate() error {
 	if c.MetricsURL == "" {
 		return fmt.Errorf("metrics URL cannot be empty")

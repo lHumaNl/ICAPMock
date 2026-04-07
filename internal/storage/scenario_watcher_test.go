@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -544,10 +544,10 @@ func TestScenarioWatcher_IsRelevantEvent(t *testing.T) {
 	absPath, _ := filepath.Abs(scenarioFile)
 
 	tests := []struct {
-		name     string
 		event    fsnotify.Event
-		watchDir bool
+		name     string
 		filePath string
+		watchDir bool
 		expected bool
 	}{
 		{

@@ -1,26 +1,5 @@
-// Package router provides ICAP request routing functionality.
-// It implements path-based routing for ICAP requests, directing them to
-// appropriate handlers based on the URI path.
-//
-// ICAP URI format: icap://server:port/service-path
-// Service paths: /reqmod, /respmod, /options (or custom paths)
-//
-// The router is thread-safe and supports concurrent route registration
-// and request serving.
-//
-// Example usage:
-//
-//	r := router.NewRouter()
-//
-//	// Register handlers
-//	r.Handle("/reqmod", &ReqmodHandler{})
-//	r.Handle("/respmod", &RespmodHandler{})
-//	r.HandleFunc("/options", func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
-//	    return icap.NewOptionsResponse("tag123", []string{"REQMOD", "RESPMOD"}, 100, 3600), nil
-//	})
-//
-//	// Serve requests
-//	resp, err := r.Serve(ctx, req)
+// Copyright 2026 ICAP Mock
+
 package router
 
 import (
@@ -37,11 +16,8 @@ import (
 
 // Route represents a registered route with its path and handler.
 type Route struct {
-	// Path is the URI path that this route matches.
-	Path string
-
-	// Handler is the handler for this route.
 	Handler handler.Handler
+	Path    string
 }
 
 // Router implements ICAP request routing.
@@ -58,8 +34,8 @@ type Route struct {
 // It includes an LRU cache for route lookups to reduce latency for
 // frequently accessed routes.
 type Router struct {
-	routes sync.Map // map[string]handler.Handler - lock-free for reads
 	cache  *RouteCache
+	routes sync.Map
 }
 
 // NewRouter creates a new Router with an empty route table.
@@ -152,7 +128,7 @@ func (r *Router) Serve(ctx context.Context, req *icap.Request) (*icap.Response, 
 		if !ok {
 			return nil, false
 		}
-		return val.(handler.Handler), true
+		return val.(handler.Handler), true //nolint:errcheck
 	}, req)
 
 	if h == nil {
@@ -171,8 +147,8 @@ func (r *Router) Routes() []Route {
 	var routes []Route
 
 	r.routes.Range(func(key, value interface{}) bool {
-		path := key.(string)
-		handler := value.(handler.Handler)
+		path := key.(string)               //nolint:errcheck
+		handler := value.(handler.Handler) //nolint:errcheck
 		routes = append(routes, Route{
 			Path:    path,
 			Handler: handler,

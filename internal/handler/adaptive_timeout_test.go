@@ -1,4 +1,5 @@
-// Package handler_test provides tests for the adaptive timeout handler.
+// Copyright 2026 ICAP Mock
+
 package handler_test
 
 import (
@@ -7,10 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TestAdaptiveTimeoutTracker_RecordDuration tests recording request durations.

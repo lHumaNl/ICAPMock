@@ -1,4 +1,5 @@
-// Package server provides TLS certificate expiry monitoring.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -18,22 +19,14 @@ import (
 // TLSCertificateMonitor monitors TLS certificate expiry and updates metrics.
 // It periodically checks the certificate and logs warnings when it approaches expiry.
 type TLSCertificateMonitor struct {
-	// config is the TLS configuration.
-	config *config.TLSConfig
-	// logger is the structured logger for monitoring.
-	logger *slog.Logger
-	// metrics is the metrics collector for updating certificate expiry metrics.
-	metrics *metrics.Collector
-	// stopChan signals the monitor to stop.
-	stopChan chan struct{}
-	// stopOnce ensures Stop() is safe to call multiple times.
-	stopOnce sync.Once
-	// checkInterval is the interval between certificate checks.
+	config        *config.TLSConfig
+	logger        *slog.Logger
+	metrics       *metrics.Collector
+	stopChan      chan struct{}
+	certFile      string
 	checkInterval time.Duration
-	// warningDays is the number of days before expiry to log warnings.
-	warningDays int
-	// certFile is the path to the TLS certificate file.
-	certFile string
+	warningDays   int
+	stopOnce      sync.Once
 }
 
 // NewTLSCertificateMonitor creates a new TLS certificate monitor.

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
@@ -7,12 +9,15 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/icap-mock/icap-mock/internal/tui/components"
 	"github.com/icap-mock/icap-mock/internal/tui/server"
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// Update handles incoming messages and updates the model
+const keyEsc = "esc"
+
+// Update handles incoming messages and updates the model.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -27,7 +32,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Dismiss help overlay on ? or Esc
 		if m.showHelp {
-			if msg.String() == "?" || msg.String() == "esc" {
+			if msg.String() == "?" || msg.String() == keyEsc {
 				m.showHelp = false
 				return m, nil
 			}
@@ -36,7 +41,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Reset confirmExit on any key other than Esc
-		if msg.String() != "esc" {
+		if msg.String() != keyEsc {
 			m.confirmExit = false
 		}
 
@@ -181,7 +186,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newModel, _ := m.changeScreen(prev)
 			return newModel, nil
 
-		case "esc":
+		case keyEsc:
 			if m.currentScreen != ScreenDashboard {
 				// Check for unsaved changes on config screen
 				if m.currentScreen == ScreenConfig && m.configEditor != nil && m.configEditor.IsModified() {
@@ -423,7 +428,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Success {
 			m.lastMessage = "Configuration saved successfully to " + msg.FilePath
 			if m.configEditor != nil {
-				m.configEditor.SetContent(m.configEditor.GetContent(), msg.FilePath)
+				_ = m.configEditor.SetContent(m.configEditor.GetContent(), msg.FilePath)
 			}
 		} else {
 			m.lastMessage = "Failed to save configuration: " + msg.Error
@@ -433,7 +438,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// changeScreen switches to a different screen
+// changeScreen switches to a different screen.
 func (m *Model) changeScreen(screen Screen) (tea.Model, tea.Cmd) {
 	if m.currentScreen == screen {
 		return m, nil
@@ -450,7 +455,7 @@ func (m *Model) changeScreen(screen Screen) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// loadReplayRequestsCmd loads replay requests from the server
+// loadReplayRequestsCmd loads replay requests from the server.
 func (m *Model) loadReplayRequestsCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.replayClient != nil {
@@ -483,7 +488,7 @@ func (m *Model) loadReplayRequestsCmd() tea.Cmd {
 	}
 }
 
-// saveConfigCmd saves the current configuration
+// saveConfigCmd saves the current configuration.
 func (m *Model) saveConfigCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.configEditor == nil {
@@ -535,7 +540,7 @@ func (m *Model) saveConfigCmd() tea.Cmd {
 	}
 }
 
-// deleteScenarioCmd deletes a scenario
+// deleteScenarioCmd deletes a scenario.
 func (m *Model) deleteScenarioCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		if m.scenarioClient == nil {
@@ -554,7 +559,7 @@ func (m *Model) deleteScenarioCmd(name string) tea.Cmd {
 	}
 }
 
-// updateScenarioCmd updates a scenario
+// updateScenarioCmd updates a scenario.
 func (m *Model) updateScenarioCmd(oldName, newName, yamlContent string) tea.Cmd {
 	return func() tea.Msg {
 		if m.scenarioClient == nil {
@@ -578,7 +583,7 @@ func (m *Model) updateScenarioCmd(oldName, newName, yamlContent string) tea.Cmd 
 	}
 }
 
-// createScenarioCmd creates a new scenario
+// createScenarioCmd creates a new scenario.
 func (m *Model) createScenarioCmd(name, yamlContent string) tea.Cmd {
 	return func() tea.Msg {
 		if m.scenarioClient == nil {
@@ -602,7 +607,7 @@ func (m *Model) createScenarioCmd(name, yamlContent string) tea.Cmd {
 	}
 }
 
-// reloadScenariosCmd reloads scenarios from server
+// reloadScenariosCmd reloads scenarios from server.
 func (m *Model) reloadScenariosCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.scenarioClient == nil {

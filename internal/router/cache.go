@@ -1,4 +1,5 @@
-// Package router provides ICAP request routing functionality with caching.
+// Copyright 2026 ICAP Mock
+
 package router
 
 import (
@@ -30,10 +31,10 @@ type CacheEntry struct {
 
 // LRUNode represents a node in the doubly-linked list for LRU tracking.
 type LRUNode struct {
-	key   string
 	prev  *LRUNode
 	next  *LRUNode
 	entry *CacheEntry
+	key   string
 }
 
 // RouteCache implements an LRU cache for route lookups.
@@ -45,26 +46,13 @@ type LRUNode struct {
 // The cache is thread-safe and supports concurrent Get/Put/Delete operations.
 // LRU eviction is O(1) using a doubly-linked list.
 type RouteCache struct {
-	// cache stores the cached entries using a mutex-protected map.
-	cache map[string]*LRUNode
-
-	// head points to the most recently used (MRU) node.
-	head *LRUNode
-
-	// tail points to the least recently used (LRU) node.
-	tail *LRUNode
-
-	// mu protects all cache operations.
-	mu sync.RWMutex
-
-	// maxEntries is the maximum number of entries the cache can hold.
+	cache      map[string]*LRUNode
+	head       *LRUNode
+	tail       *LRUNode
+	metrics    *CacheMetrics
 	maxEntries int
-
-	// ttl is the time-to-live for cache entries. Zero means no expiration.
-	ttl time.Duration
-
-	// metrics records cache operations (hits, misses, evictions).
-	metrics *CacheMetrics
+	ttl        time.Duration
+	mu         sync.RWMutex
 }
 
 // CacheMetrics tracks cache performance metrics using atomic counters

@@ -1,4 +1,5 @@
-// Package main provides the entry point for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -9,8 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/icap-mock/icap-mock/internal/storage"
 	"gopkg.in/yaml.v3"
+
+	"github.com/icap-mock/icap-mock/internal/storage"
 )
 
 // ValidateCommand handles the validate-scenarios subcommand.
@@ -95,7 +97,7 @@ func (c *ValidateCommand) Run(_ context.Context) error {
 	for _, filePath := range yamlFiles {
 		fmt.Printf("\nFile: %s\n", filePath)
 
-		data, err := os.ReadFile(filePath)
+		data, err := os.ReadFile(filePath) //nolint:gosec // path is validated
 		if err != nil {
 			fmt.Printf("  [FAIL] cannot read file: %v\n", err)
 			allPassed = false

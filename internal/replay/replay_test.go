@@ -1,4 +1,5 @@
-// Package replay provides request replay functionality for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package replay
 
 import (
@@ -22,7 +23,7 @@ import (
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
-// TestReplayerStart tests that the replayer starts correctly
+// TestReplayerStart tests that the replayer starts correctly.
 func TestReplayerStart(t *testing.T) {
 	// Create temp directory with test requests
 	tmpDir := t.TempDir()
@@ -79,7 +80,7 @@ func TestReplayerStart(t *testing.T) {
 	}
 }
 
-// TestReplayerSpeed tests that speed control works correctly
+// TestReplayerSpeed tests that speed control works correctly.
 func TestReplayerSpeed(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 2)
@@ -109,7 +110,7 @@ func TestReplayerSpeed(t *testing.T) {
 	}
 }
 
-// TestReplayerFilter tests that filtering works correctly
+// TestReplayerFilter tests that filtering works correctly.
 func TestReplayerFilter(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -187,7 +188,7 @@ func TestReplayerFilter(t *testing.T) {
 	mu.Unlock()
 }
 
-// TestReplayerCallback tests that the callback is called correctly
+// TestReplayerCallback tests that the callback is called correctly.
 func TestReplayerCallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 2)
@@ -231,7 +232,7 @@ func TestReplayerCallback(t *testing.T) {
 	mu.Unlock()
 }
 
-// TestReplayerLoop tests that loop mode works correctly
+// TestReplayerLoop tests that loop mode works correctly.
 func TestReplayerLoop(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 2)
@@ -274,7 +275,7 @@ func TestReplayerLoop(t *testing.T) {
 	mu.Unlock()
 }
 
-// TestLoadRequestFiles tests loading request files
+// TestLoadRequestFiles tests loading request files.
 func TestLoadRequestFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -327,15 +328,15 @@ func TestLoadRequestFiles(t *testing.T) {
 	}
 }
 
-// TestParseFilterFromFlags tests parsing filter from CLI flags
+// TestParseFilterFromFlags tests parsing filter from CLI flags.
 func TestParseFilterFromFlags(t *testing.T) {
 	tests := []struct {
+		checkFilter func(t *testing.T, f storage.RequestFilter)
 		name        string
 		from        string
 		to          string
 		method      string
 		wantErr     bool
-		checkFilter func(t *testing.T, f storage.RequestFilter)
 	}{
 		{
 			name:    "empty filter",
@@ -402,7 +403,7 @@ func TestParseFilterFromFlags(t *testing.T) {
 	}
 }
 
-// TestClient tests the ICAP client
+// TestClient tests the ICAP client.
 func TestClient(t *testing.T) {
 	// Start a mock ICAP server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -442,7 +443,7 @@ func TestClient(t *testing.T) {
 	}
 }
 
-// TestReplayerMetrics tests that metrics are recorded correctly
+// TestReplayerMetrics tests that metrics are recorded correctly.
 func TestReplayerMetrics(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 2)
@@ -475,7 +476,7 @@ func TestReplayerMetrics(t *testing.T) {
 	}
 }
 
-// TestReplayerStop tests that Stop works correctly
+// TestReplayerStop tests that Stop works correctly.
 func TestReplayerStop(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 10)
@@ -514,7 +515,7 @@ func TestReplayerStop(t *testing.T) {
 	}
 }
 
-// TestReplayerContextCancellation tests context cancellation
+// TestReplayerContextCancellation tests context cancellation.
 func TestReplayerContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 10)
@@ -549,7 +550,7 @@ func TestReplayerContextCancellation(t *testing.T) {
 	wg.Wait()
 }
 
-// TestReplayerAlreadyRunning tests that Start returns error when already running
+// TestReplayerAlreadyRunning tests that Start returns error when already running.
 func TestReplayerAlreadyRunning(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 5)
@@ -587,7 +588,7 @@ func TestReplayerAlreadyRunning(t *testing.T) {
 	wg.Wait()
 }
 
-// TestReplayerProgress tests the progress callback
+// TestReplayerProgress tests the progress callback.
 func TestReplayerProgress(t *testing.T) {
 	tmpDir := t.TempDir()
 	createTestRequests(t, tmpDir, 3)

@@ -1,4 +1,5 @@
-// Package server provides the ICAP server implementation.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -96,82 +97,42 @@ func DefaultGoroutineMonitorConfig() GoroutineMonitorConfig {
 
 // GoroutineStats holds current goroutine monitoring statistics.
 type GoroutineStats struct {
-	// Baseline is the goroutine count recorded at server startup.
-	Baseline int
-	// Current is the most recent goroutine count.
-	Current int
-	// Peak is the highest goroutine count observed.
-	Peak int
-	// GrowthRate is the percentage growth from baseline (0-100+).
-	GrowthRate float64
-	// ConsecutiveGrowth is the number of consecutive checks showing growth.
+	LastCheck         time.Time
+	AlertLevel        string
+	Baseline          int
+	Current           int
+	Peak              int
+	GrowthRate        float64
 	ConsecutiveGrowth int
-	// LastCheck is the time of the last monitoring check.
-	LastCheck time.Time
-	// AlertLevel indicates the current alert level (normal, warning, critical).
-	AlertLevel string
 }
 
 // ICAPServer implements the ICAP Server interface.
 // It handles incoming ICAP connections and routes requests to handlers.
 type ICAPServer struct {
-	// config holds the server configuration.
-	config *config.ServerConfig
-	// listener is the network listener used for accepting connections.
-	// For non-TLS: points directly to tcpListener.
-	// For TLS: wraps tcpListener with TLS (tls.NewListener).
-	// Accept() is called on this listener, but deadline control uses tcpListener.
-	listener net.Listener
-	// tcpListener is the underlying TCP listener for deadline control.
-	// Kept separately because TLS listener wraps TCP listener, and we need
-	// direct access to the TCP listener to set accept deadlines for graceful shutdown.
-	// Setting deadline on tcpListener affects both TLS and non-TLS accepts since
-	// the TLS listener internally calls tcpListener.Accept().
-	tcpListener *net.TCPListener
-	// addr is the server's listening address.
-	addr net.Addr
-	// router routes requests to handlers.
-	router *router.Router
-	// pool manages active connections.
-	pool *ConnectionPool
-	// semaphore limits concurrent connections.
-	semaphore chan struct{}
-	// running indicates if the server is running.
-	running bool
-	// runningMu protects access to running.
-	runningMu sync.RWMutex
-	// stopOnce ensures Stop is only called once.
-	stopOnce sync.Once
-	// stopChan signals the server to stop.
-	stopChan chan struct{}
-	// serverCtx is the context passed to Start, used to derive connection contexts.
-	serverCtx context.Context
-	// wg tracks active goroutines for graceful shutdown.
-	wg sync.WaitGroup
-	// logger provides structured logging for the server.
-	logger *slog.Logger
-	// metrics collects Prometheus metrics (optional).
-	metrics *metrics.Collector
-
-	// Goroutine monitoring fields
-	// goroutineConfig holds the goroutine monitoring configuration.
-	goroutineConfig GoroutineMonitorConfig
-	// goroutineBaseline is the goroutine count at server startup.
-	goroutineBaseline int
-	// goroutinePeak is the highest goroutine count observed.
-	goroutinePeak int
-	// goroutineConsecutiveGrowth tracks consecutive checks with growth.
+	addr                       net.Addr
+	listener                   net.Listener
+	serverCtx                  context.Context
+	scenarioCircuitBreaker     *circuitbreaker.CircuitBreaker
+	router                     *router.Router
+	pool                       *ConnectionPool
+	semaphore                  chan struct{}
+	metricsCircuitBreaker      *circuitbreaker.CircuitBreaker
+	tlsMonitor                 *TLSCertificateMonitor
+	storageCircuitBreaker      *circuitbreaker.CircuitBreaker
+	stopChan                   chan struct{}
+	tcpListener                *net.TCPListener
+	config                     *config.ServerConfig
+	logger                     *slog.Logger
+	metrics                    *metrics.Collector
+	goroutineConfig            GoroutineMonitorConfig
+	wg                         sync.WaitGroup
+	goroutinePeak              int
 	goroutineConsecutiveGrowth int
-	// goroutineMu protects goroutine monitoring state.
-	goroutineMu sync.RWMutex
-
-	// TLS certificate monitoring
-	tlsMonitor *TLSCertificateMonitor
-
-	// Circuit breakers for protecting external operations
-	storageCircuitBreaker  *circuitbreaker.CircuitBreaker
-	scenarioCircuitBreaker *circuitbreaker.CircuitBreaker
-	metricsCircuitBreaker  *circuitbreaker.CircuitBreaker
+	goroutineBaseline          int
+	goroutineMu                sync.RWMutex
+	runningMu                  sync.RWMutex
+	stopOnce                   sync.Once
+	running                    bool
 }
 
 // NewServer creates a new ICAP server with the given configuration, connection pool, and logger.
@@ -368,7 +329,7 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 		// Wrap TCP listener with TLS
 		cert, err := tls.LoadX509KeyPair(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 		if err != nil {
-			s.tcpListener.Close()
+			_ = s.tcpListener.Close()
 			s.running = false
 			return fmt.Errorf("loading TLS certificate: %w", err)
 		}
@@ -380,13 +341,13 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 		if s.config.TLS.ClientCAFile != "" {
 			caCert, err := os.ReadFile(s.config.TLS.ClientCAFile)
 			if err != nil {
-				s.tcpListener.Close()
+				_ = s.tcpListener.Close()
 				s.running = false
 				return fmt.Errorf("loading client CA certificate: %w", err)
 			}
 			caPool := x509.NewCertPool()
 			if !caPool.AppendCertsFromPEM(caCert) {
-				s.tcpListener.Close()
+				_ = s.tcpListener.Close()
 				s.running = false
 				return fmt.Errorf("parsing client CA certificate: no valid PEM block found in %s", s.config.TLS.ClientCAFile)
 			}
@@ -476,13 +437,14 @@ func (s *ICAPServer) acceptLoop() {
 			// The 100ms deadline allows the accept loop to check stopChan frequently
 			// during graceful shutdown, minimizing shutdown latency.
 			if s.tcpListener != nil {
-				s.tcpListener.SetDeadline(time.Now().Add(100 * time.Millisecond))
+				_ = s.tcpListener.SetDeadline(time.Now().Add(100 * time.Millisecond))
 			}
 
 			netConn, err := s.listener.Accept()
 			if err != nil {
 				// Check if this is a timeout (expected for deadline)
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				var netErr net.Error
+				if errors.As(err, &netErr) {
 					continue
 				}
 				// Check if listener was closed
@@ -501,7 +463,7 @@ func (s *ICAPServer) acceptLoop() {
 				// Got a slot, handle the connection
 			default:
 				// Connection limit reached, reject
-				netConn.Close()
+				_ = netConn.Close()
 				continue
 			}
 
@@ -527,13 +489,13 @@ func (s *ICAPServer) acceptLoop() {
 
 // handleConnection handles a single client connection.
 // It creates a request-scoped context for proper cancellation and timeout handling.
-// The context is cancelled when:
+// The context is canceled when:
 //   - The server shuts down (stopChan closed)
 //   - The request timeout is exceeded
 //   - The connection is closed
 func (s *ICAPServer) handleConnection(conn *Connection) {
 	// Create connection-scoped context that cancels on server shutdown
-	// This ensures all in-flight requests are cancelled during graceful shutdown
+	// This ensures all in-flight requests are canceled during graceful shutdown
 	connCtx, connCancel := context.WithCancel(s.serverCtx)
 
 	// No extra goroutine needed to cancel on server stop:
@@ -550,7 +512,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) {
 		}
 		// Cancel connection-scoped context to stop any ongoing operations
 		connCancel()
-		conn.Close()
+		_ = conn.Close()
 		s.pool.Remove(conn)
 		<-s.semaphore // Release slot
 		s.wg.Done()
@@ -559,7 +521,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) {
 	// Set initial deadline
 	if s.config.ReadTimeout > 0 {
 		now := time.Now()
-		conn.SetReadDeadline(now.Add(s.config.ReadTimeout))
+		_ = conn.SetReadDeadline(now.Add(s.config.ReadTimeout))
 	}
 
 	// Handle requests in a loop for connection reuse
@@ -593,7 +555,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) {
 					icaperrors.ErrIdleTimeout.ICAPStatus,
 					icaperrors.ErrIdleTimeout.Message,
 				))
-				conn.Flush()
+				_ = conn.Flush()
 
 				// Close connection
 				return
@@ -612,7 +574,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) {
 
 			// Reset deadline for processing
 			if s.config.WriteTimeout > 0 {
-				conn.SetWriteDeadline(now.Add(s.config.WriteTimeout))
+				_ = conn.SetWriteDeadline(now.Add(s.config.WriteTimeout))
 			}
 
 			// Create request-scoped context with timeout
@@ -659,7 +621,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) {
 
 			// Reset deadline for next request
 			if s.config.ReadTimeout > 0 {
-				conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout)) // fresh time for next request wait
+				_ = conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout)) // fresh time for next request wait
 			}
 		}
 	}
@@ -878,5 +840,5 @@ func (s *ICAPServer) monitorGoroutines() {
 	}
 }
 
-// ensure ICAPServer implements Server interface
+// ensure ICAPServer implements Server interface.
 var _ Server = (*ICAPServer)(nil)

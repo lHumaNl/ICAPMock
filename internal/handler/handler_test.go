@@ -1,4 +1,5 @@
-// Package handler_test provides tests for the ICAP handler interface and utilities.
+// Copyright 2026 ICAP Mock
+
 package handler_test
 
 import (

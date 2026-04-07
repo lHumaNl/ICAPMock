@@ -1,4 +1,5 @@
-// Package router provides benchmarks for the route cache.
+// Copyright 2026 ICAP Mock
+
 package router
 
 import (

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
@@ -6,18 +8,19 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/icap-mock/icap-mock/internal/tui/components"
 	"github.com/icap-mock/icap-mock/internal/tui/state"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestInitialModel(t *testing.T) {
 	tests := []struct {
+		cfg     *state.ClientConfig
+		check   func(*testing.T, *Model)
 		name    string
 		appName string
 		version string
-		cfg     *state.ClientConfig
-		check   func(*testing.T, *Model)
 	}{
 		{
 			name:    "default initialization",
@@ -70,8 +73,8 @@ func TestInitialModel(t *testing.T) {
 
 func TestScreen_String(t *testing.T) {
 	tests := []struct {
-		screen Screen
 		want   string
+		screen Screen
 	}{
 		{ScreenDashboard, "Dashboard"},
 		{ScreenConfig, "Config Editor"},

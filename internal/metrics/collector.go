@@ -1,4 +1,5 @@
-// Package metrics provides Prometheus metrics collection for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package metrics
 
 import (

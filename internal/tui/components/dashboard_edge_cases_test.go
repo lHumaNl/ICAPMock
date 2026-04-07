@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -8,8 +10,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 // Dashboard edge cases

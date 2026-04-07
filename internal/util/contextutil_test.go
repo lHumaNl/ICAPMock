@@ -1,4 +1,5 @@
-// Package util provides tests for context utilities.
+// Copyright 2026 ICAP Mock
+
 package util
 
 import (
@@ -149,13 +150,13 @@ func TestCheckCancellation(t *testing.T) {
 		expectError    bool
 	}{
 		{
-			name:           "non-cancelled context",
+			name:           "non-canceled context",
 			ctx:            context.Background(),
 			expectedReason: "",
 			expectError:    false,
 		},
 		{
-			name:           "cancelled context",
+			name:           "canceled context",
 			ctx:            func() context.Context { ctx, cancel := context.WithCancel(context.Background()); cancel(); return ctx }(),
 			expectedReason: ReasonCanceled,
 			expectError:    true,
@@ -212,7 +213,7 @@ func TestRequestIDWithCancel(t *testing.T) {
 	// But CheckCancellation should detect the cancellation
 	_, err := CheckCancellation(ctx)
 	if err == nil {
-		t.Error("CheckCancellation() should detect cancelled context")
+		t.Error("CheckCancellation() should detect canceled context")
 	}
 }
 

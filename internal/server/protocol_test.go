@@ -1,4 +1,5 @@
-// Package server provides the ICAP server implementation.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (

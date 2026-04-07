@@ -1,4 +1,5 @@
-// Package components provides reusable UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -12,17 +13,17 @@ import (
 type HeaderModel struct {
 	appName    string
 	version    string
+	serverInfo ServerInfo
 	width      int
 	height     int
-	serverInfo ServerInfo
 }
 
 // ServerInfo contains server status information.
 type ServerInfo struct {
-	Running bool
 	Port    string
 	Uptime  string
 	Errors  int
+	Running bool
 }
 
 // NewHeaderModel creates a new header model.
@@ -121,7 +122,7 @@ func (m *HeaderModel) GetHeight() int {
 	return 1
 }
 
-// Header styles
+// Header styles.
 var (
 	headerBackgroundStyle = lipgloss.NewStyle().
 				Background(lipgloss.Color("236")).

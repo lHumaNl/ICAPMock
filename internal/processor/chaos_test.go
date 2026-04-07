@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -266,7 +268,7 @@ func TestChaosProcessor_ContextCancellation(t *testing.T) {
 	}
 }
 
-// TestChaosProcessor_AlreadyCancelledContext tests with already cancelled context.
+// TestChaosProcessor_AlreadyCancelledContext tests with already canceled context.
 func TestChaosProcessor_AlreadyCancelledContext(t *testing.T) {
 	delegate := NewEchoProcessor()
 
@@ -281,7 +283,7 @@ func TestChaosProcessor_AlreadyCancelledContext(t *testing.T) {
 	_, err := processor.Process(ctx, req)
 
 	if err == nil {
-		t.Error("expected context cancelled error")
+		t.Error("expected context canceled error")
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)

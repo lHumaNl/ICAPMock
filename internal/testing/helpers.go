@@ -1,26 +1,12 @@
-// Package testing provides utilities and helpers for testing the ICAP Mock Server.
-//
-// It includes:
-//   - ICAP request/response builders
-//   - Server harness for integration tests
-//   - Concurrent test helpers
-//   - Mock implementations for dependencies
-//   - Assertion helpers
-//
-// Usage:
-//
-//	import "github.com/icap-mock/icap-mock/internal/testing"
-//
-//	req := testing.BuildICAPRequest("REQMOD", "icap://localhost/reqmod", nil, nil)
-//	harness := testing.NewServerHarness(t, testConfig)
-//	harness.Start()
-//	defer harness.Stop(ctx)
+// Copyright 2026 ICAP Mock
+
 package testing
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -109,9 +95,10 @@ func BuildICAPRequestWithHTTP(method, uri, httpMethod, httpURL string, httpHeade
 	httpReq.Method = httpMethod
 	httpReq.URI = httpURL
 
-	if method == icap.MethodREQMOD {
+	switch method {
+	case icap.MethodREQMOD:
 		req.HTTPRequest = httpReq
-	} else if method == icap.MethodRESPMOD {
+	case icap.MethodRESPMOD:
 		req.HTTPResponse = httpReq
 	}
 
@@ -437,7 +424,7 @@ func ParseRawICAPRequest(t *testing.T, raw string) *icap.Request {
 	}
 
 	mimeHeader, err := reader.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("Failed to read headers: %v", err)
 	}
 
@@ -494,7 +481,7 @@ func ParseRawICAPResponse(t *testing.T, raw string) *icap.Response {
 	}
 
 	mimeHeader, err := reader.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("Failed to read headers: %v", err)
 	}
 
@@ -524,9 +511,9 @@ func GetFreePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("Failed to get free port: %v", err)
 	}
-	defer l.Close()
+	defer l.Close() //nolint:errcheck
 
-	addr := l.Addr().(*net.TCPAddr)
+	addr := l.Addr().(*net.TCPAddr) //nolint:errcheck
 	return addr.Port
 }
 
@@ -544,9 +531,9 @@ func GetLocalIP(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("Failed to get local IP: %v", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	localAddr := conn.LocalAddr().(*net.UDPAddr) //nolint:errcheck
 	return localAddr.IP.String()
 }
 

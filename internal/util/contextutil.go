@@ -1,4 +1,5 @@
-// Package util provides utilities for working with context.
+// Copyright 2026 ICAP Mock
+
 package util
 
 import (
@@ -17,21 +18,21 @@ const (
 	// RequestIDKey is the key used to store the request ID in context.
 	RequestIDKey ContextKey = "request_id"
 
-	// ReasonDeadlineExceeded - context was cancelled due to deadline exceeded
+	// ReasonDeadlineExceeded - context was canceled due to deadline exceeded.
 	ReasonDeadlineExceeded ContextCancellationReason = "deadline_exceeded"
-	// ReasonCanceled - context was explicitly cancelled
+	// ReasonCanceled - context was explicitly canceled.
 	ReasonCanceled ContextCancellationReason = "canceled"
 )
 
 // CheckCancellation checks the context state and returns the cancellation reason.
-// Returns an error if the context is cancelled, nil otherwise.
+// Returns an error if the context is canceled, nil otherwise.
 //
 // Parameters:
 //   - ctx: Context to check
 //
 // Returns:
 //   - ContextCancellationReason: Cancellation reason (deadline_exceeded/canceled)
-//   - error: Error if context is cancelled, nil otherwise
+//   - error: Error if context is canceled, nil otherwise
 //
 // Example:
 //

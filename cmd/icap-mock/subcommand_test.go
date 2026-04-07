@@ -1,4 +1,5 @@
-// Package main provides tests for the subcommand framework.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -232,7 +233,7 @@ func TestReplayCommand_Run_NonExistentDir(t *testing.T) {
 
 // TestCommandRegistry_PrintUsage is skipped because capturing stderr in tests
 // causes the test to hang on Windows. The PrintUsage functionality is simple
-// and can be verified by manual testing: icap-mock --help
+// and can be verified by manual testing: icap-mock --help.
 func TestCommandRegistry_PrintUsage(t *testing.T) {
 	t.Skip("Skipping stderr capture test due to Windows pipe hanging issue")
 
@@ -292,10 +293,10 @@ func TestIntegration_BackwardCompatibility(t *testing.T) {
 
 // mockCommand is a test implementation of the Command interface.
 type mockCommand struct {
-	name       string
-	runCalled  bool
 	parseError error
 	runError   error
+	name       string
+	runCalled  bool
 }
 
 func (m *mockCommand) Name() string {
@@ -329,8 +330,8 @@ func (m *mockCommand) Description() string {
 func TestCommandDispatch(t *testing.T) {
 	tests := []struct {
 		name     string
-		args     []string
 		wantCmd  string
+		args     []string
 		wantHelp bool
 		wantErr  bool
 	}{
@@ -398,7 +399,7 @@ func TestCommandDispatch(t *testing.T) {
 
 // TestServerCommand_Usage is skipped because capturing stderr in tests
 // causes the test to hang on Windows. The Usage functionality is simple
-// and can be verified by manual testing: icap-mock server --help
+// and can be verified by manual testing: icap-mock server --help.
 func TestServerCommand_Usage(t *testing.T) {
 	t.Skip("Skipping stderr capture test due to Windows pipe hanging issue")
 
@@ -430,7 +431,7 @@ func TestServerCommand_Usage(t *testing.T) {
 
 // TestReplayCommand_Usage is skipped because capturing stderr in tests
 // causes the test to hang on Windows. The Usage functionality is simple
-// and can be verified by manual testing: icap-mock replay --help
+// and can be verified by manual testing: icap-mock replay --help.
 func TestReplayCommand_Usage(t *testing.T) {
 	t.Skip("Skipping stderr capture test due to Windows pipe hanging issue")
 

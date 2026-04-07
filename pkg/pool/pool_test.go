@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package pool
 
 import (
@@ -12,9 +14,9 @@ import (
 func TestBufferPoolGetPut(t *testing.T) {
 	tests := []struct {
 		name        string
+		description string
 		size        int
 		expectCap   int
-		description string
 	}{
 		{
 			name:        "small buffer",

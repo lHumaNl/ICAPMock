@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -15,11 +17,11 @@ import (
 //
 // This implementation is thread-safe and optimized for high-performance scenarios.
 type TokenBucketLimiter struct {
-	rate   float64    // tokens added per second
-	burst  int        // maximum bucket size
-	mu     sync.Mutex // protects the following fields
-	tokens float64    // current number of tokens
-	last   time.Time  // last time tokens were updated
+	last   time.Time
+	rate   float64
+	burst  int
+	tokens float64
+	mu     sync.Mutex
 }
 
 // NewTokenBucketLimiter creates a new token bucket rate limiter.
@@ -168,11 +170,11 @@ func (l *TokenBucketLimiter) calculateWait(n int) time.Duration {
 
 // reservation represents a reservation of tokens from the limiter.
 type reservation struct {
-	ok        bool
-	delay     time.Duration
-	limiter   *TokenBucketLimiter
-	tokens    float64
 	timeToAct time.Time
+	limiter   *TokenBucketLimiter
+	delay     time.Duration
+	tokens    float64
+	ok        bool
 }
 
 // OK reports whether the reservation is valid.

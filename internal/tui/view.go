@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
@@ -10,7 +12,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// View renders the UI
+// View renders the UI.
 func (m *Model) View() string {
 	if !m.ready {
 		return "Loading..."
@@ -52,7 +54,7 @@ func (m *Model) View() string {
 	return view
 }
 
-// updateNavigationState updates navigation components with current model state
+// updateNavigationState updates navigation components with current model state.
 func (m *Model) updateNavigationState() {
 	// Update header with server status
 	if m.serverStatus != nil {
@@ -84,7 +86,7 @@ func (m *Model) updateNavigationState() {
 	}
 }
 
-// renderContent displays the current screen
+// renderContent displays the current screen.
 func (m *Model) renderContent() string {
 	switch m.currentScreen {
 	case ScreenDashboard:
@@ -104,7 +106,7 @@ func (m *Model) renderContent() string {
 	}
 }
 
-// renderDashboard renders dashboard screen
+// renderDashboard renders dashboard screen.
 func (m *Model) renderDashboard() string {
 	if m.dashboard == nil {
 		return PanelStyle.Render(
@@ -134,7 +136,7 @@ func (m *Model) renderDashboard() string {
 	return lipgloss.JoinVertical(lipgloss.Left, serviceControls, "", dashboard)
 }
 
-// renderConfig renders config editor screen
+// renderConfig renders config editor screen.
 func (m *Model) renderConfig() string {
 	if m.configEditor == nil {
 		return PanelStyle.Render(
@@ -154,7 +156,7 @@ func (m *Model) renderConfig() string {
 	return m.configEditor.View()
 }
 
-// renderScenarios renders scenarios screen
+// renderScenarios renders scenarios screen.
 func (m *Model) renderScenarios() string {
 	if m.scenarioManager == nil {
 		return PanelStyle.Render(
@@ -165,7 +167,7 @@ func (m *Model) renderScenarios() string {
 	return m.scenarioManager.View()
 }
 
-// renderLogs renders logs screen
+// renderLogs renders logs screen.
 func (m *Model) renderLogs() string {
 	// Update log viewer with latest entries
 	logs := m.logsState.GetEntries(nil, 1000)
@@ -174,7 +176,7 @@ func (m *Model) renderLogs() string {
 	return m.logViewer.View()
 }
 
-// renderReplay renders replay screen
+// renderReplay renders replay screen.
 func (m *Model) renderReplay() string {
 	if m.replayPanel == nil {
 		return PanelStyle.Render(
@@ -185,7 +187,7 @@ func (m *Model) renderReplay() string {
 	return m.replayPanel.View()
 }
 
-// renderHealth renders health monitor screen
+// renderHealth renders health monitor screen.
 func (m *Model) renderHealth() string {
 	if m.healthMonitor == nil {
 		status := m.serverStatus.Current()
@@ -205,7 +207,7 @@ func (m *Model) renderHealth() string {
 	return m.healthMonitor.View()
 }
 
-// renderStatusBar renders context-sensitive keybindings at the bottom
+// renderStatusBar renders context-sensitive keybindings at the bottom.
 func (m *Model) renderStatusBar() string {
 	bindings := m.ShortHelp()
 	var parts []string
@@ -233,11 +235,11 @@ func (m *Model) renderStatusBar() string {
 	return style.Render(bar)
 }
 
-// renderHelpOverlay renders the full help as a centered overlay on top of the view
+// renderHelpOverlay renders the full help as a centered overlay on top of the view.
 func (m *Model) renderHelpOverlay(baseView string) string {
 	groups := m.FullHelp()
 
-	var lines []string
+	var lines []string //nolint:prealloc
 	lines = append(lines, HelpKeyStyle.Render("Keyboard Shortcuts"))
 	lines = append(lines, "")
 
@@ -300,7 +302,7 @@ func (m *Model) renderHelpOverlay(baseView string) string {
 	return positioned
 }
 
-// renderLogEntries renders log entries
+// renderLogEntries renders log entries.
 func (m *Model) renderLogEntries(entries []*state.LogEntry) string {
 	if len(entries) == 0 {
 		return SubtitleStyle.Render("No logs available")
@@ -321,17 +323,17 @@ func (m *Model) renderLogEntries(entries []*state.LogEntry) string {
 	return lipgloss.JoinVertical(lipgloss.Left, rendered...)
 }
 
-// getLogLevelStyle returns style for a log level
+// getLogLevelStyle returns style for a log level.
 func (m *Model) getLogLevelStyle(level string) lipgloss.Style {
 	return GetLogLevelStyle(level)
 }
 
-// formatFloat formats a float64 with 2 decimal places
+// formatFloat formats a float64 with 2 decimal places.
 func formatFloat(f float64) string {
 	return fmt.Sprintf("%.2f", f)
 }
 
-// formatInt formats an int64 as a string
+// formatInt formats an int64 as a string.
 func formatInt(i int64) string {
 	return fmt.Sprintf("%d", i)
 }

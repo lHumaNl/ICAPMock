@@ -1,2 +1,3 @@
-// Package main provides tests for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main

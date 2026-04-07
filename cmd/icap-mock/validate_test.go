@@ -1,7 +1,5 @@
-// Package main provides tests for the --validate flag functionality.
-// These tests verify that configuration validation works correctly
-// and handles various scenarios including valid configs, invalid configs,
-// and missing scenarios directories.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -207,8 +205,8 @@ func TestValidateMode_TLSConfiguration(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		tlsEnabled     bool
 		expectedOutput string
+		tlsEnabled     bool
 	}{
 		{
 			name:           "TLS disabled",
@@ -383,8 +381,8 @@ func TestValidateMode_Integration(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
 		setupConfig func(*config.Config, string)
+		name        string
 		expectError bool
 	}{
 		{
@@ -668,9 +666,9 @@ func TestValidateMode_HealthConfiguration(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		enabled     bool
 		checkShown  []string
 		checkHidden []string
+		enabled     bool
 	}{
 		{
 			name:    "health enabled",

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -12,30 +14,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ConfigEditorModel represents configuration editor component
+// ConfigEditorModel represents configuration editor component.
 type ConfigEditorModel struct {
 	textarea   textarea.Model
+	validation ValidationStatus
 	content    string
 	filePath   string
-	fileType   string // "yaml" or "json"
-	validation ValidationStatus
-	showHelp   bool
+	fileType   string
 	width      int
 	height     int
+	maxSize    int
+	mu         sync.RWMutex
+	showHelp   bool
 	loading    bool
 	modified   bool
-	maxSize    int // Maximum file size in bytes
-	mu         sync.RWMutex
 }
 
-// ValidationStatus represents the validation state of the config
+// ValidationStatus represents the validation state of the config.
 type ValidationStatus struct {
-	Valid   bool
 	Error   string
 	Message string
+	Valid   bool
 }
 
-// NewConfigEditorModel creates a new config editor model
+// NewConfigEditorModel creates a new config editor model.
 func NewConfigEditorModel() *ConfigEditorModel {
 	ta := textarea.New()
 	ta.ShowLineNumbers = true
@@ -55,21 +57,21 @@ func NewConfigEditorModel() *ConfigEditorModel {
 	}
 }
 
-// Init initializes the config editor model
+// Init initializes the config editor model.
 func (m *ConfigEditorModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates the config editor model
+// Update handles messages and updates the config editor model.
 func (m *ConfigEditorModel) Update(msg tea.Msg) (*ConfigEditorModel, tea.Cmd) {
 	var cmd tea.Cmd
-	var cmds []tea.Cmd
+	cmds := make([]tea.Cmd, 0, 1)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle special keys
 		switch msg.String() {
-		case "ctrl+s":
+		case keyCtrlS:
 			// Save is handled by parent
 			return m, nil
 		case "ctrl+l":
@@ -87,7 +89,7 @@ func (m *ConfigEditorModel) Update(msg tea.Msg) (*ConfigEditorModel, tea.Cmd) {
 			// Format content
 			m.formatContent()
 			return m, nil
-		case "esc":
+		case keyEsc:
 			// Return to previous screen - handled by parent
 			return m, nil
 		}
@@ -112,7 +114,7 @@ func (m *ConfigEditorModel) Update(msg tea.Msg) (*ConfigEditorModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// SetContent sets the editor content and file path
+// SetContent sets the editor content and file path.
 func (m *ConfigEditorModel) SetContent(content, filePath string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -138,9 +140,9 @@ func (m *ConfigEditorModel) SetContent(content, filePath string) error {
 
 	// Detect file type
 	if strings.HasSuffix(strings.ToLower(filePath), ".json") {
-		m.fileType = "json"
+		m.fileType = "json" //nolint:goconst
 	} else {
-		m.fileType = "yaml"
+		m.fileType = "yaml" //nolint:goconst
 	}
 
 	m.validateContent()
@@ -154,24 +156,24 @@ func (m *ConfigEditorModel) SetContent(content, filePath string) error {
 	return nil
 }
 
-// GetContent returns the current editor content
+// GetContent returns the current editor content.
 func (m *ConfigEditorModel) GetContent() string {
 	return m.textarea.Value()
 }
 
-// GetFilePath returns the current file path
+// GetFilePath returns the current file path.
 func (m *ConfigEditorModel) GetFilePath() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.filePath
 }
 
-// IsModified returns whether the content has been modified
+// IsModified returns whether the content has been modified.
 func (m *ConfigEditorModel) IsModified() bool {
 	return m.modified
 }
 
-// Reload reloads the content from the file
+// Reload reloads the content from the file.
 func (m *ConfigEditorModel) Reload() tea.Cmd {
 	return func() tea.Msg {
 		// This should be implemented by the parent component
@@ -180,7 +182,7 @@ func (m *ConfigEditorModel) Reload() tea.Cmd {
 	}
 }
 
-// formatContent formats the content according to file type
+// formatContent formats the content according to file type.
 func (m *ConfigEditorModel) formatContent() {
 	content := m.textarea.Value()
 	if content == "" {
@@ -210,7 +212,7 @@ func (m *ConfigEditorModel) formatContent() {
 	}
 }
 
-// validateContent validates the current content
+// validateContent validates the current content.
 func (m *ConfigEditorModel) validateContent() {
 	content := m.textarea.Value()
 
@@ -248,12 +250,12 @@ func (m *ConfigEditorModel) validateContent() {
 	}
 }
 
-// SetLoading sets the loading state
+// SetLoading sets the loading state.
 func (m *ConfigEditorModel) SetLoading(loading bool) {
 	m.loading = loading
 }
 
-// SetWindowSize sets the window size
+// SetWindowSize sets the window size.
 func (m *ConfigEditorModel) SetWindowSize(width, height int) {
 	m.width = width
 	m.height = height
@@ -268,7 +270,7 @@ func (m *ConfigEditorModel) SetWindowSize(width, height int) {
 	m.textarea.SetHeight(editorHeight)
 }
 
-// View renders the config editor component
+// View renders the config editor component.
 func (m *ConfigEditorModel) View() string {
 	// Render header
 	header := m.renderHeader()
@@ -302,7 +304,7 @@ func (m *ConfigEditorModel) View() string {
 	return PanelStyle.Render(content)
 }
 
-// renderHeader renders the editor header
+// renderHeader renders the editor header.
 func (m *ConfigEditorModel) renderHeader() string {
 	path := m.filePath
 	if path == "" {
@@ -325,7 +327,7 @@ func (m *ConfigEditorModel) renderHeader() string {
 	return headerLine
 }
 
-// renderValidation renders the validation status
+// renderValidation renders the validation status.
 func (m *ConfigEditorModel) renderValidation() string {
 	if m.validation.Valid {
 		return StatusRunningStyle.Render("✓ " + m.validation.Message)
@@ -343,7 +345,7 @@ func (m *ConfigEditorModel) renderValidation() string {
 	return SubtitleStyle.Render("○ " + m.validation.Message)
 }
 
-// renderEditor renders the text editor
+// renderEditor renders the text editor.
 func (m *ConfigEditorModel) renderEditor() string {
 	if m.loading {
 		return SubtitleStyle.Render("Loading configuration...")
@@ -354,7 +356,7 @@ func (m *ConfigEditorModel) renderEditor() string {
 	return m.textarea.View()
 }
 
-// renderHelp renders the keyboard shortcuts help
+// renderHelp renders the keyboard shortcuts help.
 func (m *ConfigEditorModel) renderHelp() string {
 	shortcuts := []struct {
 		key   string
@@ -369,7 +371,7 @@ func (m *ConfigEditorModel) renderHelp() string {
 		{"Esc", "Back", "196"},
 	}
 
-	var rendered []string
+	var rendered []string //nolint:prealloc
 	for _, s := range shortcuts {
 		keyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(s.color)).
@@ -390,7 +392,7 @@ func (m *ConfigEditorModel) renderHelp() string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, rendered...)
 }
 
-// Reset resets the editor to initial state
+// Reset resets the editor to initial state.
 func (m *ConfigEditorModel) Reset() {
 	m.content = ""
 	m.textarea.SetValue("")
@@ -401,7 +403,7 @@ func (m *ConfigEditorModel) Reset() {
 	m.loading = false
 }
 
-// ClearValidation clears the validation status
+// ClearValidation clears the validation status.
 func (m *ConfigEditorModel) ClearValidation() {
 	m.validation = ValidationStatus{Valid: false, Message: "No content to validate"}
 }

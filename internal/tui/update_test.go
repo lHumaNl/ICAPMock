@@ -1,12 +1,15 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/icap-mock/icap-mock/internal/tui/components"
 	"github.com/icap-mock/icap-mock/internal/tui/state"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestModel_Update_ScenarioListMsg(t *testing.T) {

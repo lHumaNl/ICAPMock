@@ -1,50 +1,5 @@
-// Package plugin provides a plugin system for extending the ICAP Mock Server
-// with custom processors. It supports both built-in and dynamically loaded
-// Go plugins (.so files).
-//
-// The plugin system allows developers to create custom processors that can
-// be registered at runtime and integrated into the processor chain.
-//
-// # Plugin Interface
-//
-// Plugins must implement the ProcessorPlugin interface:
-//
-//	type ProcessorPlugin interface {
-//	    // Process handles an ICAP request and returns a response.
-//	    Process(ctx context.Context, req *icap.Request) (*icap.Response, error)
-//	    // Name returns the plugin's unique name.
-//	    Name() string
-//	    // Init initializes the plugin with configuration.
-//	    Init(config map[string]interface{}) error
-//	    // Close cleans up plugin resources.
-//	    Close() error
-//	}
-//
-// # Built-in Plugins
-//
-// Built-in plugins can be registered using the Register function:
-//
-//	func init() {
-//	    plugin.Register("my-plugin", &MyPlugin{})
-//	}
-//
-// # Dynamic Plugins (.so files)
-//
-// Dynamic plugins can be loaded from .so files using the loader:
-//
-//	loader := plugin.NewLoader()
-//	if err := loader.Load("./myplugin.so"); err != nil {
-//	    log.Fatal(err)
-//	}
-//
-// # Retrieving Plugins
-//
-// Plugins can be retrieved by name:
-//
-//	p, exists := plugin.Get("my-plugin")
-//	if !exists {
-//	    log.Fatal("plugin not found")
-//	}
+// Copyright 2026 ICAP Mock
+
 package plugin
 
 import (
@@ -312,10 +267,10 @@ type PluginRegistry interface {
 
 // Registry provides a thread-safe plugin registry implementation.
 type Registry struct {
-	mu      sync.RWMutex
 	plugins map[string]ProcessorPlugin
 	info    map[string]PluginInfo
-	order   []string // Maintains registration order
+	order   []string
+	mu      sync.RWMutex
 }
 
 // NewRegistry creates a new empty plugin registry.

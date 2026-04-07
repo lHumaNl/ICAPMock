@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -6,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/storage"
-	"github.com/icap-mock/icap-mock/pkg/icap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/icap-mock/icap-mock/internal/storage"
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 // TestScriptSecurity_TryCatchBypassPrevention tests that try-catch cannot bypass function blocking.
@@ -18,8 +21,8 @@ func TestScriptSecurity_TryCatchBypassPrevention(t *testing.T) {
 	tests := []struct {
 		name          string
 		script        string
-		shouldFail    bool
 		errorContains []string
+		shouldFail    bool
 	}{
 		{
 			name: "try-catch around eval - MUST FAIL",
@@ -153,8 +156,8 @@ func TestScriptSecurity_StaticAnalysisBlockedPatterns(t *testing.T) {
 	tests := []struct {
 		name          string
 		script        string
-		shouldFail    bool
 		errorContains string
+		shouldFail    bool
 	}{
 		{
 			name:          "direct eval call",
@@ -212,8 +215,8 @@ func TestScriptSecurity_StaticAnalysisSuspiciousPatterns(t *testing.T) {
 	tests := []struct {
 		name        string
 		script      string
-		shouldPass  bool
 		description string
+		shouldPass  bool
 	}{
 		{
 			name:        "try-catch around blocked function",
@@ -271,10 +274,10 @@ func TestScriptSecurity_RuntimeMonitorMemoryLimit(t *testing.T) {
 	t.Skip("memory limits require explicit __checkLimits() calls in scripts; see CreateRuntimeLimitEnforcer")
 	tests := []struct {
 		name         string
-		memoryLimit  int64
 		script       string
-		shouldFail   bool
 		errorMessage string
+		memoryLimit  int64
+		shouldFail   bool
 	}{
 		{
 			name:        "small memory limit exceeded",
@@ -421,8 +424,8 @@ func TestScriptSecurity_GlobalObjectsBlocked(t *testing.T) {
 	tests := []struct {
 		name       string
 		script     string
-		shouldFail bool
 		globalName string
+		shouldFail bool
 	}{
 		{
 			name:       "require global undefined",

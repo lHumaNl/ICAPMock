@@ -1,0 +1,243 @@
+run:
+  timeout: 5m
+  go: '1.25'
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+  build-tags: []
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gosec
+    - goconst
+    - gocritic
+    - godot
+    - gofmt
+    - goimports
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+    - nakedret
+    - prealloc
+    - exportloopref
+    - nilerr
+    - nilnil
+    - noctx
+    - predeclared
+    - wastedassign
+    - durationcheck
+    - makezero
+    - errorlint
+    - exhaustive
+    - bodyclose
+    - dupl
+    - goheader
+    - gocyclo
+    - contextcheck
+
+  disable:
+    - funlen
+    - lll
+    - cyclop
+    - wsl
+    - gomnd
+    - exhaustruct
+    - godox
+    - varnamelen
+    - testpackage
+    - paralleltest
+    - tparallel
+    - forcetypeassert
+    - musttag
+    - depguard
+    - dogsled
+    - dupword
+    - err113
+    - errname
+    - execinquery
+    - forbidigo
+    - gocognit
+    - gochecknoglobals
+    - gochecknoinits
+    - gomoddirectives
+    - gomodguard
+    - inamedparam
+    - interfacebloat
+    - ireturn
+    - maintidx
+    - mnd
+    - nlreturn
+    - nonamedreturns
+    - nosnakecase
+    - promlinter
+    - reassign
+    - tagalign
+    - testifylint
+    - thelper
+    - wrapcheck
+    - zerologlint
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+    disable-default-exclusions: false
+
+  gosimple:
+    checks: ["all"]
+
+  staticcheck:
+    checks: ["all"]
+
+  govet:
+    enable-all: true
+
+  gosec:
+    excludes:
+      - G104
+      - G307
+    config:
+      G301: false
+      G302: false
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    ignore-tests: true
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - hugeParam
+      - rangeValCopy
+      - whyNoLint
+      - commentedOutCode
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/icap-mock/icap-mock
+
+  misspell:
+    locale: US
+    ignore-words:
+      - someword
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  nakedret:
+    max-func-lines: 30
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  gocyclo:
+    min-complexity: 15
+
+  dupl:
+    threshold: 100
+
+  goheader:
+    values:
+      const:
+        COMPANY: ICAP Mock
+    template: |-
+      Copyright {{YEAR}} {{COMPANY}}
+
+  lll:
+    line-length: 140
+
+  exhaustive:
+    default-signifies-exhaustive: false
+
+  makezero:
+    always: false
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+        - gocritic
+        - funlen
+
+    - path: cmd/
+      text: ".*"
+      linters:
+        - lll
+
+    - path: internal/tui/
+      linters:
+        - gocyclo
+        - funlen
+        - dupl
+
+  exclude-use-default: false
+  exclude:
+    - should have comment
+    - comment on exported
+    - comment to be ignored
+
+  include:
+    - EXC0002
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true
+  show-stats: true

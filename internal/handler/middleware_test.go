@@ -1,4 +1,5 @@
-// Package handler_test provides tests for the ICAP handler middleware.
+// Copyright 2026 ICAP Mock
+
 package handler_test
 
 import (
@@ -12,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
@@ -19,15 +23,13 @@ import (
 	"github.com/icap-mock/icap-mock/internal/ratelimit"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 )
 
 // syncBuffer is a thread-safe bytes.Buffer for use as a log output in tests
 // where worker goroutines write concurrently with test goroutines reading.
 type syncBuffer struct {
-	mu  sync.Mutex
 	buf bytes.Buffer
+	mu  sync.Mutex
 }
 
 func (b *syncBuffer) Write(p []byte) (n int, err error) {
@@ -72,11 +74,11 @@ func (r *mockReservation) Cancel()              {}
 
 // mockStorage implements storage.Storage for testing.
 type mockStorage struct {
-	mu         sync.RWMutex
-	requests   []*storage.StoredRequest
 	saveErr    error
-	saveCount  int64
 	saveCalled chan struct{}
+	requests   []*storage.StoredRequest
+	saveCount  int64
+	mu         sync.RWMutex
 }
 
 func newMockStorage() *mockStorage {
@@ -1116,7 +1118,7 @@ func TestStorageMiddlewareWithPool_ShutdownTimeout(t *testing.T) {
 	if err == nil {
 		t.Error("Shutdown() should return error on timeout")
 	}
-	if err != context.DeadlineExceeded {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Shutdown() error = %v, want %v", err, context.DeadlineExceeded)
 	}
 

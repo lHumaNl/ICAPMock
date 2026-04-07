@@ -1,6 +1,5 @@
-// Package errors provides error wrapping utilities for the ICAP Mock Server.
-// These functions enable building error chains with context while preserving
-// the original error for debugging and error handling.
+// Copyright 2026 ICAP Mock
+
 package errors
 
 import (

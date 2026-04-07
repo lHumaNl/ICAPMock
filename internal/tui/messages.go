@@ -1,59 +1,61 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
 	"time"
 )
 
-// TickMsg is sent periodically to refresh data
+// TickMsg is sent periodically to refresh data.
 type TickMsg struct {
 	Time time.Time
 }
 
-// ConfigChangedMsg is sent when configuration is modified
+// ConfigChangedMsg is sent when configuration is modified.
 type ConfigChangedMsg struct {
 	Config *ConfigSnapshot
 }
 
-// ScreenChangeMsg is sent to switch between screens
+// ScreenChangeMsg is sent to switch between screens.
 type ScreenChangeMsg struct {
 	Screen Screen
 }
 
-// ErrorMessage is sent when an error occurs
+// ErrorMessage is sent when an error occurs.
 type ErrorMessage struct {
 	Err error
 }
 
-// SuccessMsg is sent when an operation succeeds
+// SuccessMsg is sent when an operation succeeds.
 type SuccessMsg struct {
 	Message string
 }
 
-// LogEntry represents a single log entry for view rendering
+// LogEntry represents a single log entry for view rendering.
 type LogEntry struct {
 	Timestamp time.Time
+	Fields    map[string]interface{}
 	Level     string
 	Message   string
-	Fields    map[string]interface{}
 }
 
-// ConfigSnapshot represents configuration snapshot
+// ConfigSnapshot represents configuration snapshot.
 type ConfigSnapshot struct {
 	FilePath string
+	Error    string
 	Modified bool
 	Valid    bool
-	Error    string
 }
 
-// ConfigSavedMsg is sent when configuration is saved successfully
+// ConfigSavedMsg is sent when configuration is saved successfully.
 type ConfigSavedMsg struct {
 	FilePath string
-	Success  bool
 	Error    string
+	Success  bool
 }
 
-// ShutdownSignal is sent when application should gracefully shutdown
+// ShutdownSignal is sent when application should gracefully shutdown.
 type ShutdownSignal struct{}
 
-// ShutdownCompleteMsg is sent when shutdown is complete
+// ShutdownCompleteMsg is sent when shutdown is complete.
 type ShutdownCompleteMsg struct{}

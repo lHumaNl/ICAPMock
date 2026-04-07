@@ -1,5 +1,5 @@
-// Package config_test contains comprehensive tests for configuration defaults.
-// These tests verify Wave 1-2 changes: MaxConnections=15000, MaxBodySize=10MB, PprofConfig.
+// Copyright 2026 ICAP Mock
+
 package config_test
 
 import (
@@ -109,9 +109,9 @@ func TestConfigDefaults_AllServerDefaults(t *testing.T) {
 	cfg.SetDefaults()
 
 	tests := []struct {
-		name     string
 		got      interface{}
 		expected interface{}
+		name     string
 	}{
 		{"Host", cfg.Server.Host, "0.0.0.0"},
 		{"Port", cfg.Server.Port, 1344},

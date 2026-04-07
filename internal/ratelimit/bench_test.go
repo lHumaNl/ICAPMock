@@ -1,4 +1,5 @@
-// Package ratelimit provides benchmarks for the rate limiting hot path.
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (

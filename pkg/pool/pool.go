@@ -1,28 +1,5 @@
-// Package pool provides buffer pools for reducing memory allocations and GC pressure.
-// It uses sync.Pool to reuse buffers across goroutines, which is especially beneficial
-// in high-throughput scenarios where buffers are frequently allocated and discarded.
-//
-// The package provides four types of pools:
-//   - BufferPool: For reusable byte slices of various sizes (4KB, 8KB, 32KB)
-//   - BytesBufferPool: For reusable bytes.Buffer objects
-//   - StringBuilderPool: For reusable strings.Builder objects
-//   - HeaderMapPool: For reusable map[string][]string (HTTP/ICAP headers)
-//
-// Expected GC pressure reduction: 40-80MB/sec at 10K RPS
-//
-// Usage:
-//
-//	// Get a buffer from the pool
-//	buf := pool.BufferPool.Get(8192) // Get an 8KB buffer
-//	defer pool.BufferPool.Put(buf)
-//
-//	// Or use bytes.Buffer
-//	bb := pool.BytesBufferPool.Get()
-//	defer pool.BytesBufferPool.Put(bb)
-//
-//	// Or use header map pool
-//	hdr := pool.HeaderMapPool.Get()
-//	defer pool.HeaderMapPool.Put(hdr)
+// Copyright 2026 ICAP Mock
+
 package pool
 
 import (
@@ -82,7 +59,7 @@ func NewSlicePool() *SlicePool {
 // If size is larger than SizeLarge, a new slice is allocated (not pooled).
 //
 // Important: Reset the slice (set length to 0) before use if needed.
-// Example: buf := (*bufPtr)[:0]
+// Example: buf := (*bufPtr)[:0].
 func (p *SlicePool) Get(size int) *[]byte {
 	var bufPtr interface{}
 
@@ -99,7 +76,7 @@ func (p *SlicePool) Get(size int) *[]byte {
 		return &buf
 	}
 
-	return bufPtr.(*[]byte)
+	return bufPtr.(*[]byte) //nolint:errcheck
 }
 
 // Put returns a byte slice to the appropriate pool.
@@ -171,7 +148,7 @@ func NewBytesPool() *BytesPool {
 // The buffer is reset to empty before being returned.
 // Always call Put() when done with the buffer.
 func (p *BytesPool) Get() *bytes.Buffer {
-	buf := p.pool.Get().(*bytes.Buffer)
+	buf := p.pool.Get().(*bytes.Buffer) //nolint:errcheck
 	buf.Reset()
 	return buf
 }
@@ -220,7 +197,7 @@ func NewBuilderPool() *BuilderPool {
 // The builder is reset to empty before being returned.
 // Always call Put() when done with the builder.
 func (p *BuilderPool) Get() *strings.Builder {
-	builder := p.pool.Get().(*strings.Builder)
+	builder := p.pool.Get().(*strings.Builder) //nolint:errcheck
 	builder.Reset()
 	return builder
 }
@@ -270,7 +247,7 @@ func NewResponsePool() *ResponsePool {
 // The buffer is reset to empty before being returned.
 // Always call Put() when done with the buffer.
 func (p *ResponsePool) Get() *bytes.Buffer {
-	buf := p.pool.Get().(*bytes.Buffer)
+	buf := p.pool.Get().(*bytes.Buffer) //nolint:errcheck
 	buf.Reset()
 	return buf
 }
@@ -327,7 +304,7 @@ func NewHeaderPool() *HeaderPool {
 // The map is cleared before being returned.
 // Always call Put() when done with the map.
 func (p *HeaderPool) Get() *map[string][]string {
-	hdr := p.pool.Get().(*map[string][]string)
+	hdr := p.pool.Get().(*map[string][]string) //nolint:errcheck
 	// Clear the map for reuse
 	for k := range *hdr {
 		delete(*hdr, k)

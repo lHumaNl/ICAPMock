@@ -1,19 +1,5 @@
-// Package ratelimit provides high-performance rate limiting implementations.
-//
-// This file implements a key-based sharded token bucket rate limiter that:
-//   - Supports per-client, per-method, and per-client+per-method rate limiting
-//   - Uses 16 independent shards with hash-based distribution
-//   - Eliminates mutex contention in high-concurrency scenarios
-//   - Provides O(1) lookup for existing keys
-//   - Memory-bounded with optional TTL-based eviction
-//
-// This design is particularly effective for workloads with 10,000+ RPS where
-// single-limiter mutex contention becomes a significant bottleneck.
-//
-// Trade-offs:
-//   - Lower contention at the cost of slightly less precise rate limiting
-//   - Best suited for uniform request patterns
-//   - Requires keys to have good hash distribution
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -100,8 +86,8 @@ type limiterEntry struct {
 // shard holds a shard of the rate limiter with its own mutex.
 // Each shard maintains a map of keys to their token bucket limiters.
 type shard struct {
-	mu       sync.RWMutex
 	limiters map[Key]*limiterEntry
+	mu       sync.RWMutex
 }
 
 // KeyBasedShardedTokenBucketLimiter implements rate limiting using key-based
@@ -124,11 +110,11 @@ type shard struct {
 // Thread-safe: All operations are protected by per-shard mutexes and atomic fields.
 type KeyBasedShardedTokenBucketLimiter struct {
 	shards    [numShards]*shard
-	rate      atomic.Value  // Rate limit in tokens per second (atomic.Value storing float64)
-	burst     atomic.Int64  // Burst capacity (atomic for thread safety)
-	evictions atomic.Uint64 // Number of evictions
-	ttl       time.Duration // TTL for idle limiters (0 = no eviction)
-	stopCh    chan struct{} // Signal to stop eviction goroutine
+	rate      atomic.Value
+	stopCh    chan struct{}
+	burst     atomic.Int64
+	evictions atomic.Uint64
+	ttl       time.Duration
 }
 
 // NewKeyBasedShardedTokenBucketLimiter creates a new key-based sharded token bucket rate limiter.
@@ -209,7 +195,7 @@ func (l *KeyBasedShardedTokenBucketLimiter) Allow(key Key) bool {
 		shard.mu.Lock()
 		entry, exists = shard.limiters[key]
 		if !exists {
-			rate := l.rate.Load().(float64)
+			rate := l.rate.Load().(float64) //nolint:errcheck
 			burst := int(l.burst.Load())
 			entry = &limiterEntry{
 				limiter: NewTokenBucketLimiter(rate, burst),
@@ -303,7 +289,7 @@ func (l *KeyBasedShardedTokenBucketLimiter) Reserve(key Key) Reservation {
 		shard.mu.Lock()
 		entry, exists = shard.limiters[key]
 		if !exists {
-			rate := l.rate.Load().(float64)
+			rate := l.rate.Load().(float64) //nolint:errcheck
 			burst := int(l.burst.Load())
 			entry = &limiterEntry{
 				limiter: NewTokenBucketLimiter(rate, burst),

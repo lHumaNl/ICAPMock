@@ -1,4 +1,5 @@
-// Package server provides the ICAP server implementation.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -12,9 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/pkg/pool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/icap-mock/icap-mock/pkg/pool"
 )
 
 func TestNewConnection(t *testing.T) {

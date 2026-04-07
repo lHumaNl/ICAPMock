@@ -1,4 +1,5 @@
-// Package logger provides structured logging tests for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package logger
 
 import (
@@ -119,9 +120,9 @@ func TestNewWithWriter(t *testing.T) {
 // TestLogLevels tests different log level configurations.
 func TestLogLevels(t *testing.T) {
 	tests := []struct {
+		logFunc   func(*Logger)
 		name      string
 		level     string
-		logFunc   func(*Logger)
 		shouldLog bool
 	}{
 		{"debug level logs debug", "debug", func(l *Logger) { l.Debug("debug msg") }, true},

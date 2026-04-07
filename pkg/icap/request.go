@@ -1,5 +1,5 @@
-// Package icap provides ICAP (Internet Content Adaptation Protocol) data structures
-// and utilities per RFC 3507.
+// Copyright 2026 ICAP Mock
+
 package icap
 
 import (
@@ -142,26 +142,18 @@ func (e Encapsulated) HasResBody() bool {
 // to BodyReader bypasses thread-safety and should only be done when you have
 // exclusive access to the message.
 type HTTPMessage struct {
-	Method     string    // HTTP method (GET, POST, etc.)
-	URI        string    // Request URI
-	Status     string    // Response status code (as string)
-	StatusText string    // Response status text
-	Proto      string    // HTTP version (HTTP/1.1)
-	Header     Header    // HTTP headers
-	Body       []byte    // HTTP body (populated lazily via GetBody())
-	BodyReader io.Reader // Streaming body reader (primary source)
-
-	// bodyLoaded tracks whether Body has been loaded from BodyReader
+	BodyReader io.Reader
+	bodyErr    error
+	Header     Header
+	Method     string
+	URI        string
+	Status     string
+	StatusText string
+	Proto      string
+	Body       []byte
+	mu         sync.RWMutex
+	bodyOnce   sync.Once
 	bodyLoaded bool
-
-	// bodyOnce ensures body is loaded exactly once even with concurrent calls
-	bodyOnce sync.Once
-
-	// bodyErr stores any error from loading the body
-	bodyErr error
-
-	// mu protects bodyLoaded, Body, and bodyErr fields
-	mu sync.RWMutex
 }
 
 // GetBody returns the body content, loading it lazily from BodyReader if needed.
@@ -286,40 +278,22 @@ func (m *HTTPMessage) GetPreviewBody(previewSize int) ([]byte, error) {
 //
 // Body-related methods (GetBody, IsBodyLoaded) are thread-safe.
 type Request struct {
-	Method     string    // ICAP method: REQMOD, RESPMOD, OPTIONS
-	URI        string    // ICAP URI (icap://...)
-	Proto      string    // ICAP version (ICAP/1.0)
-	Header     Header    // ICAP headers
-	Body       []byte    // ICAP body (populated lazily via GetBody())
-	BodyReader io.Reader // Streaming body reader (primary source)
-
-	// Parsed encapsulated HTTP message
-	HTTPRequest  *HTTPMessage // Embedded HTTP request (for REQMOD)
-	HTTPResponse *HTTPMessage // Embedded HTTP response (for RESPMOD)
-
-	// Encapsulated header values
+	BodyReader   io.Reader
+	bodyErr      error
+	Header       Header
+	HTTPRequest  *HTTPMessage
+	HTTPResponse *HTTPMessage
+	RemoteAddr   string
+	URI          string
+	Proto        string
+	Method       string
+	ClientIP     string
+	Body         []byte
 	Encapsulated Encapsulated
-
-	// Preview mode (RFC 3507 Section 4.6)
-	// When > 0, only the first N bytes of the HTTP body should be processed
-	// and returned as a preview. If preview body is unchanged, return ICAP 204.
-	Preview int // Number of bytes to read for preview (0 = no preview)
-
-	// Connection info
-	ClientIP   string // Client IP address (from X-Client-IP or connection)
-	RemoteAddr string // Remote address string
-
-	// bodyLoaded tracks whether Body has been loaded from BodyReader
-	bodyLoaded bool
-
-	// bodyOnce ensures body is loaded exactly once even with concurrent calls
-	bodyOnce sync.Once
-
-	// bodyErr stores any error from loading the body
-	bodyErr error
-
-	// mu protects bodyLoaded, Body, and bodyErr fields
-	mu sync.RWMutex
+	Preview      int
+	mu           sync.RWMutex
+	bodyOnce     sync.Once
+	bodyLoaded   bool
 }
 
 // GetBody returns the ICAP body content, loading it lazily from BodyReader if needed.
@@ -434,7 +408,7 @@ func ParseRequest(r *bufio.Reader) (*Request, error) {
 	// Read headers using textproto for proper handling
 	tp := textproto.NewReader(r)
 	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("reading headers: %w", err)
 	}
 
@@ -550,7 +524,7 @@ func (r *Request) parseHTTPRequest() error {
 	// Read HTTP headers
 	tp := textproto.NewReader(reader)
 	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	for k, v := range headerMap {
@@ -591,7 +565,7 @@ func (r *Request) parseHTTPRequestStreaming(reader *bufio.Reader) error {
 	// Read request line
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// No body content, nothing to parse
 			return nil
 		}
@@ -616,7 +590,7 @@ func (r *Request) parseHTTPRequestStreaming(reader *bufio.Reader) error {
 	// Read HTTP headers using textproto
 	tp := textproto.NewReader(reader)
 	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("reading HTTP headers: %w", err)
 	}
 	for k, v := range headerMap {
@@ -673,7 +647,7 @@ func (r *Request) parseHTTPResponse() error {
 	// Read HTTP headers
 	tp := textproto.NewReader(reader)
 	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	for k, v := range headerMap {
@@ -709,7 +683,7 @@ func (r *Request) parseHTTPResponseStreaming(reader *bufio.Reader) error {
 	// Read status line
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// No body content, nothing to parse
 			return nil
 		}
@@ -734,7 +708,7 @@ func (r *Request) parseHTTPResponseStreaming(reader *bufio.Reader) error {
 	// Read HTTP headers using textproto
 	tp := textproto.NewReader(reader)
 	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("reading HTTP headers: %w", err)
 	}
 	for k, v := range headerMap {
@@ -872,7 +846,7 @@ func (r *Request) WriteTo(w io.Writer) (int64, error) {
 }
 
 // ParseEncapsulatedHeader parses the Encapsulated header value.
-// Format: "req-hdr=0, req-body=412" or "req-hdr=0, res-hdr=200, res-body=350"
+// Format: "req-hdr=0, req-body=412" or "req-hdr=0, res-hdr=200, res-body=350".
 func ParseEncapsulatedHeader(s string) (Encapsulated, error) {
 	encap := NewEncapsulated()
 

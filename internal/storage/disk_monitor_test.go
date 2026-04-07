@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -384,7 +384,7 @@ func TestDiskMonitor_MultipleStartStop(t *testing.T) {
 	}
 }
 
-// TestDiskMonitor_ContextCancellation tests that monitor stops when context is cancelled.
+// TestDiskMonitor_ContextCancellation tests that monitor stops when context is canceled.
 func TestDiskMonitor_ContextCancellation(t *testing.T) {
 	cfg := config.DiskMonitorConfig{
 		Enabled:          true,

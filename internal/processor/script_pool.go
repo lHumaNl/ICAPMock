@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -16,8 +18,8 @@ import (
 type scriptJob struct {
 	ctx    context.Context
 	req    *icap.Request
-	script string
 	result chan<- scriptJobResult
+	script string
 }
 
 // scriptJobResult holds the result of a script execution.
@@ -28,10 +30,10 @@ type scriptJobResult struct {
 
 // WorkerHealth tracks the health status of a worker.
 type WorkerHealth struct {
+	lastError       error
 	workerID        int
 	jobsProcessed   int64
 	panicsRecovered int64
-	lastError       error
 	lastPanicTime   int64
 	mu              sync.RWMutex
 }
@@ -60,17 +62,10 @@ func (h *WorkerHealth) GetStats() (int64, int64, int64) {
 
 // ScriptWorkerPoolConfig holds configuration for the script worker pool.
 type ScriptWorkerPoolConfig struct {
-	// Workers is the number of script worker goroutines.
-	// Default: 100
-	Workers int
-	// QueueSize is the size of the bounded job queue.
-	// Default: 1000
+	Metrics   *metrics.Collector
+	Logger    *logger.Logger
+	Workers   int
 	QueueSize int
-	// Metrics is the Prometheus metrics collector for tracking script pool metrics.
-	// If nil, metrics will not be collected.
-	Metrics *metrics.Collector
-	// Logger is the logger for recording script pool events.
-	Logger *logger.Logger
 }
 
 // DefaultScriptWorkerPoolConfig returns the default configuration.
@@ -88,20 +83,20 @@ func DefaultScriptWorkerPoolConfig() ScriptWorkerPoolConfig {
 // The pool provides graceful shutdown capabilities to prevent goroutine leaks.
 // Scripts are rejected when the queue is full, preventing memory exhaustion.
 type ScriptWorkerPool struct {
-	jobs          chan *scriptJob
-	wg            sync.WaitGroup
 	ctx           context.Context
+	scriptFunc    executeScriptFunc
 	cancel        context.CancelFunc
 	logger        *logger.Logger
 	metrics       *metrics.Collector
-	scriptFunc    executeScriptFunc
+	jobs          chan *scriptJob
+	workerHealth  []*WorkerHealth
+	wg            sync.WaitGroup
 	maxQueueSize  int
 	rejectedCount int64
-	workerHealth  []*WorkerHealth
 	healthMu      sync.RWMutex
+	jobsMu        sync.RWMutex
 	shutdownOnce  sync.Once
 	stopped       atomic.Bool
-	jobsMu        sync.RWMutex // protects sends to jobs channel against close
 }
 
 // executeScriptFunc is the function type for executing scripts.
@@ -132,7 +127,7 @@ func NewScriptWorkerPool(cfg ScriptWorkerPoolConfig, scriptFunc executeScriptFun
 		cfg.QueueSize = 1000
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel managed elsewhere
 	jobs := make(chan *scriptJob, cfg.QueueSize)
 
 	pool := &ScriptWorkerPool{
@@ -249,7 +244,7 @@ func (p *ScriptWorkerPool) Execute(ctx context.Context, req *icap.Request, scrip
 		}
 		return result.resp, result.err
 	case <-ctx.Done():
-		// Context cancelled, return error
+		// Context canceled, return error
 		return nil, ctx.Err()
 	case <-p.ctx.Done():
 		// Pool is shutting down; the job may never be processed
@@ -261,7 +256,7 @@ func (p *ScriptWorkerPool) Execute(ctx context.Context, req *icap.Request, scrip
 // It closes the job queue, processes all pending jobs, and waits for workers to finish.
 //
 // The method will wait up to the provided context's deadline for graceful shutdown.
-// If the context is cancelled, the shutdown is aborted immediately.
+// If the context is canceled, the shutdown is aborted immediately.
 //
 // This method is idempotent - calling it multiple times is safe.
 //
@@ -322,12 +317,12 @@ func (p *ScriptWorkerPool) scriptWorker(id int) {
 	for {
 		select {
 		case <-p.ctx.Done():
-			// Context cancelled, drain remaining jobs quickly during shutdown
+			// Context canceled, drain remaining jobs quickly during shutdown
 			for job := range p.jobs {
-				// Check if job context is already cancelled
+				// Check if job context is already canceled
 				select {
 				case <-job.ctx.Done():
-					// Job cancelled, skip processing
+					// Job canceled, skip processing
 					continue
 				default:
 				}
@@ -339,7 +334,7 @@ func (p *ScriptWorkerPool) scriptWorker(id int) {
 						"worker_id", id,
 					)
 				}
-				// Send result (ignore if channel is closed or job cancelled)
+				// Send result (ignore if channel is closed or job canceled)
 				select {
 				case job.result <- scriptJobResult{resp: resp, err: err}:
 				case <-job.ctx.Done():
@@ -401,11 +396,11 @@ func (p *ScriptWorkerPool) processJobWithRecovery(workerID int, job *scriptJob) 
 	// Check for exit conditions before processing
 	select {
 	case <-job.ctx.Done():
-		// Job context cancelled, return error and continue
+		// Job context canceled, return error and continue
 		p.sendResultSafely(job, scriptJobResult{err: job.ctx.Err()})
 		return false
 	case <-p.ctx.Done():
-		// Pool context cancelled, worker should exit
+		// Pool context canceled, worker should exit
 		return true
 	default:
 		// Continue processing
@@ -430,18 +425,18 @@ func (p *ScriptWorkerPool) processJobWithRecovery(workerID int, job *scriptJob) 
 }
 
 // sendResultSafely sends a job result to the result channel with proper exit condition checking.
-// It checks if the result channel is closed, job context is cancelled, or pool is shutting down.
+// It checks if the result channel is closed, job context is canceled, or pool is shutting down.
 func (p *ScriptWorkerPool) sendResultSafely(job *scriptJob, result scriptJobResult) {
 	select {
 	case job.result <- result:
 		// Result sent successfully
 	case <-job.ctx.Done():
-		// Job context cancelled, channel may be closed
+		// Job context canceled, channel may be closed
 	case <-p.ctx.Done():
 		// Pool shutting down, channel may be closed
 	default:
 		// Channel closed, unable to send result
-		// This is expected during shutdown or when job context is cancelled
+		// This is expected during shutdown or when job context is canceled
 	}
 }
 

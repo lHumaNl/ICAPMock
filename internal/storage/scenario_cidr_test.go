@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -120,9 +120,9 @@ func TestScenarioRegistry_CIDR_Invalid(t *testing.T) {
 	tests := []struct {
 		name       string
 		cidrRange  string
-		wantErr    bool
 		errField   string
 		errMessage string
+		wantErr    bool
 	}{
 		{
 			name:       "missing prefix length",
@@ -562,8 +562,8 @@ scenarios:
 func TestMatchByCIDR(t *testing.T) {
 	tests := []struct {
 		name       string
-		cidrRanges []string
 		clientIP   string
+		cidrRanges []string
 		want       bool
 	}{
 		{

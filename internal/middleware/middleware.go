@@ -1,5 +1,5 @@
-// Package middleware provides reusable ICAP middleware for rate limiting,
-// request storage, panic recovery, and middleware chaining.
+// Copyright 2026 ICAP Mock
+
 package middleware
 
 import (
@@ -21,12 +21,12 @@ import (
 
 // CircuitBreakerConfig holds configuration for the circuit breaker used by StorageMiddleware.
 type CircuitBreakerConfig struct {
-	Enabled          bool
+	Metrics          *metrics.Collector
+	Component        string
 	MaxFailures      int
 	ResetTimeout     time.Duration
 	SuccessThreshold int
-	Component        string
-	Metrics          *metrics.Collector
+	Enabled          bool
 }
 
 // DefaultCircuitBreakerConfig returns the default circuit breaker configuration.
@@ -104,10 +104,10 @@ type storageJob struct {
 
 // StorageMiddlewareConfig holds configuration for the storage middleware.
 type StorageMiddlewareConfig struct {
-	Workers        int
-	QueueSize      int
 	CircuitBreaker CircuitBreakerConfig
 	Metrics        *metrics.Collector
+	Workers        int
+	QueueSize      int
 }
 
 // DefaultStorageMiddlewareConfig returns the default configuration.
@@ -121,14 +121,14 @@ func DefaultStorageMiddlewareConfig() StorageMiddlewareConfig {
 
 // StorageMiddleware manages a pool of workers for async storage operations.
 type StorageMiddleware struct {
-	jobs           chan *storageJob
-	wg             sync.WaitGroup
 	ctx            context.Context
-	cancel         context.CancelFunc
 	store          storage.Storage
+	jobs           chan *storageJob
+	cancel         context.CancelFunc
 	logger         *slog.Logger
 	circuitBreaker *circuitbreaker.CircuitBreaker
 	metrics        *metrics.Collector
+	wg             sync.WaitGroup
 	maxQueueSize   int
 	rejectedCount  int64
 	stopped        atomic.Bool
@@ -137,7 +137,7 @@ type StorageMiddleware struct {
 // StorageMiddlewareWithPool returns middleware that saves requests to storage
 // using a bounded worker pool.
 func StorageMiddlewareWithPool(store storage.Storage, logger *slog.Logger, cfg StorageMiddlewareConfig) *StorageMiddleware {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel managed elsewhere
 	jobs := make(chan *storageJob, cfg.QueueSize)
 
 	var cb *circuitbreaker.CircuitBreaker

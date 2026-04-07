@@ -1,23 +1,5 @@
-// Package config provides configuration structures and loading mechanisms
-// for the ICAP Mock Server.
-//
-// The configuration can be loaded from YAML files, JSON files, environment
-// variables, or programmatically. The loader supports merging configurations
-// from multiple sources with the following priority (highest to lowest):
-//
-//  1. Environment variables
-//  2. Configuration file (YAML or JSON)
-//  3. Default values
-//
-// Example YAML configuration:
-//
-//	server:
-//	  host: "0.0.0.0"
-//	  port: 1344
-//	  read_timeout: 30s
-//	logging:
-//	  level: "info"
-//	  format: "json"
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (
@@ -26,22 +8,14 @@ import (
 	"time"
 )
 
+const defaultHost = "0.0.0.0"
+
 // CircuitBreakerGlobalConfig contains global circuit breaker configuration.
 // Circuit breakers provide automatic failure isolation for external dependencies.
 type CircuitBreakerGlobalConfig struct {
-	// Enabled enables circuit breakers globally.
-	// When disabled, all circuit breakers bypass logic.
-	// Default: false (disabled for backward compatibility)
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// Defaults provides default configuration for all circuit breakers.
-	// Individual components can override these defaults.
-	Defaults CircuitBreakerComponentConfig `yaml:"defaults" json:"defaults"`
-
-	// Components provides per-component circuit breaker configuration.
-	// Component names include: "storage", "scenario_loader", "metrics_server".
-	// If a component is not listed here, it uses defaults.
 	Components map[string]CircuitBreakerComponentConfig `yaml:"components" json:"components"`
+	Defaults   CircuitBreakerComponentConfig            `yaml:"defaults" json:"defaults"`
+	Enabled    bool                                     `yaml:"enabled" json:"enabled"`
 }
 
 // CircuitBreakerComponentConfig contains circuit breaker configuration for a single component.
@@ -77,9 +51,9 @@ func (c *CircuitBreakerComponentConfig) UnmarshalJSON(data []byte) error {
 	type Alias CircuitBreakerComponentConfig
 
 	temp := struct {
+		*Alias
 		OpenTimeout   string `json:"open_timeout"`
 		RollingWindow string `json:"rolling_window"`
-		*Alias
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -122,46 +96,44 @@ type DefaultsConfig struct {
 // InlineWeightedResponse mirrors storage.WeightedResponseV2 for inline scenario definitions.
 // Defined here to avoid a circular import between config and storage packages.
 type InlineWeightedResponse struct {
-	Weight     int               `yaml:"weight,omitempty" json:"weight,omitempty"`
 	Set        map[string]string `yaml:"set,omitempty" json:"set,omitempty"`
-	Status     int               `yaml:"status,omitempty" json:"status,omitempty"`
-	HTTPStatus int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 	Body       string            `yaml:"body,omitempty" json:"body,omitempty"`
 	Delay      string            `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Weight     int               `yaml:"weight,omitempty" json:"weight,omitempty"`
+	Status     int               `yaml:"status,omitempty" json:"status,omitempty"`
+	HTTPStatus int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 }
 
 // InlineScenarioEntry mirrors storage.ScenarioEntryV2 for inline scenario definitions.
 // Defined here to avoid a circular import between config and storage packages.
 type InlineScenarioEntry struct {
-	Method     string                   `yaml:"method,omitempty" json:"method,omitempty"`
-	Endpoint   string                   `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
-	Status     int                      `yaml:"status,omitempty" json:"status,omitempty"`
-	HTTPStatus int                      `yaml:"http_status,omitempty" json:"http_status,omitempty"`
-	Priority   int                      `yaml:"priority,omitempty" json:"priority,omitempty"`
 	When       map[string]string        `yaml:"when,omitempty" json:"when,omitempty"`
 	Set        map[string]string        `yaml:"set,omitempty" json:"set,omitempty"`
+	Method     string                   `yaml:"method,omitempty" json:"method,omitempty"`
+	Endpoint   string                   `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
 	Body       string                   `yaml:"body,omitempty" json:"body,omitempty"`
 	BodyFile   string                   `yaml:"body_file,omitempty" json:"body_file,omitempty"`
 	Delay      string                   `yaml:"delay,omitempty" json:"delay,omitempty"`
 	Responses  []InlineWeightedResponse `yaml:"responses,omitempty" json:"responses,omitempty"`
+	Status     int                      `yaml:"status,omitempty" json:"status,omitempty"`
+	HTTPStatus int                      `yaml:"http_status,omitempty" json:"http_status,omitempty"`
+	Priority   int                      `yaml:"priority,omitempty" json:"priority,omitempty"`
 }
 
 // ServerEntryConfig defines an ICAP server instance with its own port and scenarios.
 // Fields that are zero/empty fall back to DefaultsConfig values.
 type ServerEntryConfig struct {
-	Port         int    `yaml:"port" json:"port"`
-	ScenariosDir string `yaml:"scenarios_dir" json:"scenarios_dir"`
-	ServiceID    string `yaml:"service_id,omitempty" json:"service_id,omitempty"`
-	// Inline scenarios (v2 format, higher priority than file-loaded scenarios)
-	Scenarios map[string]InlineScenarioEntry `yaml:"scenarios,omitempty" json:"scenarios,omitempty"`
-	// Override fields (if set, take precedence over defaults)
-	Host            string        `yaml:"host,omitempty" json:"host,omitempty"`
-	ReadTimeout     time.Duration `yaml:"read_timeout,omitempty" json:"read_timeout,omitempty"`
-	WriteTimeout    time.Duration `yaml:"write_timeout,omitempty" json:"write_timeout,omitempty"`
-	MaxConnections  int           `yaml:"max_connections,omitempty" json:"max_connections,omitempty"`
-	MaxBodySize     int64         `yaml:"max_body_size,omitempty" json:"max_body_size,omitempty"`
-	IdleTimeout     time.Duration `yaml:"idle_timeout,omitempty" json:"idle_timeout,omitempty"`
-	ShutdownTimeout time.Duration `yaml:"shutdown_timeout,omitempty" json:"shutdown_timeout,omitempty"`
+	Scenarios       map[string]InlineScenarioEntry `yaml:"scenarios,omitempty" json:"scenarios,omitempty"`
+	ScenariosDir    string                         `yaml:"scenarios_dir" json:"scenarios_dir"`
+	ServiceID       string                         `yaml:"service_id,omitempty" json:"service_id,omitempty"`
+	Host            string                         `yaml:"host,omitempty" json:"host,omitempty"`
+	Port            int                            `yaml:"port" json:"port"`
+	ReadTimeout     time.Duration                  `yaml:"read_timeout,omitempty" json:"read_timeout,omitempty"`
+	WriteTimeout    time.Duration                  `yaml:"write_timeout,omitempty" json:"write_timeout,omitempty"`
+	MaxConnections  int                            `yaml:"max_connections,omitempty" json:"max_connections,omitempty"`
+	MaxBodySize     int64                          `yaml:"max_body_size,omitempty" json:"max_body_size,omitempty"`
+	IdleTimeout     time.Duration                  `yaml:"idle_timeout,omitempty" json:"idle_timeout,omitempty"`
+	ShutdownTimeout time.Duration                  `yaml:"shutdown_timeout,omitempty" json:"shutdown_timeout,omitempty"`
 }
 
 // ToServerConfig merges this entry with defaults to produce a ServerConfig
@@ -206,72 +178,31 @@ func (e *ServerEntryConfig) ToServerConfig(defaults DefaultsConfig) ServerConfig
 // Config is the root configuration structure for the ICAP Mock Server.
 // It contains all sub-configurations for different components.
 type Config struct {
-	// Server contains ICAP server configuration.
-	Server ServerConfig `yaml:"server" json:"server"`
-
-	// Logging contains logging configuration.
-	Logging LoggingConfig `yaml:"logging" json:"logging"`
-
-	// Metrics contains Prometheus metrics configuration.
-	Metrics MetricsConfig `yaml:"metrics" json:"metrics"`
-
-	// Mock contains mock processor configuration.
-	Mock MockConfig `yaml:"mock" json:"mock"`
-
-	// Chaos contains chaos engineering configuration.
-	Chaos ChaosConfig `yaml:"chaos" json:"chaos"`
-
-	// Storage contains request storage configuration.
-	Storage StorageConfig `yaml:"storage" json:"storage"`
-
-	// RateLimit contains rate limiting configuration.
-	RateLimit RateLimitConfig `yaml:"rate_limit" json:"rate_limit"`
-
-	// PerClientRateLimit contains per-client rate limiting configuration.
-	PerClientRateLimit PerClientRateLimitConfig `yaml:"per_client_rate_limit" json:"per_client_rate_limit"`
-
-	// PerMethodRateLimit contains per-method rate limiting configuration.
-	PerMethodRateLimit PerMethodRateLimitConfig `yaml:"per_method_rate_limit" json:"per_method_rate_limit"`
-
-	// Health contains health check endpoint configuration.
-	Health HealthConfig `yaml:"health" json:"health"`
-
-	// Defaults contains shared settings inherited by all servers in the Servers map.
-	Defaults DefaultsConfig `yaml:"defaults,omitempty" json:"defaults,omitempty"`
-
-	// Servers defines ICAP server instances as a name→config map.
-	// When empty, falls back to server.port + mock.scenarios_dir (backward compatible).
-	// Example:
-	//   servers:
-	//     kata:
-	//       port: 1344
-	//       scenarios_dir: "./configs/scenarios-kata"
-	Servers map[string]ServerEntryConfig `yaml:"servers,omitempty" json:"servers,omitempty"`
-
-	// Replay contains request replay configuration.
-	Replay ReplayConfig `yaml:"replay" json:"replay"`
-
-	// Pprof contains pprof profiling configuration.
-	Pprof PprofConfig `yaml:"pprof" json:"pprof"`
-
-	// Plugin contains plugin system configuration.
-	Plugin PluginConfig `yaml:"plugin" json:"plugin"`
-
-	// Sharding contains scenario sharding configuration.
-	Sharding ShardingConfig `yaml:"sharding" json:"sharding"`
-
-	// Preview contains preview rate limiting configuration.
-	Preview PreviewConfig `yaml:"preview" json:"preview"`
-
-	// CircuitBreaker contains global circuit breaker configuration.
-	CircuitBreaker CircuitBreakerGlobalConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
+	CircuitBreaker     CircuitBreakerGlobalConfig   `yaml:"circuit_breaker" json:"circuit_breaker"`
+	Servers            map[string]ServerEntryConfig `yaml:"servers,omitempty" json:"servers,omitempty"`
+	Server             ServerConfig                 `yaml:"server" json:"server"`
+	Health             HealthConfig                 `yaml:"health" json:"health"`
+	Metrics            MetricsConfig                `yaml:"metrics" json:"metrics"`
+	RateLimit          RateLimitConfig              `yaml:"rate_limit" json:"rate_limit"`
+	Plugin             PluginConfig                 `yaml:"plugin" json:"plugin"`
+	Replay             ReplayConfig                 `yaml:"replay" json:"replay"`
+	Mock               MockConfig                   `yaml:"mock" json:"mock"`
+	Logging            LoggingConfig                `yaml:"logging" json:"logging"`
+	Storage            StorageConfig                `yaml:"storage" json:"storage"`
+	Defaults           DefaultsConfig               `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	Chaos              ChaosConfig                  `yaml:"chaos" json:"chaos"`
+	PerClientRateLimit PerClientRateLimitConfig     `yaml:"per_client_rate_limit" json:"per_client_rate_limit"`
+	Sharding           ShardingConfig               `yaml:"sharding" json:"sharding"`
+	Preview            PreviewConfig                `yaml:"preview" json:"preview"`
+	PerMethodRateLimit PerMethodRateLimitConfig     `yaml:"per_method_rate_limit" json:"per_method_rate_limit"`
+	Pprof              PprofConfig                  `yaml:"pprof" json:"pprof"`
 }
 
 // SetDefaults sets default values for all configuration fields.
 // This should be called before loading configuration from files or environment.
 func (c *Config) SetDefaults() {
 	// Server defaults
-	c.Server.Host = "0.0.0.0"
+	c.Server.Host = defaultHost //nolint:goconst
 	c.Server.Port = 1344
 	c.Server.ReadTimeout = 30 * time.Second
 	c.Server.WriteTimeout = 30 * time.Second
@@ -299,7 +230,7 @@ func (c *Config) SetDefaults() {
 
 	// Metrics defaults
 	c.Metrics.Enabled = true
-	c.Metrics.Host = "0.0.0.0"
+	c.Metrics.Host = defaultHost
 	c.Metrics.Port = 9090
 	c.Metrics.Path = "/metrics"
 
@@ -424,59 +355,16 @@ func (c *Config) SetDefaults() {
 
 // ServerConfig contains ICAP server configuration.
 type ServerConfig struct {
-	// Host is the address to bind the ICAP server to.
-	// Default: "0.0.0.0"
-	Host string `yaml:"host" json:"host"`
-
-	// Port is the ICAP server port.
-	// Default: 1344 (standard ICAP port)
-	Port int `yaml:"port" json:"port"`
-
-	// ReadTimeout is the maximum duration for reading the entire
-	// request, including the body.
-	// Default: 30s
-	ReadTimeout time.Duration `yaml:"read_timeout" json:"read_timeout"`
-
-	// WriteTimeout is the maximum duration before timing out
-	// writes of the response.
-	// Default: 30s
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
-
-	// MaxConnections is the maximum number of simultaneous connections.
-	// This value should be set based on expected traffic and server resources.
-	// Higher values allow more concurrent connections but require more memory.
-	// Default: 15000 (production-ready for high-traffic workloads)
-	MaxConnections int `yaml:"max_connections" json:"max_connections"`
-
-	// MaxBodySize is the maximum size of the request body in bytes.
-	// Setting a reasonable limit protects against:
-	//   - Memory exhaustion attacks (malicious large payloads)
-	//   - Accidental OOM conditions from oversized requests
-	// For streaming mode with large files, this can be increased or set to 0.
-	// Default: 10485760 (10MB) - safe for most production scenarios
-	MaxBodySize int64 `yaml:"max_body_size" json:"max_body_size"`
-
-	// Streaming enables full streaming mode for body handling.
-	// When enabled, body processing uses O(1) memory.
-	// Default: true
-	Streaming bool `yaml:"streaming" json:"streaming"`
-
-	// IdleTimeout is the maximum duration a connection can be idle before being closed.
-	// This prevents resource exhaustion by closing inactive connections.
-	// A connection is considered idle when no reads or writes occur for this duration.
-	// Default: 60s
-	IdleTimeout time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
-
-	// ShutdownTimeout is the maximum duration for graceful shutdown.
-	// The server stops accepting new connections and waits for active requests.
-	// If timeout is exceeded, remaining connections are forcibly closed.
-	// This prevents indefinite blocking during shutdown while respecting
-	// the "wait for all requests" intent with a safety net.
-	// Default: 30s
+	TLS             TLSConfig     `yaml:"tls" json:"tls"`
+	Host            string        `yaml:"host" json:"host"`
+	Port            int           `yaml:"port" json:"port"`
+	ReadTimeout     time.Duration `yaml:"read_timeout" json:"read_timeout"`
+	WriteTimeout    time.Duration `yaml:"write_timeout" json:"write_timeout"`
+	MaxConnections  int           `yaml:"max_connections" json:"max_connections"`
+	MaxBodySize     int64         `yaml:"max_body_size" json:"max_body_size"`
+	IdleTimeout     time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout"`
-
-	// TLS contains TLS/SSL configuration.
-	TLS TLSConfig `yaml:"tls" json:"tls"`
+	Streaming       bool          `yaml:"streaming" json:"streaming"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ServerConfig.
@@ -487,12 +375,12 @@ func (c *ServerConfig) UnmarshalJSON(data []byte) error {
 
 	// Create a temporary struct with duration fields as strings
 	temp := struct {
+		*Alias
 		ReadTimeout     string          `json:"read_timeout"`
 		WriteTimeout    string          `json:"write_timeout"`
 		IdleTimeout     string          `json:"idle_timeout"`
 		ShutdownTimeout string          `json:"shutdown_timeout"`
 		MaxBodySize     json.RawMessage `json:"max_body_size"`
-		*Alias
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -555,31 +443,13 @@ func (c *ServerConfig) UnmarshalJSON(data []byte) error {
 
 // TLSConfig contains TLS configuration for the ICAP server.
 type TLSConfig struct {
-	// Enabled enables TLS for the server.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// CertFile is the path to the TLS certificate file.
-	CertFile string `yaml:"cert_file" json:"cert_file"`
-
-	// KeyFile is the path to the TLS private key file.
-	KeyFile string `yaml:"key_file" json:"key_file"`
-
-	// CertCheckInterval is the interval between TLS certificate expiry checks.
-	// Default: 24h (24 hours)
+	CertFile          string        `yaml:"cert_file" json:"cert_file"`
+	KeyFile           string        `yaml:"key_file" json:"key_file"`
+	ClientCAFile      string        `yaml:"client_ca_file" json:"client_ca_file"`
+	ClientAuth        string        `yaml:"client_auth" json:"client_auth"`
 	CertCheckInterval time.Duration `yaml:"cert_check_interval" json:"cert_check_interval"`
-
-	// ExpiryWarningDays is the number of days before expiry to start logging warnings.
-	// Default: 30 days
-	ExpiryWarningDays int `yaml:"expiry_warning_days" json:"expiry_warning_days"`
-
-	// ClientCAFile is the path to the CA certificate used to verify client certificates.
-	// Required when ClientAuth is "optional" or "required".
-	ClientCAFile string `yaml:"client_ca_file" json:"client_ca_file"`
-
-	// ClientAuth controls whether and how client certificates are verified.
-	// Accepted values: "none" (default), "optional", "required".
-	ClientAuth string `yaml:"client_auth" json:"client_auth"`
+	ExpiryWarningDays int           `yaml:"expiry_warning_days" json:"expiry_warning_days"`
+	Enabled           bool          `yaml:"enabled" json:"enabled"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for TLSConfig.
@@ -590,8 +460,8 @@ func (c *TLSConfig) UnmarshalJSON(data []byte) error {
 
 	// Create a temporary struct with duration fields as strings
 	temp := struct {
-		CertCheckInterval string `json:"cert_check_interval"`
 		*Alias
+		CertCheckInterval string `json:"cert_check_interval"`
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -645,64 +515,26 @@ type LoggingConfig struct {
 
 // MetricsConfig contains Prometheus metrics configuration.
 type MetricsConfig struct {
-	// Enabled enables the Prometheus metrics endpoint.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// Host is the address to bind the metrics server to.
-	// Default: "0.0.0.0"
-	Host string `yaml:"host" json:"host"`
-
-	// Port is the metrics server port.
-	// Default: 9090
-	Port int `yaml:"port" json:"port"`
-
-	// Path is the HTTP path for the metrics endpoint.
-	// Default: "/metrics"
-	Path string `yaml:"path" json:"path"`
+	Host    string `yaml:"host" json:"host"`
+	Path    string `yaml:"path" json:"path"`
+	Port    int    `yaml:"port" json:"port"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
 }
 
 // MockConfig contains mock processor configuration.
 type MockConfig struct {
-	// DefaultMode is the default processing mode.
-	// Valid values: "echo", "mock", "script"
-	// Default: "mock"
-	DefaultMode string `yaml:"default_mode" json:"default_mode"`
-
-	// ScenariosDir is the directory containing scenario files.
-	ScenariosDir string `yaml:"scenarios_dir" json:"scenarios_dir"`
-
-	// DefaultTimeout is the default timeout for processing requests.
-	// Default: 5s
-	DefaultTimeout time.Duration `yaml:"default_timeout" json:"default_timeout"`
-
-	// ServiceID is the ICAP Service-ID header value returned in OPTIONS responses.
-	// This identifies the ICAP service instance and is useful for multi-instance deployments.
-	// RFC 3507 recommends this header for service identification.
-	// Default: "icap-mock"
-	ServiceID string `yaml:"service_id" json:"service_id"`
-
-	// HotReload contains hot-reload configuration for scenario files.
-	// When enabled, scenarios are automatically reloaded when files change.
-	HotReload HotReloadConfig `yaml:"hot_reload" json:"hot_reload"`
+	DefaultMode    string          `yaml:"default_mode" json:"default_mode"`
+	ScenariosDir   string          `yaml:"scenarios_dir" json:"scenarios_dir"`
+	ServiceID      string          `yaml:"service_id" json:"service_id"`
+	HotReload      HotReloadConfig `yaml:"hot_reload" json:"hot_reload"`
+	DefaultTimeout time.Duration   `yaml:"default_timeout" json:"default_timeout"`
 }
 
 // HotReloadConfig contains configuration for scenario hot-reloading.
 type HotReloadConfig struct {
-	// Enabled enables automatic hot-reload of scenario files.
-	// When true, scenario files are watched for changes and automatically reloaded.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// Debounce is the duration to wait before reloading after a file change.
-	// This prevents multiple reloads when a file is saved multiple times quickly.
-	// Default: 1s
-	Debounce time.Duration `yaml:"debounce" json:"debounce"`
-
-	// WatchDirectory enables watching the entire directory for changes.
-	// If false, only watches the specific scenario file.
-	// Default: true
-	WatchDirectory bool `yaml:"watch_directory" json:"watch_directory"`
+	Debounce       time.Duration `yaml:"debounce" json:"debounce"`
+	Enabled        bool          `yaml:"enabled" json:"enabled"`
+	WatchDirectory bool          `yaml:"watch_directory" json:"watch_directory"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for HotReloadConfig.
@@ -711,8 +543,8 @@ func (c *HotReloadConfig) UnmarshalJSON(data []byte) error {
 	type Alias HotReloadConfig
 
 	temp := struct {
-		Debounce string `json:"debounce"`
 		*Alias
+		Debounce string `json:"debounce"`
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -738,8 +570,8 @@ func (c *MockConfig) UnmarshalJSON(data []byte) error {
 	type Alias MockConfig
 
 	temp := struct {
-		DefaultTimeout string `json:"default_timeout"`
 		*Alias
+		DefaultTimeout string `json:"default_timeout"`
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -765,8 +597,8 @@ func (c *PerClientRateLimitConfig) UnmarshalJSON(data []byte) error {
 	type Alias PerClientRateLimitConfig
 
 	temp := struct {
-		TTL string `json:"ttl"`
 		*Alias
+		TTL string `json:"ttl"`
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -792,8 +624,8 @@ func (c *CircuitBreakerConfig) UnmarshalJSON(data []byte) error {
 	type Alias CircuitBreakerConfig
 
 	temp := struct {
-		ResetTimeout string `json:"reset_timeout"`
 		*Alias
+		ResetTimeout string `json:"reset_timeout"`
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -847,39 +679,14 @@ type ChaosConfig struct {
 
 // StorageConfig contains request storage configuration.
 type StorageConfig struct {
-	// Enabled enables request storage.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// RequestsDir is the directory for storing recorded requests.
-	// Default: "./data/requests"
-	RequestsDir string `yaml:"requests_dir" json:"requests_dir"`
-
-	// MaxFileSize is the maximum size of a single storage file in bytes.
-	// Default: 104857600 (100MB)
-	MaxFileSize int64 `yaml:"max_file_size" json:"max_file_size"`
-
-	// RotateAfter is the number of requests after which to rotate the file.
-	// Default: 10000
-	RotateAfter int `yaml:"rotate_after" json:"rotate_after"`
-
-	// Workers is the number of background workers for async storage operations.
-	// Default: 16
-	Workers int `yaml:"workers" json:"workers"`
-
-	// QueueSize is the size of the job queue for storage operations.
-	// When the queue is full, new requests are dropped.
-	// Default: 10000
-	QueueSize int `yaml:"queue_size" json:"queue_size"`
-
-	// DiskMonitor contains disk space monitoring configuration.
-	// The disk monitor prevents crashes when disk is full by checking
-	// available space before writes and rejecting requests at error threshold.
-	DiskMonitor DiskMonitorConfig `yaml:"disk_monitor" json:"disk_monitor"`
-
-	// CircuitBreaker contains circuit breaker configuration for storage failures.
-	// The circuit breaker prevents cascading failures when storage is unhealthy.
+	RequestsDir    string               `yaml:"requests_dir" json:"requests_dir"`
+	DiskMonitor    DiskMonitorConfig    `yaml:"disk_monitor" json:"disk_monitor"`
 	CircuitBreaker CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
+	MaxFileSize    int64                `yaml:"max_file_size" json:"max_file_size"`
+	RotateAfter    int                  `yaml:"rotate_after" json:"rotate_after"`
+	Workers        int                  `yaml:"workers" json:"workers"`
+	QueueSize      int                  `yaml:"queue_size" json:"queue_size"`
+	Enabled        bool                 `yaml:"enabled" json:"enabled"`
 }
 
 // CircuitBreakerConfig contains circuit breaker configuration for storage operations.
@@ -911,43 +718,13 @@ type CircuitBreakerConfig struct {
 // The disk monitor prevents crashes when disk is full by checking available space
 // before writes and rejecting requests at error threshold.
 type DiskMonitorConfig struct {
-	// Enabled enables periodic disk space checking.
-	// When enabled, disk usage is monitored and writes are rejected at error threshold.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// CheckInterval is the interval between disk space checks.
-	// Default: 30s
-	CheckInterval time.Duration `yaml:"check_interval" json:"check_interval"`
-
-	// WarningThreshold is the disk usage percentage that triggers a warning.
-	// Writes are allowed but a warning is logged and metric is emitted.
-	// Range: 0.0 to 1.0 (e.g., 0.80 = 80%)
-	// Default: 0.80 (80%)
-	WarningThreshold float64 `yaml:"warning_threshold" json:"warning_threshold"`
-
-	// ErrorThreshold is the disk usage percentage that triggers write rejection.
-	// At this threshold, new writes are rejected with ICAP error response.
-	// Range: 0.0 to 1.0 (e.g., 0.95 = 95%)
-	// Default: 0.95 (95%)
-	ErrorThreshold float64 `yaml:"error_threshold" json:"error_threshold"`
-
-	// Path is the directory path to check for disk space.
-	// Empty string means use the requests_dir.
-	// Default: "" (use requests_dir)
-	Path string `yaml:"path" json:"path"`
-
-	// UseSyscalls enables use of platform-specific syscalls for disk checking.
-	// When true, uses statfs on Unix/Linux and GetDiskFreeSpaceEx on Windows.
-	// When false, uses filepath.Walk (slower, but works on all platforms).
-	// Default: true
-	UseSyscalls bool `yaml:"use_syscalls" json:"use_syscalls"`
-
-	// CacheInterval is the duration to cache disk usage results.
-	// Multiple CheckDiskSpace() calls within this interval will use cached results,
-	// preventing multiple expensive I/O operations.
-	// Default: 5s
-	CacheInterval time.Duration `yaml:"cache_interval" json:"cache_interval"`
+	Path             string        `yaml:"path" json:"path"`
+	CheckInterval    time.Duration `yaml:"check_interval" json:"check_interval"`
+	WarningThreshold float64       `yaml:"warning_threshold" json:"warning_threshold"`
+	ErrorThreshold   float64       `yaml:"error_threshold" json:"error_threshold"`
+	CacheInterval    time.Duration `yaml:"cache_interval" json:"cache_interval"`
+	Enabled          bool          `yaml:"enabled" json:"enabled"`
+	UseSyscalls      bool          `yaml:"use_syscalls" json:"use_syscalls"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for DiskMonitorConfig.
@@ -956,9 +733,9 @@ func (c *DiskMonitorConfig) UnmarshalJSON(data []byte) error {
 	type Alias DiskMonitorConfig
 
 	temp := struct {
+		*Alias
 		CheckInterval string `json:"check_interval"`
 		CacheInterval string `json:"cache_interval"`
-		*Alias
 	}{
 		Alias: (*Alias)(c),
 	}
@@ -988,22 +765,10 @@ func (c *DiskMonitorConfig) UnmarshalJSON(data []byte) error {
 
 // RateLimitConfig contains rate limiting configuration.
 type RateLimitConfig struct {
-	// Enabled enables rate limiting.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// RequestsPerSecond is the maximum number of requests per second.
-	// Default: 10000
+	Algorithm         string  `yaml:"algorithm" json:"algorithm"`
 	RequestsPerSecond float64 `yaml:"requests_per_second" json:"requests_per_second"`
-
-	// Burst is the maximum burst capacity.
-	// Default: 15000
-	Burst int `yaml:"burst" json:"burst"`
-
-	// Algorithm is the rate limiting algorithm to use.
-	// Valid values: "token_bucket", "sliding_window", "sharded_token_bucket"
-	// Default: "sharded_token_bucket" (optimal for high-load scenarios 10k+ RPS)
-	Algorithm string `yaml:"algorithm" json:"algorithm"`
+	Burst             int     `yaml:"burst" json:"burst"`
+	Enabled           bool    `yaml:"enabled" json:"enabled"`
 }
 
 // PerClientRateLimitConfig contains per-client rate limiting configuration.
@@ -1058,41 +823,18 @@ type PerMethodRateLimitConfig struct {
 
 // HealthConfig contains health check endpoint configuration.
 type HealthConfig struct {
-	// Enabled enables health check endpoints.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// Port is the health check server port.
-	// Default: 8080
-	Port int `yaml:"port" json:"port"`
-
-	// HealthPath is the HTTP path for the health endpoint.
-	// Default: "/health"
 	HealthPath string `yaml:"health_path" json:"health_path"`
-
-	// ReadyPath is the HTTP path for the readiness endpoint.
-	// Default: "/ready"
-	ReadyPath string `yaml:"ready_path" json:"ready_path"`
-
-	// APIToken is the bearer token for authenticating REST API requests.
-	// If empty, API endpoints are accessible without authentication.
-	// Can also be set via ICAP_API_TOKEN environment variable.
-	APIToken string `yaml:"api_token" json:"api_token"`
+	ReadyPath  string `yaml:"ready_path" json:"ready_path"`
+	APIToken   string `yaml:"api_token" json:"api_token"`
+	Port       int    `yaml:"port" json:"port"`
+	Enabled    bool   `yaml:"enabled" json:"enabled"`
 }
 
 // ReplayConfig contains request replay configuration.
 type ReplayConfig struct {
-	// Enabled enables request replay mode.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// RequestsDir is the directory containing recorded requests to replay.
-	RequestsDir string `yaml:"requests_dir" json:"requests_dir"`
-
-	// Speed is the replay speed multiplier.
-	// 1.0 = original speed, 2.0 = 2x faster
-	// Default: 1.0
-	Speed float64 `yaml:"speed" json:"speed"`
+	RequestsDir string  `yaml:"requests_dir" json:"requests_dir"`
+	Speed       float64 `yaml:"speed" json:"speed"`
+	Enabled     bool    `yaml:"enabled" json:"enabled"`
 }
 
 // PprofConfig contains pprof profiling endpoint configuration.
@@ -1109,43 +851,18 @@ type PprofConfig struct {
 
 // PluginConfig contains plugin system configuration.
 type PluginConfig struct {
-	// Enabled enables the plugin system.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// Dir is the directory containing plugin .so files.
-	// Default: "./plugins"
-	Dir string `yaml:"dir" json:"dir"`
-
-	// Names is a list of plugin names to load in order.
-	// If empty, all plugins in the directory are loaded.
-	Names []string `yaml:"names" json:"names"`
+	Dir     string   `yaml:"dir" json:"dir"`
+	Names   []string `yaml:"names" json:"names"`
+	Enabled bool     `yaml:"enabled" json:"enabled"`
 }
 
 // ShardingConfig contains scenario sharding configuration for O(1) matching.
 // Sharding distributes scenarios across multiple shards based on path hash,
 // dramatically improving matching performance for large scenario sets.
 type ShardingConfig struct {
-	// Enabled enables scenario sharding.
-	// When enabled, scenarios are distributed across multiple shards for O(1) matching.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// ShardCount is the number of shards to use for distribution.
-	// More shards = better distribution but more memory overhead.
-	// Should be a power of 2 for optimal hash distribution.
-	// Default: 16
-	ShardCount int `yaml:"shard_count" json:"shard_count"`
-
-	// CacheSize is the size of the LRU cache for frequent requests.
-	// Caches matched scenarios to avoid repeated matching operations.
-	// Set to 0 to disable caching.
-	// Default: 1000
-	CacheSize int `yaml:"cache_size" json:"cache_size"`
-
-	// EnableCache enables LRU caching of match results.
-	// Can be disabled to save memory at the cost of performance.
-	// Default: true
+	ShardCount  int  `yaml:"shard_count" json:"shard_count"`
+	CacheSize   int  `yaml:"cache_size" json:"cache_size"`
+	Enabled     bool `yaml:"enabled" json:"enabled"`
 	EnableCache bool `yaml:"enable_cache" json:"enable_cache"`
 }
 

@@ -1,2 +1,3 @@
-// Package utils provides TUI utilities and helper functions.
+// Copyright 2026 ICAP Mock
+
 package utils

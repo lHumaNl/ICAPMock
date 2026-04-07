@@ -1,4 +1,5 @@
-// Package handler provides ICAP request handlers for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -58,7 +59,7 @@ func NewReqmodHandler(proc processor.Processor, m *metrics.Collector, logger *sl
 //  7. Returns the processor response or cancellation error
 //
 // Error handling:
-//   - Returns context.Canceled or context.DeadlineExceeded if context is cancelled
+//   - Returns context.Canceled or context.DeadlineExceeded if context is canceled
 //   - Returns ErrNilProcessor if the processor is nil
 //   - Propagates processor errors
 func (h *ReqmodHandler) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -18,8 +20,8 @@ func TestMockProcessor_Process(t *testing.T) {
 	log := createTestLogger(t)
 
 	tests := []struct {
-		name           string
 		scenario       *storage.Scenario
+		name           string
 		expectedStatus int
 		expectError    bool
 	}{

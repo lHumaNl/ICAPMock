@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -147,7 +149,7 @@ func (l *SlidingWindowLimiter) rotateBuckets(currentTick int64) {
 
 // calculateWeightedCount computes the approximate request count using the two-bucket algorithm.
 // The formula is: currentCount + previousCount * overlapFactor
-// where overlapFactor = 1 - (position within current window)
+// where overlapFactor = 1 - (position within current window).
 func (l *SlidingWindowLimiter) calculateWeightedCount(now int64) float64 {
 	currentCount := float64(l.counters[0].Load())
 	previousCount := float64(l.counters[1].Load())
@@ -297,11 +299,11 @@ func (l *SlidingWindowLimiter) calculateWeightedCountLocked(now int64) float64 {
 
 // slidingReservation represents a reservation in the sliding window limiter.
 type slidingReservation struct {
-	ok       bool
-	delay    time.Duration
 	limiter  *SlidingWindowLimiter
-	reserved bool // true if we actually incremented the counter
+	delay    time.Duration
 	canceled atomic.Bool
+	ok       bool
+	reserved bool
 }
 
 // OK reports whether the reservation is valid.

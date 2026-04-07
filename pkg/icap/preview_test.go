@@ -1,4 +1,5 @@
-// Package icap_test provides tests for ICAP Preview mode (RFC 3507).
+// Copyright 2026 ICAP Mock
+
 package icap_test
 
 import (
@@ -368,8 +369,8 @@ func TestRequestGetPreviewBody(t *testing.T) {
 	tests := []struct {
 		name        string
 		method      string
-		hasBody     bool
 		previewSize int
+		hasBody     bool
 		wantBody    bool
 	}{
 		{

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -347,9 +349,9 @@ func TestServiceControlsModel_View_LoadingState(t *testing.T) {
 	tests := []struct {
 		name        string
 		status      string
-		loading     bool
 		contains    string
 		notContains string
+		loading     bool
 	}{
 		{"Loading with running status", "running", true, "Processing...", ""},
 		{"Loading with stopped status", "stopped", true, "Processing...", ""},

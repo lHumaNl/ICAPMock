@@ -1,4 +1,5 @@
-// Package main provides build information variables for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 // Build information (set via ldflags).

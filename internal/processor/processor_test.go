@@ -1,7 +1,10 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/icap-mock/icap-mock/pkg/icap"
@@ -11,8 +14,8 @@ import (
 // and can be implemented by different types.
 func TestProcessorInterface(t *testing.T) {
 	tests := []struct {
-		name      string
 		processor Processor
+		name      string
 	}{
 		{
 			name:      "ProcessorFunc",
@@ -74,7 +77,7 @@ func TestProcessorFunc(t *testing.T) {
 		req := createTestRequest(t)
 		_, err := p.Process(context.Background(), req)
 
-		if err != expectedErr {
+		if !errors.Is(err, expectedErr) {
 			t.Errorf("expected error %v, got %v", expectedErr, err)
 		}
 	})
@@ -122,7 +125,7 @@ func TestChainProcessor(t *testing.T) {
 		req := createTestRequest(t)
 		_, err := chain.Process(context.Background(), req)
 
-		if err != expectedErr {
+		if !errors.Is(err, expectedErr) {
 			t.Errorf("expected error %v, got %v", expectedErr, err)
 		}
 	})

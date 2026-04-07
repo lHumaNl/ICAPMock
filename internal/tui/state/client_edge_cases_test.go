@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
@@ -35,7 +37,7 @@ func TestMetricsClient_GetNetworkError_Timeout(t *testing.T) {
 
 	snapshot, err := client.GetMetrics(ctx)
 	assert.Error(t, err)
-	// Error may be wrapped by rate limiter ("rate limit wait cancelled: context deadline exceeded")
+	// Error may be wrapped by rate limiter ("rate limit wait canceled: context deadline exceeded")
 	// or come directly as a timeout. Both indicate the context timed out.
 	errStr := err.Error()
 	assert.True(t, strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded"),
@@ -702,11 +704,11 @@ func TestRateLimiter_ContextCancellation_BeforeAcquire(t *testing.T) {
 	cancel()
 
 	// When a token is immediately available, Acquire succeeds even with
-	// a cancelled context (non-blocking path). This is correct behavior.
+	// a canceled context (non-blocking path). This is correct behavior.
 	err := rl.Acquire(ctx)
 	// err may be nil if the token was available without blocking
 	if err != nil {
-		assert.Contains(t, err.Error(), "cancelled")
+		assert.Contains(t, err.Error(), "canceled")
 	}
 }
 
@@ -723,7 +725,7 @@ func TestRateLimiter_ContextCancellation_DuringWait(t *testing.T) {
 	// With only 1 token available, Acquire may succeed immediately
 	// without hitting the context cancellation.
 	if err != nil {
-		assert.Contains(t, err.Error(), "cancelled")
+		assert.Contains(t, err.Error(), "canceled")
 	}
 }
 

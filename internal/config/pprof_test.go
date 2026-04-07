@@ -1,4 +1,5 @@
-// Package config_test contains tests for pprof configuration.
+// Copyright 2026 ICAP Mock
+
 package config_test
 
 import (

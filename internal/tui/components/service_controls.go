@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -6,16 +8,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ServiceControlsModel represents the service controls component
+// ServiceControlsModel represents the service controls component.
 type ServiceControlsModel struct {
-	mu           sync.RWMutex
 	serverStatus string
 	serverPort   string
 	serverUptime string
+	mu           sync.RWMutex
 	loading      bool
 }
 
-// NewServiceControlsModel creates a new service controls model
+// NewServiceControlsModel creates a new service controls model.
 func NewServiceControlsModel() *ServiceControlsModel {
 	return &ServiceControlsModel{
 		serverStatus: "unknown",
@@ -25,7 +27,7 @@ func NewServiceControlsModel() *ServiceControlsModel {
 	}
 }
 
-// SetStatus updates the server status information
+// SetStatus updates the server status information.
 func (m *ServiceControlsModel) SetStatus(status, port, uptime string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -34,14 +36,14 @@ func (m *ServiceControlsModel) SetStatus(status, port, uptime string) {
 	m.serverUptime = uptime
 }
 
-// SetLoading sets the loading state
+// SetLoading sets the loading state.
 func (m *ServiceControlsModel) SetLoading(loading bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.loading = loading
 }
 
-// View renders the service controls component
+// View renders the service controls component.
 func (m *ServiceControlsModel) View() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -71,19 +73,19 @@ func (m *ServiceControlsModel) View() string {
 	return PanelStyle.Render(content)
 }
 
-// renderStatusIndicator renders the server status indicator
+// renderStatusIndicator renders the server status indicator.
 func (m *ServiceControlsModel) renderStatusIndicator() string {
 	var style lipgloss.Style
 	var text string
 
 	switch m.serverStatus {
-	case "running":
+	case "running": //nolint:goconst
 		style = StatusRunningStyle
 		text = "● RUNNING"
-	case "stopped":
+	case "stopped": //nolint:goconst
 		style = StatusStoppedStyle
 		text = "● STOPPED"
-	case "error":
+	case "error": //nolint:goconst
 		style = ErrorStyle
 		text = "● ERROR"
 	default:
@@ -94,14 +96,14 @@ func (m *ServiceControlsModel) renderStatusIndicator() string {
 	return style.Render(text)
 }
 
-// renderServerInfo renders the server information
+// renderServerInfo renders the server information.
 func (m *ServiceControlsModel) renderServerInfo() string {
 	return SubtitleStyle.Render(
 		"Port: " + m.serverPort + " | Uptime: " + m.serverUptime,
 	)
 }
 
-// renderControls renders the control buttons
+// renderControls renders the control buttons.
 func (m *ServiceControlsModel) renderControls() string {
 	if m.loading {
 		return SubtitleStyle.Render("Processing...")
@@ -114,14 +116,14 @@ func (m *ServiceControlsModel) renderControls() string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, startBtn, " ", stopBtn, " ", restartBtn)
 }
 
-// renderShortcuts renders the keyboard shortcuts
+// renderShortcuts renders the keyboard shortcuts.
 func (m *ServiceControlsModel) renderShortcuts() string {
 	return SubtitleStyle.Render(
 		"Keyboard: s=start | t=stop | r=restart | esc=back",
 	)
 }
 
-// ButtonStyle for control buttons
+// ButtonStyle for control buttons.
 var ButtonStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("250")).
 	Background(lipgloss.Color("240")).

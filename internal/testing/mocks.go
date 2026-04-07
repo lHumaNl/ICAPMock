@@ -1,4 +1,5 @@
-// Package testing provides mock implementations for testing the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package testing
 
 import (
@@ -24,33 +25,29 @@ import (
 //	calls := mock.GetCalls()
 //	require.Len(t, calls, 2)
 type MockMetricsCollector struct {
-	mu sync.Mutex
-
-	// Recorded calls
 	requests         []mockRequestCall
 	requestDurations []mockRequestDurationCall
 	errors           []mockErrorCall
-
-	// Counters
-	requestCount atomic.Int64
-	errorCount   atomic.Int64
+	requestCount     atomic.Int64
+	errorCount       atomic.Int64
+	mu               sync.Mutex
 }
 
 type mockRequestCall struct {
-	method string
 	time   time.Time
+	method string
 }
 
 type mockRequestDurationCall struct {
+	time     time.Time
 	method   string
 	duration time.Duration
-	time     time.Time
 }
 
 type mockErrorCall struct {
+	time   time.Time
 	method string
 	err    string
-	time   time.Time
 }
 
 // NewMockMetricsCollector creates a new mock metrics collector.
@@ -253,12 +250,11 @@ func (m *MockMetricsCollector) AssertMethodCalled(t *testing.T, method string) b
 //	saved := mock.GetSavedRequests()
 //	require.Len(t, saved, 1)
 type MockStorage struct {
-	mu sync.Mutex
-
 	requests      map[string]*storage.StoredRequest
 	savedRequests []*storage.StoredRequest
-	closed        bool
 	saveCount     atomic.Int64
+	mu            sync.Mutex
+	closed        bool
 }
 
 // NewMockStorage creates a new mock storage.
@@ -494,13 +490,13 @@ func (m *MockStorage) IsClosed() bool {
 //	used := fs.GetUsedSpace()
 //	require.Equal(t, int64(5), used)
 type MockFileSystem struct {
-	mu           sync.Mutex
-	totalSpace   int64
-	usedSpace    int64
 	files        map[string][]byte
 	writeErrors  map[string]error
 	readErrors   map[string]error
 	deleteErrors map[string]error
+	totalSpace   int64
+	usedSpace    int64
+	mu           sync.Mutex
 }
 
 // NewMockFileSystem creates a new mock file system.

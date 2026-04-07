@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -245,7 +247,7 @@ logging:
 
 		_, err = client.LoadConfigFile(cancelledCtx, yamlFile)
 		if err != nil {
-			t.Errorf("LoadConfigFile() with cancelled context should succeed (file read is not context-aware), got error: %v", err)
+			t.Errorf("LoadConfigFile() with canceled context should succeed (file read is not context-aware), got error: %v", err)
 		}
 	})
 

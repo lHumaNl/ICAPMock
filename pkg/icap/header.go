@@ -1,5 +1,5 @@
-// Package icap provides ICAP (Internet Content Adaptation Protocol) data structures
-// and utilities per RFC 3507.
+// Copyright 2026 ICAP Mock
+
 package icap
 
 import (
@@ -55,7 +55,7 @@ func CanonicalHeaderKey(key string) string {
 var canonicalCache sync.Map
 
 // textCanonicalize converts a header key to canonical form.
-// E.g., "content-type" -> "Content-Type", "x-custom-header" -> "X-Custom-Header"
+// E.g., "content-type" -> "Content-Type", "x-custom-header" -> "X-Custom-Header".
 func textCanonicalize(s string) string {
 	if s == "" {
 		return ""
@@ -63,7 +63,7 @@ func textCanonicalize(s string) string {
 
 	// Check cache first
 	if v, ok := canonicalCache.Load(s); ok {
-		return v.(string)
+		return v.(string) //nolint:errcheck
 	}
 
 	upper := true

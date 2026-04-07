@@ -1,5 +1,5 @@
-// Package config provides configuration structures and loading mechanisms
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (
@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// TestConfig_SetDefaults tests that all default values are set correctly
+// TestConfig_SetDefaults tests that all default values are set correctly.
 func TestConfig_SetDefaults(t *testing.T) {
 	tests := []struct {
+		expected interface{}
 		name     string
 		field    string
-		expected interface{}
 	}{
 		// Server defaults
 		{"Server.Host", "Server.Host", "0.0.0.0"},
@@ -111,7 +111,7 @@ func TestConfig_SetDefaults(t *testing.T) {
 	}
 }
 
-// TestConfig_Structure tests that all configuration structures exist
+// TestConfig_Structure tests that all configuration structures exist.
 func TestConfig_Structure(t *testing.T) {
 	cfg := &Config{}
 
@@ -145,7 +145,7 @@ func TestConfig_Structure(t *testing.T) {
 	}
 }
 
-// TestServerConfig_Tags tests that yaml/json tags are properly set
+// TestServerConfig_Tags tests that yaml/json tags are properly set.
 func TestServerConfig_Tags(t *testing.T) {
 	cfg := ServerConfig{}
 	_ = cfg // Just verify it compiles
@@ -153,7 +153,7 @@ func TestServerConfig_Tags(t *testing.T) {
 	// We'll verify tags work via YAML marshaling in loader tests
 }
 
-// TestTLSConfig tests TLS configuration structure
+// TestTLSConfig tests TLS configuration structure.
 func TestTLSConfig(t *testing.T) {
 	tls := TLSConfig{
 		Enabled:  true,
@@ -172,7 +172,7 @@ func TestTLSConfig(t *testing.T) {
 	}
 }
 
-// TestChaosConfig tests Chaos configuration defaults and ranges
+// TestChaosConfig tests Chaos configuration defaults and ranges.
 func TestChaosConfig_Defaults(t *testing.T) {
 	cfg := &Config{}
 	cfg.SetDefaults()
@@ -183,7 +183,7 @@ func TestChaosConfig_Defaults(t *testing.T) {
 	}
 }
 
-// TestRateLimitConfig tests RateLimit configuration
+// TestRateLimitConfig tests RateLimit configuration.
 func TestRateLimitConfig_Algorithms(t *testing.T) {
 	cfg := &Config{}
 	cfg.SetDefaults()
@@ -200,7 +200,7 @@ func TestRateLimitConfig_Algorithms(t *testing.T) {
 	}
 }
 
-// TestMockConfig tests Mock configuration
+// TestMockConfig tests Mock configuration.
 func TestMockConfig(t *testing.T) {
 	cfg := &MockConfig{
 		DefaultMode:    "echo",
@@ -219,7 +219,7 @@ func TestMockConfig(t *testing.T) {
 	}
 }
 
-// TestStorageConfig tests Storage configuration
+// TestStorageConfig tests Storage configuration.
 func TestStorageConfig(t *testing.T) {
 	cfg := &StorageConfig{
 		Enabled:     true,
@@ -236,7 +236,7 @@ func TestStorageConfig(t *testing.T) {
 	}
 }
 
-// TestReplayConfig tests Replay configuration
+// TestReplayConfig tests Replay configuration.
 func TestReplayConfig(t *testing.T) {
 	cfg := &ReplayConfig{
 		Enabled:     true,
@@ -252,7 +252,7 @@ func TestReplayConfig(t *testing.T) {
 	}
 }
 
-// TestLoggingConfig tests Logging configuration levels
+// TestLoggingConfig tests Logging configuration levels.
 func TestLoggingConfig_Levels(t *testing.T) {
 	validLevels := []string{"debug", "info", "warn", "error"}
 	validFormats := []string{"json", "text"}

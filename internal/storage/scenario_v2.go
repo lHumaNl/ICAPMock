@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -21,15 +23,15 @@ func (d DelayConfig) Duration() time.Duration {
 		return d.Min
 	}
 	delta := d.Max - d.Min
-	return d.Min + time.Duration(rand.Int63n(int64(delta)))
+	return d.Min + time.Duration(rand.Int63n(int64(delta))) //nolint:gosec // crypto not needed here
 }
 
 // MatchValue represents an exact or regex match condition.
 type MatchValue struct {
-	Raw      string         // original string from YAML
-	Pattern  string         // pattern without re: prefix
-	IsRegex  bool           // true if re: prefix was present
-	compiled *regexp.Regexp // compiled regex (nil for exact match)
+	compiled *regexp.Regexp
+	Raw      string
+	Pattern  string
+	IsRegex  bool
 }
 
 // Matches checks if the given value matches this condition.
@@ -53,36 +55,36 @@ type ScenarioFileV2 struct {
 
 // ScenarioDefaultsV2 contains default values inherited by all scenarios.
 type ScenarioDefaultsV2 struct {
+	Headers    map[string]string `yaml:"headers,omitempty"`
 	Method     string            `yaml:"method,omitempty"`
 	Endpoint   string            `yaml:"endpoint,omitempty"`
 	Status     int               `yaml:"status,omitempty"`
 	HTTPStatus int               `yaml:"http_status,omitempty"`
-	Headers    map[string]string `yaml:"headers,omitempty"`
 }
 
 // ScenarioEntryV2 defines a single scenario in v2 format.
 type ScenarioEntryV2 struct {
-	Method     string               `yaml:"method,omitempty"`
-	Endpoint   string               `yaml:"endpoint,omitempty"`
-	Status     int                  `yaml:"status,omitempty"`
-	HTTPStatus int                  `yaml:"http_status,omitempty"`
-	Priority   int                  `yaml:"priority,omitempty"`
 	When       map[string]string    `yaml:"when,omitempty"`
 	Set        map[string]string    `yaml:"set,omitempty"`
+	Method     string               `yaml:"method,omitempty"`
+	Endpoint   string               `yaml:"endpoint,omitempty"`
 	Body       string               `yaml:"body,omitempty"`
 	BodyFile   string               `yaml:"body_file,omitempty"`
 	Delay      string               `yaml:"delay,omitempty"`
 	Responses  []WeightedResponseV2 `yaml:"responses,omitempty"`
+	Status     int                  `yaml:"status,omitempty"`
+	HTTPStatus int                  `yaml:"http_status,omitempty"`
+	Priority   int                  `yaml:"priority,omitempty"`
 }
 
 // WeightedResponseV2 defines one variant in a weighted response set.
 type WeightedResponseV2 struct {
-	Weight     int               `yaml:"weight,omitempty"`
 	Set        map[string]string `yaml:"set,omitempty"`
-	Status     int               `yaml:"status,omitempty"`
-	HTTPStatus int               `yaml:"http_status,omitempty"`
 	Body       string            `yaml:"body,omitempty"`
 	Delay      string            `yaml:"delay,omitempty"`
+	Weight     int               `yaml:"weight,omitempty"`
+	Status     int               `yaml:"status,omitempty"`
+	HTTPStatus int               `yaml:"http_status,omitempty"`
 }
 
 // rangePattern matches patterns like "300ms-1500ms", "1s-5s", "1m-2m".

@@ -1,4 +1,5 @@
-// Package replay provides request replay functionality for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package replay
 
 import (
@@ -83,7 +84,7 @@ func LoadRequestFiles(dir string, filter storage.RequestFilter) ([]*storage.Stor
 
 // LoadRequestFile loads a single request file and parses it.
 func LoadRequestFile(path string) (*storage.StoredRequest, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is validated
 	if err != nil {
 		return nil, fmt.Errorf("reading file %s: %w", path, err)
 	}

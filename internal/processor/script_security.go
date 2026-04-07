@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+
 	"github.com/icap-mock/icap-mock/internal/logger"
 )
 
@@ -26,10 +29,10 @@ var suspiciousPatterns = []*regexp.Regexp{
 var cachedMemStatsInstance = &cachedMemStats{}
 
 type cachedMemStats struct {
-	mu        sync.RWMutex
-	stats     runtime.MemStats
 	updatedAt time.Time
+	stats     runtime.MemStats
 	ttl       time.Duration
+	mu        sync.RWMutex
 }
 
 func init() {
@@ -72,16 +75,16 @@ func (e *SecurityViolationError) Error() string {
 
 // ScriptRuntimeMonitor tracks runtime metrics for script execution.
 type ScriptRuntimeMonitor struct {
-	mu             sync.RWMutex
 	startTime      time.Time
 	deadline       time.Time
+	lastCheck      time.Time
 	maxDuration    time.Duration
 	memoryLimit    int64
 	maxOperations  int64
 	operationCount int64
 	initialAlloc   uint64
-	lastCheck      time.Time
 	checkInterval  time.Duration
+	mu             sync.RWMutex
 }
 
 // NewScriptRuntimeMonitor creates a new runtime monitor.
@@ -135,7 +138,7 @@ func (m *ScriptRuntimeMonitor) CheckEnforceLimits() error {
 		var ms runtime.MemStats
 		runtime.ReadMemStats(&ms)
 
-		memUsed := int64(ms.Alloc) - int64(m.initialAlloc)
+		memUsed := int64(ms.Alloc) - int64(m.initialAlloc) //nolint:gosec // safe range
 		if m.memoryLimit > 0 && memUsed > m.memoryLimit {
 			return fmt.Errorf("memory limit exceeded: %d bytes (limit: %d bytes)", memUsed, m.memoryLimit)
 		}
@@ -160,7 +163,7 @@ func (m *ScriptRuntimeMonitor) GetMemoryUsed() int64 {
 
 	ms := readMemStatsCached()
 
-	return int64(ms.Alloc) - int64(m.initialAlloc)
+	return int64(ms.Alloc) - int64(m.initialAlloc) //nolint:gosec // safe range
 }
 
 // GetOperationCount returns the number of operations performed.
@@ -172,10 +175,10 @@ func (m *ScriptRuntimeMonitor) GetOperationCount() int64 {
 
 // StaticScriptValidator performs static analysis on scripts before execution.
 type StaticScriptValidator struct {
+	logger             *logger.Logger
 	blockedPatterns    []*regexp.Regexp
 	suspiciousPatterns []*regexp.Regexp
 	maxScriptLength    int
-	logger             *logger.Logger
 }
 
 // NewStaticScriptValidator creates a new static script validator.
@@ -265,7 +268,7 @@ func (p *ScriptProcessor) CreateSafeFunctionBlocker(vm *goja.Runtime, funcName s
 	// Ensure the function is not accessible via the global object
 	// by deleting it from the global object
 	globalObj := vm.GlobalObject()
-	globalObj.Delete(funcName)
+	_ = globalObj.Delete(funcName)
 
 	return nil
 }
@@ -291,7 +294,7 @@ func (p *ScriptProcessor) CreateInstrumentedConsole(vm *goja.Runtime, monitor *S
 	consoleObj := vm.NewObject()
 
 	// Wrap console.log with monitoring
-	consoleObj.Set("log", func(call goja.FunctionCall) goja.Value {
+	_ = consoleObj.Set("log", func(call goja.FunctionCall) goja.Value {
 		if err := monitor.CheckEnforceLimits(); err != nil {
 			panic(err)
 		}
@@ -308,7 +311,7 @@ func (p *ScriptProcessor) CreateInstrumentedConsole(vm *goja.Runtime, monitor *S
 	})
 
 	// Wrap console.error with monitoring
-	consoleObj.Set("error", func(call goja.FunctionCall) goja.Value {
+	_ = consoleObj.Set("error", func(call goja.FunctionCall) goja.Value {
 		if err := monitor.CheckEnforceLimits(); err != nil {
 			panic(err)
 		}
@@ -325,7 +328,7 @@ func (p *ScriptProcessor) CreateInstrumentedConsole(vm *goja.Runtime, monitor *S
 	})
 
 	// Wrap console.warn with monitoring
-	consoleObj.Set("warn", func(call goja.FunctionCall) goja.Value {
+	_ = consoleObj.Set("warn", func(call goja.FunctionCall) goja.Value {
 		if err := monitor.CheckEnforceLimits(); err != nil {
 			panic(err)
 		}

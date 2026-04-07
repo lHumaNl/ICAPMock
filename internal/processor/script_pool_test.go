@@ -1,7 +1,10 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -9,13 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/logger"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestScriptWorkerPool_BasicExecution tests that scripts are executed by the pool.
@@ -795,10 +799,10 @@ func TestScriptWorkerPool_ContextCancelDuringPanic(t *testing.T) {
 
 	_, err = pool.Execute(ctx, req, "script")
 	assert.Error(t, err)
-	// Should be context cancelled error (job cancelled before panic could be sent)
+	// Should be context canceled error (job canceled before panic could be sent)
 	assert.True(t,
-		err == context.Canceled || strings.Contains(err.Error(), "panic"),
-		"should either be context cancelled or panic error")
+		errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "panic"),
+		"should either be context canceled or panic error")
 }
 
 // TestScriptWorkerPool_WorkerExitOnChannelClose tests that workers exit when result channel is closed.

@@ -1,4 +1,5 @@
-// Package health provides health check endpoints for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package health
 
 import (
@@ -14,7 +15,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/config"
 )
 
-// TestNewHealthChecker tests creating a new health checker
+// TestNewHealthChecker tests creating a new health checker.
 func TestNewHealthChecker(t *testing.T) {
 	checker := NewHealthChecker()
 	if checker == nil {
@@ -31,7 +32,7 @@ func TestNewHealthChecker(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetICAPReady tests setting ICAP ready status
+// TestHealthChecker_SetICAPReady tests setting ICAP ready status.
 func TestHealthChecker_SetICAPReady(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -48,7 +49,7 @@ func TestHealthChecker_SetICAPReady(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetStorageReady tests setting storage ready status
+// TestHealthChecker_SetStorageReady tests setting storage ready status.
 func TestHealthChecker_SetStorageReady(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -65,7 +66,7 @@ func TestHealthChecker_SetStorageReady(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetScenariosCount tests setting scenarios count
+// TestHealthChecker_SetScenariosCount tests setting scenarios count.
 func TestHealthChecker_SetScenariosCount(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -82,7 +83,7 @@ func TestHealthChecker_SetScenariosCount(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetStorageError tests setting storage error
+// TestHealthChecker_SetStorageError tests setting storage error.
 func TestHealthChecker_SetStorageError(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -101,7 +102,7 @@ func TestHealthChecker_SetStorageError(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetICAPError tests setting ICAP error
+// TestHealthChecker_SetICAPError tests setting ICAP error.
 func TestHealthChecker_SetICAPError(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -120,7 +121,7 @@ func TestHealthChecker_SetICAPError(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_IsReady tests overall readiness
+// TestHealthChecker_IsReady tests overall readiness.
 func TestHealthChecker_IsReady(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -154,7 +155,7 @@ func TestHealthChecker_IsReady(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_ConcurrentAccess tests thread safety
+// TestHealthChecker_ConcurrentAccess tests thread safety.
 func TestHealthChecker_ConcurrentAccess(t *testing.T) {
 	checker := NewHealthChecker()
 	var wg sync.WaitGroup
@@ -180,7 +181,7 @@ func TestHealthChecker_ConcurrentAccess(t *testing.T) {
 	// If we get here without race condition, test passes
 }
 
-// TestNewHealthServer tests creating a new health server
+// TestNewHealthServer tests creating a new health server.
 func TestNewHealthServer(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -198,7 +199,7 @@ func TestNewHealthServer(t *testing.T) {
 	}
 }
 
-// TestNewHealthServer_NilConfig tests that nil config returns error
+// TestNewHealthServer_NilConfig tests that nil config returns error.
 func TestNewHealthServer_NilConfig(t *testing.T) {
 	_, err := NewHealthServer(nil)
 	if err == nil {
@@ -206,7 +207,7 @@ func TestNewHealthServer_NilConfig(t *testing.T) {
 	}
 }
 
-// TestHealthServer_GetChecker tests getting the checker
+// TestHealthServer_GetChecker tests getting the checker.
 func TestHealthServer_GetChecker(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -226,7 +227,7 @@ func TestHealthServer_GetChecker(t *testing.T) {
 	}
 }
 
-// TestHealthServer_HealthEndpoint tests the /health endpoint
+// TestHealthServer_HealthEndpoint tests the /health endpoint.
 func TestHealthServer_HealthEndpoint(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -270,7 +271,7 @@ func TestHealthServer_HealthEndpoint(t *testing.T) {
 	}
 }
 
-// TestHealthServer_ReadyEndpoint_Ready tests the /ready endpoint when ready
+// TestHealthServer_ReadyEndpoint_Ready tests the /ready endpoint when ready.
 func TestHealthServer_ReadyEndpoint_Ready(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -322,7 +323,7 @@ func TestHealthServer_ReadyEndpoint_Ready(t *testing.T) {
 	}
 }
 
-// TestHealthServer_ReadyEndpoint_NotReady tests the /ready endpoint when not ready
+// TestHealthServer_ReadyEndpoint_NotReady tests the /ready endpoint when not ready.
 func TestHealthServer_ReadyEndpoint_NotReady(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -367,7 +368,7 @@ func TestHealthServer_ReadyEndpoint_NotReady(t *testing.T) {
 	}
 }
 
-// TestHealthServer_ReadyEndpoint_WithErrors tests the /ready endpoint with errors
+// TestHealthServer_ReadyEndpoint_WithErrors tests the /ready endpoint with errors.
 func TestHealthServer_ReadyEndpoint_WithErrors(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -419,7 +420,7 @@ func TestHealthServer_ReadyEndpoint_WithErrors(t *testing.T) {
 	}
 }
 
-// TestHealthServer_StartStop tests starting and stopping the server
+// TestHealthServer_StartStop tests starting and stopping the server.
 func TestHealthServer_StartStop(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -474,7 +475,7 @@ func TestHealthServer_StartStop(t *testing.T) {
 	}
 }
 
-// TestHealthServer_StopWithoutStart tests stopping without starting
+// TestHealthServer_StopWithoutStart tests stopping without starting.
 func TestHealthServer_StopWithoutStart(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -497,7 +498,7 @@ func TestHealthServer_StopWithoutStart(t *testing.T) {
 	}
 }
 
-// TestHealthServer_Disabled tests that disabled server doesn't start
+// TestHealthServer_Disabled tests that disabled server doesn't start.
 func TestHealthServer_Disabled(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    false,
@@ -529,7 +530,7 @@ func TestHealthServer_Disabled(t *testing.T) {
 	}
 }
 
-// TestHealthServer_CustomPaths tests custom health and ready paths
+// TestHealthServer_CustomPaths tests custom health and ready paths.
 func TestHealthServer_CustomPaths(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
@@ -578,7 +579,7 @@ func TestHealthServer_CustomPaths(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_GetStatus tests getting full status
+// TestHealthChecker_GetStatus tests getting full status.
 func TestHealthChecker_GetStatus(t *testing.T) {
 	checker := NewHealthChecker()
 
@@ -601,7 +602,7 @@ func TestHealthChecker_GetStatus(t *testing.T) {
 	}
 }
 
-// TestHealthServer_MethodNotAllowed tests that non-GET methods are rejected
+// TestHealthServer_MethodNotAllowed tests that non-GET methods are rejected.
 func TestHealthServer_MethodNotAllowed(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,

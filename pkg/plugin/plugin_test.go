@@ -1,4 +1,5 @@
-// Package plugin_test provides tests for the plugin system.
+// Copyright 2026 ICAP Mock
+
 package plugin_test
 
 import (
@@ -13,11 +14,11 @@ import (
 
 // mockPlugin is a test implementation of ProcessorPlugin.
 type mockPlugin struct {
-	name       string
 	initErr    error
 	closeErr   error
 	processErr error
 	response   *icap.Response
+	name       string
 	initCalls  int
 	closeCalls int
 	mu         sync.Mutex

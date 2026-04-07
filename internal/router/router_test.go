@@ -1,8 +1,10 @@
-// Package router provides ICAP request routing functionality.
+// Copyright 2026 ICAP Mock
+
 package router
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,11 +15,11 @@ import (
 
 // mockHandler is a test handler implementation.
 type mockHandler struct {
+	err     error
+	lastReq atomic.Pointer[icap.Request]
+	resp    *icap.Response
 	method  string
 	called  atomic.Bool
-	lastReq atomic.Pointer[icap.Request]
-	err     error
-	resp    *icap.Response
 }
 
 // Handle implements Handler interface.
@@ -510,7 +512,7 @@ func TestRouter_Serve_ContextCancellation(t *testing.T) {
 		t.Fatalf("HandleFunc() error = %v", err)
 	}
 
-	// Create cancelled context
+	// Create canceled context
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -518,7 +520,7 @@ func TestRouter_Serve_ContextCancellation(t *testing.T) {
 	_, err = r.Serve(ctx, req)
 
 	// The handler returns ctx.Err() which is context.Canceled
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Expected context.Canceled error, got %v", err)
 	}
 }
@@ -540,7 +542,7 @@ func TestRouter_Serve_Error(t *testing.T) {
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost:1344/reqmod")
 	_, err = r.Serve(context.Background(), req)
 
-	if err != context.DeadlineExceeded {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Expected DeadlineExceeded error, got %v", err)
 	}
 }

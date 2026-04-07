@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
@@ -11,7 +13,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// RunTUI starts the TUI application with optional configuration
+// RunTUI starts the TUI application with optional configuration.
 func RunTUI(cfg *state.ClientConfig) error {
 	return RunTUIWithVersion(cfg, "dev")
 }

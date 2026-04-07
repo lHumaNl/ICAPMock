@@ -1,28 +1,5 @@
-// Package circuitbreaker provides circuit breaker pattern implementation
-// for ICAP Mock Server resilience.
-//
-// The circuit breaker prevents cascade failures by automatically
-// isolating failing components. It implements a three-state machine:
-//
-//   - CLOSED (normal): Requests pass through normally
-//   - OPEN (failing): Requests are rejected immediately
-//   - HALF_OPEN (testing): Limited requests test recovery
-//
-// The circuit breaker uses a sliding window for failure counting,
-// making it suitable for high-throughput scenarios (10k+ RPS).
-//
-// Example usage:
-//
-//	config := circuitbreaker.DefaultConfig()
-//	cb := circuitbreaker.NewCircuitBreaker("storage", config, logger, metrics)
-//
-//	err := cb.Call(ctx, func() error {
-//	    return writeToDisk(data)
-//	})
-//	if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
-//	    // Circuit is open, use fallback
-//	    return serveFromCache()
-//	}
+// Copyright 2026 ICAP Mock
+
 package circuitbreaker
 
 import (
@@ -131,22 +108,19 @@ type bucket struct {
 
 // CircuitBreaker implements the circuit breaker pattern with sliding window.
 type CircuitBreaker struct {
-	name    string
-	config  Config
-	logger  *slog.Logger
-	metrics MetricsRecorder
-
-	state           State
-	stateMu         sync.RWMutex
-	lastStateChange atomic.Int64
-
-	buckets        []*bucket
-	bucketCount    int
-	bucketDuration time.Duration
-	currentBucket  atomic.Int64
-
+	metrics          MetricsRecorder
+	logger           *slog.Logger
+	name             string
+	buckets          []*bucket
+	config           Config
+	lastStateChange  atomic.Int64
+	state            State
+	bucketCount      int
+	bucketDuration   time.Duration
+	currentBucket    atomic.Int64
 	halfOpenRequests atomic.Int64
 	lastFailure      atomic.Int64
+	stateMu          sync.RWMutex
 }
 
 // MetricsRecorder records circuit breaker metrics for monitoring.
@@ -164,26 +138,13 @@ type MetricsRecorder interface {
 
 // Stats holds current circuit breaker statistics.
 type Stats struct {
-	// State is the current circuit breaker state.
-	State State
-
-	// Failures is the total failure count in the rolling window.
-	Failures int64
-
-	// Successes is the total success count in the rolling window.
-	Successes int64
-
-	// Requests is the total request count in the rolling window.
-	Requests int64
-
-	// HalfOpenRequests is the number of requests in HALF_OPEN state.
+	LastFailure      time.Time
+	LastStateChange  time.Time
+	State            State
+	Failures         int64
+	Successes        int64
+	Requests         int64
 	HalfOpenRequests int64
-
-	// LastFailure is the timestamp of the last failure.
-	LastFailure time.Time
-
-	// LastStateChange is the timestamp of the last state transition.
-	LastStateChange time.Time
 }
 
 // NewCircuitBreaker creates a new circuit breaker with the given configuration.
@@ -492,13 +453,14 @@ func (cb *CircuitBreaker) recordSuccess(bucketIdx int) {
 	state := cb.State()
 
 	// HALF_OPEN state: Check if we should close the circuit
-	if state == StateHalfOpen {
+	switch state {
+	case StateHalfOpen:
 		cb.halfOpenRequests.Add(1)
 
 		if cb.halfOpenRequests.Load() >= int64(cb.config.SuccessThreshold) {
 			cb.transitionTo(StateClosed)
 		}
-	} else if state == StateClosed {
+	case StateClosed:
 		// Reset half-open request counter on success in CLOSED state
 		cb.halfOpenRequests.Store(0)
 	}
@@ -529,7 +491,8 @@ func (cb *CircuitBreaker) recordFailure(bucketIdx int) {
 	state := cb.State()
 
 	// CLOSED state: Check if we should open the circuit
-	if state == StateClosed {
+	switch state {
+	case StateClosed:
 		failureCount := cb.getFailureCount()
 		if failureCount >= cb.config.FailureThreshold {
 			cb.transitionTo(StateOpen)
@@ -541,7 +504,7 @@ func (cb *CircuitBreaker) recordFailure(bucketIdx int) {
 				)
 			}
 		}
-	} else if state == StateHalfOpen {
+	case StateHalfOpen:
 		// HALF_OPEN state: Any failure reopens the circuit
 		cb.transitionTo(StateOpen)
 		if cb.logger != nil {
@@ -611,9 +574,10 @@ func (cb *CircuitBreaker) transitionToLocked(newState State) {
 	cb.setState(newState)
 
 	// Reset counters on certain transitions
-	if newState == StateHalfOpen {
+	switch newState {
+	case StateHalfOpen:
 		cb.halfOpenRequests.Store(0)
-	} else if newState == StateClosed {
+	case StateClosed:
 		cb.halfOpenRequests.Store(0)
 		// Clear all buckets when closing circuit
 		for _, b := range cb.buckets {

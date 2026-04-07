@@ -1,37 +1,5 @@
-// Package health provides health check endpoints for the ICAP Mock Server.
-// It implements Kubernetes-style health and readiness probes for container
-// orchestration systems.
-//
-// The package provides two main endpoints:
-//   - /health - Basic liveness check indicating the server process is running
-//   - /ready - Readiness check indicating the server is ready to accept traffic
-//
-// The readiness check verifies the status of internal components such as the
-// ICAP server and storage backend.
-//
-// Example usage:
-//
-//	cfg := &config.HealthConfig{
-//	    Enabled:    true,
-//	    Port:       8080,
-//	    HealthPath: "/health",
-//	    ReadyPath:  "/ready",
-//	}
-//
-//	server, err := NewHealthServer(cfg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	// Start health server in background
-//	go server.Start(context.Background())
-//
-//	// Mark components as ready
-//	server.Checker().SetICAPReady(true)
-//	server.Checker().SetStorageReady(true)
-//
-//	// Graceful shutdown
-//	server.Stop(context.Background())
+// Copyright 2026 ICAP Mock
+
 package health
 
 import (
@@ -48,44 +16,34 @@ import (
 
 // HealthResponse represents the response for the /health endpoint.
 type HealthResponse struct {
-	// Status is always "healthy" for the health endpoint.
-	Status string `json:"status"`
-	// Time is the timestamp of the health check.
-	Time time.Time `json:"time"`
+	Time   time.Time `json:"time"`
+	Status string    `json:"status"`
 }
 
 // ReadyResponse represents the response for the /ready endpoint.
 type ReadyResponse struct {
-	// Status is "ready" if all checks pass, "not_ready" otherwise.
-	Status string `json:"status"`
-	// Checks contains the status of individual components.
-	// Values can be "ok", "starting", "error: <message>", or numeric counts.
 	Checks map[string]interface{} `json:"checks"`
+	Status string                 `json:"status"`
 }
 
 // Status represents the current health status of all components.
 type Status struct {
-	// ICAPReady indicates whether the ICAP server is ready.
-	ICAPReady bool
-	// StorageReady indicates whether the storage backend is ready.
-	StorageReady bool
-	// ScenariosCount is the number of loaded mock scenarios.
+	ICAPError      string
+	StorageError   string
 	ScenariosCount int
-	// ICAPError contains an error message if the ICAP server has an error.
-	ICAPError string
-	// StorageError contains an error message if storage has an error.
-	StorageError string
+	ICAPReady      bool
+	StorageReady   bool
 }
 
 // HealthChecker tracks the readiness status of server components.
 // It is safe for concurrent use.
 type HealthChecker struct {
+	icapError      string
+	storageError   string
+	scenariosCount int
 	mu             sync.RWMutex
 	icapReady      bool
 	storageReady   bool
-	scenariosCount int
-	icapError      string
-	storageError   string
 }
 
 // NewHealthChecker creates a new HealthChecker with default values.
@@ -275,8 +233,8 @@ func (s *HealthServer) Start(ctx context.Context) error {
 		WriteTimeout: 5 * time.Second,
 	}
 
-	// Shutdown when context is cancelled
-	go func() {
+	// Shutdown when context is canceled
+	go func() { //nolint:gosec // background context intentional for shutdown
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -319,7 +277,7 @@ func (s *HealthServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // handleReady handles the /ready endpoint.
@@ -369,5 +327,5 @@ func (s *HealthServer) handleReady(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -1,19 +1,5 @@
-// Package handler provides ICAP request handlers for the ICAP Mock Server.
-// This file contains adaptive timeout tracker and middleware implementations.
-//
-// The adaptive timeout mechanism automatically adjusts request timeouts based on
-// observed request latency (P95 percentile). This prevents both premature timeouts
-// (too aggressive) and hanging requests (too lenient).
-//
-// Key features:
-//   - Tracks request durations per endpoint (method + path)
-//   - Calculates P95 latency from recent requests (sliding window of 1000)
-//   - Sets timeout = P95 * safety_multiplier (default: 2.0)
-//   - Clamps timeout to MinTimeout/MaxTimeout bounds
-//   - Adjusts periodically (every 100 requests or 10s, whichever first)
-//   - Falls back to default timeout when insufficient data (< 100 requests)
-//
-// Thread-safe for concurrent use.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -53,13 +39,13 @@ type endpointKey struct {
 
 // endpointStats tracks request duration history for a single endpoint.
 type endpointStats struct {
-	mu         sync.Mutex      // Per-endpoint lock
-	durations  []time.Duration // Ring buffer of request durations
-	head       int             // Next write position in ring buffer
-	count      int             // Current number of elements in ring buffer
-	totalCount int64           // Total requests processed
-	lastAdjust time.Time       // Time of last timeout adjustment
-	sampleSize int             // Max number of durations to track
+	lastAdjust time.Time
+	durations  []time.Duration
+	head       int
+	count      int
+	totalCount int64
+	sampleSize int
+	mu         sync.Mutex
 }
 
 // AdaptiveTimeoutTracker tracks request durations and calculates adaptive timeouts.
@@ -68,8 +54,9 @@ type endpointStats struct {
 //
 // Thread-safe for concurrent use. Uses per-endpoint locking for minimal contention.
 type AdaptiveTimeoutTracker struct {
-	mu                 sync.RWMutex // Protects stats and currentTimeout maps
 	stats              map[endpointKey]*endpointStats
+	currentTimeout     map[endpointKey]time.Duration
+	metrics            *metrics.Collector
 	sampleSize         int
 	adjustmentInterval time.Duration
 	adjustmentFreq     int64
@@ -77,36 +64,19 @@ type AdaptiveTimeoutTracker struct {
 	minTimeout         time.Duration
 	maxTimeout         time.Duration
 	fallbackTimeout    time.Duration
-	currentTimeout     map[endpointKey]time.Duration
-	metrics            *metrics.Collector
+	mu                 sync.RWMutex
 }
 
 // AdaptiveTimeoutConfig holds configuration for the adaptive timeout tracker.
 type AdaptiveTimeoutConfig struct {
-	// SampleSize is the number of recent requests to track per endpoint.
-	// Default: 1000
-	SampleSize int
-	// AdjustmentInterval is the time between timeout adjustments.
-	// Default: 10s
-	AdjustmentInterval time.Duration
-	// AdjustmentFrequency is the number of requests between adjustments.
-	// Default: 100
+	Metrics             *metrics.Collector
+	SampleSize          int
+	AdjustmentInterval  time.Duration
 	AdjustmentFrequency int64
-	// SafetyMultiplier multiplies P95 latency for timeout calculation.
-	// Default: 2.0
-	SafetyMultiplier float64
-	// MinTimeout is the minimum allowed timeout.
-	// Default: 10ms
-	MinTimeout time.Duration
-	// MaxTimeout is the maximum allowed timeout.
-	// Default: 60s
-	MaxTimeout time.Duration
-	// FallbackTimeout is used when insufficient data is available.
-	// Default: 30s
-	FallbackTimeout time.Duration
-	// Metrics is the Prometheus metrics collector.
-	// If nil, metrics will not be collected.
-	Metrics *metrics.Collector
+	SafetyMultiplier    float64
+	MinTimeout          time.Duration
+	MaxTimeout          time.Duration
+	FallbackTimeout     time.Duration
 }
 
 // DefaultAdaptiveTimeoutConfig returns the default configuration.

@@ -1,27 +1,5 @@
-// Package processor provides request processing implementations for the ICAP Mock Server.
-// It defines the Processor interface and several implementations for different
-// processing modes: echo, mock, script, and chaos.
-//
-// The Processor interface is the core abstraction for request handling:
-//
-//	type Processor interface {
-//	    Process(ctx context.Context, req *icap.Request) (*icap.Response, error)
-//	    Name() string
-//	}
-//
-// Available processors:
-//   - EchoProcessor: Simple pass-through returning 204 No Content Needed
-//   - MockProcessor: Scenario-based response matching
-//   - ScriptProcessor: JavaScript-based dynamic response generation
-//   - ChaosProcessor: Fault injection decorator for testing resilience
-//
-// Example usage:
-//
-//	processor := NewMockProcessor(registry, logger)
-//	resp, err := processor.Process(ctx, req)
-//	if err != nil {
-//	    // handle error
-//	}
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (

@@ -1,4 +1,5 @@
-// Package testing provides server harness for integration testing of ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package testing
 
 import (
@@ -12,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	prometheus "github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
@@ -19,7 +22,6 @@ import (
 	"github.com/icap-mock/icap-mock/internal/server"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	prometheus "github.com/prometheus/client_golang/prometheus"
 )
 
 // getFreePort returns a free TCP port that can be used for testing.
@@ -29,9 +31,9 @@ func getFreePort() int {
 	if err != nil {
 		panic(fmt.Sprintf("Failed to get free port: %v", err))
 	}
-	defer l.Close()
+	defer l.Close() //nolint:errcheck
 
-	addr := l.Addr().(*net.TCPAddr)
+	addr := l.Addr().(*net.TCPAddr) //nolint:errcheck
 	return addr.Port
 }
 
@@ -230,10 +232,10 @@ func (h *ServerHarness) SendRequest(req *icap.Request) (*icap.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	// Set a read deadline to avoid hanging
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	if _, err := req.WriteTo(conn); err != nil {
 		return nil, fmt.Errorf("failed to write request: %w", err)
@@ -282,9 +284,9 @@ func (h *ServerHarness) SendRawRequest(rawRequest string) (*icap.Response, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	if _, err := conn.Write([]byte(rawRequest)); err != nil {
 		return nil, fmt.Errorf("failed to write request: %w", err)

@@ -1,6 +1,5 @@
-// Package storage contains tests for panic recovery in filesystem storage.
-// WARN-001 FIX: These tests verify that panics in asyncWriter are recovered
-// and do not crash the goroutine silently.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -291,8 +290,8 @@ func TestFileStorage_PanicRecovery_InvalidData(t *testing.T) {
 
 	// Create a request with various edge cases
 	testCases := []struct {
-		name string
 		sr   *StoredRequest
+		name string
 	}{
 		{
 			name: "empty_strings",
@@ -627,7 +626,7 @@ func TestFileStorage_PanicRecovery_AfterPanic(t *testing.T) {
 	}
 }
 
-// Helper function to verify file integrity
+// Helper function to verify file integrity.
 func verifyBatchFileIntegrity(t *testing.T, path string) {
 	t.Helper()
 
@@ -709,5 +708,5 @@ func TestFileStorage_PanicRecovery_DataIntegrity(t *testing.T) {
 	}
 }
 
-// Ensure io import is used
+// Ensure io import is used.
 var _ = io.EOF

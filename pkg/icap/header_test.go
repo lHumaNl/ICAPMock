@@ -1,5 +1,5 @@
-// Package icap provides ICAP (Internet Content Adaptation Protocol) data structures
-// and utilities per RFC 3507.
+// Copyright 2026 ICAP Mock
+
 package icap_test
 
 import (

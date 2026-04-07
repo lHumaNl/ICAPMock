@@ -1,4 +1,5 @@
-// Package metrics provides Prometheus metrics collection for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package metrics
 
 import (
@@ -12,7 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// getHistogramCount returns the count of observations from a histogram metric
+// getHistogramCount returns the count of observations from a histogram metric.
 func getHistogramCount(reg prometheus.Gatherer, metricName string, labels ...string) uint64 {
 	mfs, err := reg.Gather()
 	if err != nil {
@@ -40,7 +41,7 @@ func getHistogramCount(reg prometheus.Gatherer, metricName string, labels ...str
 	return 0
 }
 
-// TestNewCollector tests that a new collector can be created
+// TestNewCollector tests that a new collector can be created.
 func TestNewCollector(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -52,7 +53,7 @@ func TestNewCollector(t *testing.T) {
 	}
 }
 
-// TestNewCollector_NilRegistry tests that nil registry returns error
+// TestNewCollector_NilRegistry tests that nil registry returns error.
 func TestNewCollector_NilRegistry(t *testing.T) {
 	_, err := NewCollector(nil)
 	if err == nil {
@@ -60,7 +61,7 @@ func TestNewCollector_NilRegistry(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordRequest tests request counter recording
+// TestCollector_RecordRequest tests request counter recording.
 func TestCollector_RecordRequest(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -85,7 +86,7 @@ func TestCollector_RecordRequest(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordRequestDuration tests request duration histogram recording
+// TestCollector_RecordRequestDuration tests request duration histogram recording.
 func TestCollector_RecordRequestDuration(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -105,7 +106,7 @@ func TestCollector_RecordRequestDuration(t *testing.T) {
 	}
 }
 
-// TestCollector_RequestsInFlight tests in-flight request gauge
+// TestCollector_RequestsInFlight tests in-flight request gauge.
 func TestCollector_RequestsInFlight(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -136,7 +137,7 @@ func TestCollector_RequestsInFlight(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordRequestSize tests request size histogram recording
+// TestCollector_RecordRequestSize tests request size histogram recording.
 func TestCollector_RecordRequestSize(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -154,7 +155,7 @@ func TestCollector_RecordRequestSize(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordResponseSize tests response size histogram recording
+// TestCollector_RecordResponseSize tests response size histogram recording.
 func TestCollector_RecordResponseSize(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -171,7 +172,7 @@ func TestCollector_RecordResponseSize(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordError tests error counter recording
+// TestCollector_RecordError tests error counter recording.
 func TestCollector_RecordError(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -194,7 +195,7 @@ func TestCollector_RecordError(t *testing.T) {
 	}
 }
 
-// TestCollector_ActiveConnections tests active connections gauge
+// TestCollector_ActiveConnections tests active connections gauge.
 func TestCollector_ActiveConnections(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -220,7 +221,7 @@ func TestCollector_ActiveConnections(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordScenarioMatched tests scenario counter recording
+// TestCollector_RecordScenarioMatched tests scenario counter recording.
 func TestCollector_RecordScenarioMatched(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -243,7 +244,7 @@ func TestCollector_RecordScenarioMatched(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordChaosInjected tests chaos injection counter recording
+// TestCollector_RecordChaosInjected tests chaos injection counter recording.
 func TestCollector_RecordChaosInjected(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -266,7 +267,7 @@ func TestCollector_RecordChaosInjected(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordRateLimitExceeded tests rate limit counter recording
+// TestCollector_RecordRateLimitExceeded tests rate limit counter recording.
 func TestCollector_RecordRateLimitExceeded(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -289,7 +290,7 @@ func TestCollector_RecordRateLimitExceeded(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordRateLimitWaitTime tests rate limit wait time histogram recording
+// TestCollector_RecordRateLimitWaitTime tests rate limit wait time histogram recording.
 func TestCollector_RecordRateLimitWaitTime(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -306,7 +307,7 @@ func TestCollector_RecordRateLimitWaitTime(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordReplayRequest tests replay request counter recording
+// TestCollector_RecordReplayRequest tests replay request counter recording.
 func TestCollector_RecordReplayRequest(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -324,7 +325,7 @@ func TestCollector_RecordReplayRequest(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordReplayFailure tests replay failure counter recording
+// TestCollector_RecordReplayFailure tests replay failure counter recording.
 func TestCollector_RecordReplayFailure(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -341,7 +342,7 @@ func TestCollector_RecordReplayFailure(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordReplayDuration tests replay duration histogram recording
+// TestCollector_RecordReplayDuration tests replay duration histogram recording.
 func TestCollector_RecordReplayDuration(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -358,7 +359,7 @@ func TestCollector_RecordReplayDuration(t *testing.T) {
 	}
 }
 
-// TestCollector_SetReplayBehindOriginal tests replay behind gauge setting
+// TestCollector_SetReplayBehindOriginal tests replay behind gauge setting.
 func TestCollector_SetReplayBehindOriginal(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -379,7 +380,7 @@ func TestCollector_SetReplayBehindOriginal(t *testing.T) {
 	}
 }
 
-// TestCollector_StreamingActive tests streaming active gauge
+// TestCollector_StreamingActive tests streaming active gauge.
 func TestCollector_StreamingActive(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -402,7 +403,7 @@ func TestCollector_StreamingActive(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordStreamingBytes tests streaming bytes counter recording
+// TestCollector_RecordStreamingBytes tests streaming bytes counter recording.
 func TestCollector_RecordStreamingBytes(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -425,7 +426,7 @@ func TestCollector_RecordStreamingBytes(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordConfigReload tests config reload counter recording
+// TestCollector_RecordConfigReload tests config reload counter recording.
 func TestCollector_RecordConfigReload(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -448,7 +449,7 @@ func TestCollector_RecordConfigReload(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordConfigReloadDuration tests config reload duration histogram recording
+// TestCollector_RecordConfigReloadDuration tests config reload duration histogram recording.
 func TestCollector_RecordConfigReloadDuration(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -465,7 +466,7 @@ func TestCollector_RecordConfigReloadDuration(t *testing.T) {
 	}
 }
 
-// TestCollector_SetConfigLastReloadStatus tests config last reload status gauge
+// TestCollector_SetConfigLastReloadStatus tests config last reload status gauge.
 func TestCollector_SetConfigLastReloadStatus(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -488,7 +489,7 @@ func TestCollector_SetConfigLastReloadStatus(t *testing.T) {
 	}
 }
 
-// TestHandler tests that Handler returns a valid HTTP handler
+// TestHandler tests that Handler returns a valid HTTP handler.
 func TestHandler(t *testing.T) {
 	handler := Handler()
 	if handler == nil {
@@ -513,7 +514,7 @@ func TestHandler(t *testing.T) {
 	}
 }
 
-// TestHandlerWithRegistry tests that HandlerWithRegistry returns a valid HTTP handler
+// TestHandlerWithRegistry tests that HandlerWithRegistry returns a valid HTTP handler.
 func TestHandlerWithRegistry(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	handler := HandlerWithRegistry(reg)
@@ -531,7 +532,7 @@ func TestHandlerWithRegistry(t *testing.T) {
 	}
 }
 
-// TestHandlerWithRegistry_NilRegistry tests that nil registry returns a handler with default registry
+// TestHandlerWithRegistry_NilRegistry tests that nil registry returns a handler with default registry.
 func TestHandlerWithRegistry_NilRegistry(t *testing.T) {
 	handler := HandlerWithRegistry(nil)
 	if handler == nil {
@@ -539,7 +540,7 @@ func TestHandlerWithRegistry_NilRegistry(t *testing.T) {
 	}
 }
 
-// TestCollector_MetricNames tests that all expected metric names are registered
+// TestCollector_MetricNames tests that all expected metric names are registered.
 func TestCollector_MetricNames(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -614,7 +615,7 @@ func TestCollector_MetricNames(t *testing.T) {
 	}
 }
 
-// TestCollector_ConcurrentAccess tests that the collector is safe for concurrent use
+// TestCollector_ConcurrentAccess tests that the collector is safe for concurrent use.
 func TestCollector_ConcurrentAccess(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -650,7 +651,7 @@ func TestCollector_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestCollector_SetCircuitBreakerState tests circuit breaker state gauge
+// TestCollector_SetCircuitBreakerState tests circuit breaker state gauge.
 func TestCollector_SetCircuitBreakerState(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -680,7 +681,7 @@ func TestCollector_SetCircuitBreakerState(t *testing.T) {
 	}
 }
 
-// TestCollector_SetCircuitBreakerState_MultipleComponents tests that state gauge works for multiple components
+// TestCollector_SetCircuitBreakerState_MultipleComponents tests that state gauge works for multiple components.
 func TestCollector_SetCircuitBreakerState_MultipleComponents(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -709,7 +710,7 @@ func TestCollector_SetCircuitBreakerState_MultipleComponents(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordCircuitBreakerTransition tests circuit breaker transition counter
+// TestCollector_RecordCircuitBreakerTransition tests circuit breaker transition counter.
 func TestCollector_RecordCircuitBreakerTransition(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -744,7 +745,7 @@ func TestCollector_RecordCircuitBreakerTransition(t *testing.T) {
 	}
 }
 
-// TestCollector_RecordCircuitBreakerFailure tests circuit breaker failure counter
+// TestCollector_RecordCircuitBreakerFailure tests circuit breaker failure counter.
 func TestCollector_RecordCircuitBreakerFailure(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -770,7 +771,7 @@ func TestCollector_RecordCircuitBreakerFailure(t *testing.T) {
 	}
 }
 
-// TestCollector_CircuitBreakerMetrics_ConcurrentAccess tests that circuit breaker metrics are safe for concurrent use
+// TestCollector_CircuitBreakerMetrics_ConcurrentAccess tests that circuit breaker metrics are safe for concurrent use.
 func TestCollector_CircuitBreakerMetrics_ConcurrentAccess(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -811,7 +812,7 @@ func TestCollector_CircuitBreakerMetrics_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestCollector_CircuitBreakerMetrics_InitialState tests that initial state is set to closed (0)
+// TestCollector_CircuitBreakerMetrics_InitialState tests that initial state is set to closed (0).
 func TestCollector_CircuitBreakerMetrics_InitialState(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)
@@ -828,7 +829,7 @@ func TestCollector_CircuitBreakerMetrics_InitialState(t *testing.T) {
 	}
 }
 
-// TestCollector_CircuitBreakerMetrics_AllTransitions tests all possible state transitions
+// TestCollector_CircuitBreakerMetrics_AllTransitions tests all possible state transitions.
 func TestCollector_CircuitBreakerMetrics_AllTransitions(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)

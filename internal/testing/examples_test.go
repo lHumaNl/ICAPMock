@@ -1,4 +1,5 @@
-// Package testing provides example tests demonstrating the use of test utilities.
+// Copyright 2026 ICAP Mock
+
 package testing
 
 import (
@@ -8,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestExampleUnit demonstrates request/response building and assertion.

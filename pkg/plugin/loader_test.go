@@ -1,7 +1,9 @@
-// Package plugin_test provides tests for the plugin loader.
+// Copyright 2026 ICAP Mock
+
 package plugin_test
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -92,7 +94,7 @@ func TestLoadErrorUnwrap(t *testing.T) {
 	}
 
 	unwrapped := err.Unwrap()
-	if unwrapped != internalErr {
+	if !errors.Is(unwrapped, internalErr) {
 		t.Fatal("Unwrap should return internal error")
 	}
 }

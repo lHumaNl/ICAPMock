@@ -1,4 +1,5 @@
-// Package config provides configuration loading from files and environment
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (
@@ -34,8 +35,8 @@ type MetricsCollector interface {
 
 // Loader handles loading configuration from various sources.
 type Loader struct {
-	envPrefix string
 	metrics   MetricsCollector
+	envPrefix string
 }
 
 // NewLoader creates a new configuration loader.
@@ -63,7 +64,7 @@ type LoadOptions struct {
 // Load loads configuration from multiple sources with proper precedence:
 // 1. Defaults are applied first
 // 2. Configuration file values override defaults
-// 3. Environment variables override file values
+// 3. Environment variables override file values.
 func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 	startTime := time.Now()
 	cfg := &Config{}
@@ -99,7 +100,7 @@ func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 	// the merge happens at runtime via ServerEntryConfig.ToServerConfig()
 	// Here we just ensure defaults have sane values
 	if cfg.Defaults.Host == "" && len(cfg.Servers) > 0 {
-		cfg.Defaults.Host = "0.0.0.0"
+		cfg.Defaults.Host = defaultHost
 	}
 	if cfg.Defaults.ReadTimeout == 0 && len(cfg.Servers) > 0 {
 		cfg.Defaults.ReadTimeout = 30 * time.Second
@@ -143,7 +144,7 @@ func (l *Loader) recordMetrics(success bool, duration time.Duration) {
 // LoadFromFile loads configuration from a YAML or JSON file.
 // The file format is determined by the file extension.
 func (l *Loader) LoadFromFile(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is validated
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -164,7 +165,7 @@ func (l *Loader) LoadFromFile(path string) (*Config, error) {
 		// Try YAML first, then JSON
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			if jsonErr := json.Unmarshal(data, cfg); jsonErr != nil {
-				return nil, fmt.Errorf("failed to parse config file as YAML or JSON: yaml=%v, json=%v", err, jsonErr)
+				return nil, fmt.Errorf("failed to parse config file as YAML or JSON: yaml=%w, json=%w", err, jsonErr)
 			}
 		}
 	}
@@ -174,7 +175,7 @@ func (l *Loader) LoadFromFile(path string) (*Config, error) {
 
 // LoadFromEnv loads configuration from environment variables.
 // Environment variables follow the pattern: ICAP_<SECTION>_<KEY>
-// For example: ICAP_SERVER_PORT, ICAP_LOGGING_LEVEL
+// For example: ICAP_SERVER_PORT, ICAP_LOGGING_LEVEL.
 func (l *Loader) LoadFromEnv(cfg *Config) error {
 	// Server configuration
 	if v := os.Getenv(l.envPrefix + "SERVER_HOST"); v != "" {

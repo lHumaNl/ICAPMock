@@ -1,4 +1,5 @@
-// Package components provides reusable UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -140,7 +141,7 @@ func (m *TabsModel) View() string {
 	return result
 }
 
-// Styles for tabs
+// Styles for tabs.
 var (
 	activeTabStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("15")).

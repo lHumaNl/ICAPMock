@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package utils
 
 import (
@@ -148,7 +150,7 @@ func TestCircuitBreaker_FailImmediatelyWhenOpen(t *testing.T) {
 		return nil
 	})
 
-	if err != CircuitOpenError {
+	if !errors.Is(err, CircuitOpenError) {
 		t.Errorf("expected CircuitOpenError, got %v", err)
 	}
 
@@ -220,7 +222,7 @@ func TestCircuitBreaker_ConcurrentCalls(t *testing.T) {
 	close(errChan)
 
 	for err := range errChan {
-		if err != nil && err != CircuitOpenError && err.Error() != "simulated error" {
+		if err != nil && !errors.Is(err, CircuitOpenError) && err.Error() != "simulated error" {
 			t.Errorf("unexpected error: %v", err)
 		}
 	}
@@ -494,8 +496,8 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 
 func TestCircuitBreaker_DefaultConfigs(t *testing.T) {
 	tests := []struct {
-		name            string
 		creator         func() *CircuitBreaker
+		name            string
 		expectedFailure int
 		expectedTimeout time.Duration
 	}{
@@ -576,8 +578,8 @@ func TestCircuitBreaker_RaceDetection(t *testing.T) {
 
 func TestCircuitState_String(t *testing.T) {
 	tests := []struct {
-		state    CircuitState
 		expected string
+		state    CircuitState
 	}{
 		{StateClosed, "Closed"},
 		{StateHalfOpen, "HalfOpen"},

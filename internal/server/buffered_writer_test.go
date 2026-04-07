@@ -1,6 +1,5 @@
-// Package server provides tests for bufferedWriter buffering behavior.
-// These tests verify that the bufferedWriter properly buffers small writes
-// and reduces syscall overhead.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (

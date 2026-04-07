@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
@@ -13,17 +15,17 @@ import (
 	"time"
 )
 
-// RateLimiter implements token bucket rate limiting
+// RateLimiter implements token bucket rate limiting.
 type RateLimiter struct {
-	mu           sync.Mutex
+	lastRefill   time.Time
+	requestQueue chan struct{}
 	tokens       int
 	maxTokens    int
 	refillRate   time.Duration
-	lastRefill   time.Time
-	requestQueue chan struct{}
+	mu           sync.Mutex
 }
 
-// NewRateLimiter creates a new token bucket rate limiter
+// NewRateLimiter creates a new token bucket rate limiter.
 func NewRateLimiter(maxRequests int, interval time.Duration) *RateLimiter {
 	if maxRequests <= 0 {
 		maxRequests = 10 // sensible default to avoid blocking on unbuffered channel
@@ -37,7 +39,7 @@ func NewRateLimiter(maxRequests int, interval time.Duration) *RateLimiter {
 	}
 }
 
-// Acquire acquires a token from the bucket, blocking if necessary
+// Acquire acquires a token from the bucket, blocking if necessary.
 func (rl *RateLimiter) Acquire(ctx context.Context) error {
 	// Acquire queue slot with proper synchronization
 	rl.mu.Lock()
@@ -51,7 +53,7 @@ func (rl *RateLimiter) Acquire(ctx context.Context) error {
 		select {
 		case rl.requestQueue <- struct{}{}:
 		case <-ctx.Done():
-			return fmt.Errorf("rate limit wait cancelled: %w", ctx.Err())
+			return fmt.Errorf("rate limit wait canceled: %w", ctx.Err())
 		}
 	}
 
@@ -75,7 +77,7 @@ func (rl *RateLimiter) Acquire(ctx context.Context) error {
 		select {
 		case <-time.After(waitTime):
 		case <-ctx.Done():
-			return fmt.Errorf("rate limit wait cancelled: %w", ctx.Err())
+			return fmt.Errorf("rate limit wait canceled: %w", ctx.Err())
 		}
 
 		rl.mu.Lock()
@@ -87,14 +89,14 @@ func (rl *RateLimiter) Acquire(ctx context.Context) error {
 	return nil
 }
 
-// refill refills tokens based on elapsed time
+// refill refills tokens based on elapsed time.
 func (rl *RateLimiter) refill() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	rl.refillLocked()
 }
 
-// refillLocked refills tokens (must be called with mutex held)
+// refillLocked refills tokens (must be called with mutex held).
 func (rl *RateLimiter) refillLocked() {
 	if rl.refillRate <= 0 {
 		// No refill interval configured; immediately replenish all tokens.
@@ -115,10 +117,10 @@ func (rl *RateLimiter) refillLocked() {
 }
 
 type MetricsClient struct {
-	baseURL     string
 	httpClient  *http.Client
 	rateLimiter *RateLimiter
 	cfg         *ClientConfig
+	baseURL     string
 }
 
 func NewMetricsClient(cfg *ClientConfig) *MetricsClient {
@@ -147,7 +149,7 @@ func (c *MetricsClient) GetMetrics(ctx context.Context) (*MetricsSnapshot, error
 	}
 
 	url := fmt.Sprintf("%s/metrics", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -156,7 +158,7 @@ func (c *MetricsClient) GetMetrics(ctx context.Context) (*MetricsSnapshot, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch metrics: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		log.Printf("Metrics endpoint not found")
@@ -354,10 +356,10 @@ func calculateRPS(counters map[string]float64) float64 {
 }
 
 type LogsClient struct {
-	baseURL     string
 	httpClient  *http.Client
 	rateLimiter *RateLimiter
 	cfg         *ClientConfig
+	baseURL     string
 }
 
 func NewLogsClient(cfg *ClientConfig) *LogsClient {
@@ -393,7 +395,7 @@ func (c *LogsClient) GetLogs(ctx context.Context, limit int) ([]*LogEntry, error
 	}
 
 	url := fmt.Sprintf("%s/logs?limit=%d", c.baseURL, limit)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -402,7 +404,7 @@ func (c *LogsClient) GetLogs(ctx context.Context, limit int) ([]*LogEntry, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		log.Printf("Logs endpoint not found")
@@ -426,10 +428,10 @@ func (c *LogsClient) GetLogs(ctx context.Context, limit int) ([]*LogEntry, error
 }
 
 type StatusClient struct {
-	baseURL     string
 	httpClient  *http.Client
 	rateLimiter *RateLimiter
 	cfg         *ClientConfig
+	baseURL     string
 }
 
 func NewStatusClient(cfg *ClientConfig) *StatusClient {
@@ -451,7 +453,7 @@ func NewStatusClient(cfg *ClientConfig) *StatusClient {
 	}
 }
 
-// ServerStatusInfo represents server status information
+// ServerStatusInfo represents server status information.
 type ServerStatusInfo struct {
 	State  string
 	Port   string
@@ -466,7 +468,7 @@ func (c *StatusClient) GetStatus(ctx context.Context) (ServerStatusInfo, error) 
 	}
 
 	url := fmt.Sprintf("%s/health", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return ServerStatusInfo{}, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -476,7 +478,7 @@ func (c *StatusClient) GetStatus(ctx context.Context) (ServerStatusInfo, error) 
 		log.Printf("Failed to fetch status: %v", err)
 		return ServerStatusInfo{State: "stopped", Port: "1344", Uptime: "0s"}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusInternalServerError {
 		log.Printf("Server error while fetching status")
@@ -485,8 +487,8 @@ func (c *StatusClient) GetStatus(ctx context.Context) (ServerStatusInfo, error) 
 	if resp.StatusCode == http.StatusOK {
 		var healthResp struct {
 			Status string `json:"status"`
-			Port   int    `json:"port"`
 			Uptime string `json:"uptime"`
+			Port   int    `json:"port"`
 		}
 
 		body, err := io.ReadAll(resp.Body)

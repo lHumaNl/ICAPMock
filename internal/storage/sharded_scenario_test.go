@@ -1,8 +1,9 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -326,7 +327,7 @@ func TestShardedScenarioRegistry_Remove_NotFound(t *testing.T) {
 	registry := NewShardedScenarioRegistry()
 
 	err := registry.Remove("nonexistent")
-	if err != ErrNoMatch {
+	if !errors.Is(err, ErrNoMatch) {
 		t.Errorf("Remove() error = %v, want %v", err, ErrNoMatch)
 	}
 }
@@ -781,8 +782,8 @@ func TestShardedScenarioRegistry_Distribution(t *testing.T) {
 	}
 
 	// Проверяем что сценарии распределены по shard-ам
-	shardCounts := make([]int, 16)
 	shardedReg := registry.(*ShardedScenarioRegistry)
+	shardCounts := make([]int, 16, 16+len(shardedReg.shards))
 	for _, shard := range shardedReg.shards {
 		shard.mu.RLock()
 		shardCounts = append(shardCounts, len(shard.scenarios))

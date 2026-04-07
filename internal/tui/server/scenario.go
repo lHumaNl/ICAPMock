@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -12,28 +14,28 @@ import (
 	"github.com/icap-mock/icap-mock/internal/tui/utils"
 )
 
-// APIScenario represents a scenario for API operations
+// APIScenario represents a scenario for API operations.
 type APIScenario struct {
+	Config   map[string]interface{} `json:"config"`
 	Name     string                 `json:"name"`
-	Priority int                    `json:"priority"`
 	Method   string                 `json:"method,omitempty"`
 	Path     string                 `json:"path,omitempty"`
-	Config   map[string]interface{} `json:"config"`
+	Priority int                    `json:"priority"`
 }
 
-// ScenarioListResponse represents the response for listing scenarios
+// ScenarioListResponse represents the response for listing scenarios.
 type ScenarioListResponse struct {
 	Scenarios []APIScenario `json:"scenarios"`
 }
 
-// ScenarioClient provides HTTP client for scenario operations
+// ScenarioClient provides HTTP client for scenario operations.
 type ScenarioClient struct {
 	baseURL     string
 	httpClient  *http.Client
 	retryConfig utils.RetryConfig
 }
 
-// NewScenarioClient creates a new scenario client
+// NewScenarioClient creates a new scenario client.
 func NewScenarioClient(host string, port int) *ScenarioClient {
 	return &ScenarioClient{
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
@@ -44,15 +46,15 @@ func NewScenarioClient(host string, port int) *ScenarioClient {
 	}
 }
 
-// doRequestWithRetry executes an HTTP request with retry
+// doRequestWithRetry executes an HTTP request with retry.
 func (c *ScenarioClient) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	return utils.DoWithRetryHTTP(ctx, c.retryConfig, c.httpClient, req)
 }
 
-// ListScenarios fetches all scenarios from the server
+// ListScenarios fetches all scenarios from the server.
 func (c *ScenarioClient) ListScenarios(ctx context.Context) ([]APIScenario, error) {
 	url := fmt.Sprintf("%s/scenarios", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -61,7 +63,7 @@ func (c *ScenarioClient) ListScenarios(ctx context.Context) ([]APIScenario, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch scenarios: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return []APIScenario{}, nil
@@ -78,7 +80,7 @@ func (c *ScenarioClient) ListScenarios(ctx context.Context) ([]APIScenario, erro
 	return response.Scenarios, nil
 }
 
-// CreateScenario creates a new scenario
+// CreateScenario creates a new scenario.
 func (c *ScenarioClient) CreateScenario(ctx context.Context, scenario APIScenario) error {
 	body, err := json.Marshal(scenario)
 	if err != nil {
@@ -96,7 +98,7 @@ func (c *ScenarioClient) CreateScenario(ctx context.Context, scenario APIScenari
 	if err != nil {
 		return fmt.Errorf("failed to create scenario: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		return nil
@@ -106,7 +108,7 @@ func (c *ScenarioClient) CreateScenario(ctx context.Context, scenario APIScenari
 	return fmt.Errorf("failed to create scenario (status %d): %s", resp.StatusCode, string(respBody))
 }
 
-// UpdateScenario updates an existing scenario
+// UpdateScenario updates an existing scenario.
 func (c *ScenarioClient) UpdateScenario(ctx context.Context, oldName string, scenario APIScenario) error {
 	body, err := json.Marshal(scenario)
 	if err != nil {
@@ -124,7 +126,7 @@ func (c *ScenarioClient) UpdateScenario(ctx context.Context, oldName string, sce
 	if err != nil {
 		return fmt.Errorf("failed to update scenario: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("scenario not found: %s", oldName)
@@ -137,10 +139,10 @@ func (c *ScenarioClient) UpdateScenario(ctx context.Context, oldName string, sce
 	return nil
 }
 
-// DeleteScenario deletes a scenario
+// DeleteScenario deletes a scenario.
 func (c *ScenarioClient) DeleteScenario(ctx context.Context, name string) error {
 	url := fmt.Sprintf("%s/scenarios/%s", c.baseURL, name)
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -149,7 +151,7 @@ func (c *ScenarioClient) DeleteScenario(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("failed to delete scenario: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("scenario not found: %s", name)
@@ -162,10 +164,10 @@ func (c *ScenarioClient) DeleteScenario(ctx context.Context, name string) error 
 	return nil
 }
 
-// ReloadScenarios reloads scenarios from disk
+// ReloadScenarios reloads scenarios from disk.
 func (c *ScenarioClient) ReloadScenarios(ctx context.Context) error {
 	url := fmt.Sprintf("%s/scenarios/reload", c.baseURL)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -174,7 +176,7 @@ func (c *ScenarioClient) ReloadScenarios(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to reload scenarios: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))

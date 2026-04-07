@@ -1,4 +1,5 @@
-// Package handler provides tests for preview rate limiting.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (

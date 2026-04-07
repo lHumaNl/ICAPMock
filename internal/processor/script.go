@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -22,25 +24,10 @@ import (
 // These settings prevent malicious scripts from accessing sensitive resources
 // and limit resource usage to protect the server.
 type ScriptSecurityConfig struct {
-	// Timeout is the maximum execution time for a script.
-	// Default: 5s
-	Timeout time.Duration
-
-	// MemoryLimitBytes is the maximum memory a script can allocate.
-	// Default: 10485760 (10MB)
-	// Set to 0 to disable memory limit (not recommended for production).
-	MemoryLimitBytes int64
-
-	// AllowedFunctions is a whitelist of global functions/objects allowed in scripts.
-	// Supports wildcards (e.g., "Math.*").
-	// If empty, allows only safe built-ins (Math, String, Date, JSON, console).
-	// Default: ["Math.*", "String.*", "Date.*", "JSON.*", "console.*"]
 	AllowedFunctions []string
-
-	// BlockedFunctions is a blacklist of global functions/objects to block.
-	// These will be overridden to throw security errors if accessed.
-	// Default: ["eval", "Function", "setTimeout", "setInterval", "require", "import"]
 	BlockedFunctions []string
+	Timeout          time.Duration
+	MemoryLimitBytes int64
 }
 
 // DefaultScriptSecurityConfig returns secure defaults for script execution.
@@ -66,11 +53,11 @@ func DefaultScriptSecurityConfig() ScriptSecurityConfig {
 type ScriptProcessor struct {
 	registry  storage.ScenarioRegistry
 	logger    *logger.Logger
-	timeout   time.Duration
-	security  ScriptSecurityConfig
-	mu        sync.RWMutex
 	pool      *ScriptWorkerPool
 	validator *StaticScriptValidator
+	security  ScriptSecurityConfig
+	timeout   time.Duration
+	mu        sync.RWMutex
 }
 
 // NewScriptProcessor creates a new ScriptProcessor with the given registry, logger, and timeout.
@@ -348,7 +335,7 @@ func (p *ScriptProcessor) createSandboxedVM() (*goja.Runtime, error) {
 	globalObj := vm.GlobalObject()
 	blockedGlobals := []string{"require", "module", "exports", "__dirname", "__filename", "process", "global", "Buffer"}
 	for _, globalName := range blockedGlobals {
-		globalObj.Delete(globalName)
+		_ = globalObj.Delete(globalName)
 		// Also set to undefined to prevent access
 		if err := vm.Set(globalName, goja.Undefined()); err != nil {
 			// Log but don't fail if already undefined

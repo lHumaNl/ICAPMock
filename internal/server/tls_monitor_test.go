@@ -1,4 +1,5 @@
-// Package server tests TLS certificate expiry monitoring.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -14,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"log/slog"
+
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/metrics"
-	"github.com/prometheus/client_golang/prometheus"
-	"log/slog"
 )
 
 // generateTestCertificate creates a test TLS certificate with specified validity period.
@@ -88,8 +91,8 @@ func generateTestCertificate(t *testing.T, validFor time.Duration, certFile stri
 
 func TestNewTLSCertificateMonitor(t *testing.T) {
 	tests := []struct {
-		name    string
 		config  *config.TLSConfig
+		name    string
 		wantNil bool
 	}{
 		{

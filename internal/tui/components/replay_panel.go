@@ -1,4 +1,5 @@
-// Package components provides UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -13,24 +14,24 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ReplayRequestItem represents a recorded request in the list
+// ReplayRequestItem represents a recorded request in the list.
 type ReplayRequestItem struct {
-	ID         string
 	Timestamp  time.Time
+	ID         string
 	Method     string
 	Path       string
-	StatusCode int
 	Response   string
+	StatusCode int
 	Duration   time.Duration
 	Selected   bool
 }
 
-// FilterValue implements list.Item
+// FilterValue implements list.Item.
 func (r ReplayRequestItem) FilterValue() string {
 	return r.ID
 }
 
-// Title implements list.Item
+// Title implements list.Item.
 func (r ReplayRequestItem) Title() string {
 	timestamp := r.Timestamp.Format("15:04:05")
 	if r.Selected {
@@ -39,12 +40,12 @@ func (r ReplayRequestItem) Title() string {
 	return fmt.Sprintf("[ ] %s - %s %s", timestamp, r.Method, r.Path)
 }
 
-// Description implements list.Item
+// Description implements list.Item.
 func (r ReplayRequestItem) Description() string {
 	return fmt.Sprintf("Status: %d | Duration: %v", r.StatusCode, r.Duration)
 }
 
-// ReplayViewMode represents the current view mode
+// ReplayViewMode represents the current view mode.
 type ReplayViewMode int
 
 const (
@@ -53,52 +54,46 @@ const (
 	ReplayViewDetail
 )
 
-// ReplayPanelModel represents the replay panel component
+// ReplayPanelModel represents the replay panel component.
 type ReplayPanelModel struct {
-	mu     sync.RWMutex
-	mode   ReplayViewMode
-	width  int
-	height int
-	ready  bool
-
-	// List view components
-	requestList *list.Model
-
-	// Replay controls
-	replaySpeed      float64 // 0.5, 1, 2, 5
+	selectedRequest  *ReplayRequestItem
+	replayResults    *ReplayResults
+	requestList      *list.Model
 	targetURL        string
-	replayInProgress bool
+	errorMessage     string
+	requestDetail    string
+	replaySpeed      float64
 	progress         float64
-
-	// Results
-	replayResults   *ReplayResults
-	selectedRequest *ReplayRequestItem
-	requestDetail   string
-	errorMessage    string
+	height           int
+	width            int
+	mode             ReplayViewMode
+	mu               sync.RWMutex
+	replayInProgress bool
+	ready            bool
 }
 
-// ReplayResults contains replay execution results
+// ReplayResults contains replay execution results.
 type ReplayResults struct {
+	StartTime      time.Time
+	EndTime        time.Time
+	RequestResults []RequestResult
 	TotalRequests  int
 	SuccessCount   int
 	FailureCount   int
 	TotalDuration  time.Duration
 	AverageLatency time.Duration
-	StartTime      time.Time
-	EndTime        time.Time
-	RequestResults []RequestResult
 }
 
-// RequestResult represents the result of a single replayed request
+// RequestResult represents the result of a single replayed request.
 type RequestResult struct {
 	ID         string
-	Success    bool
+	Error      string
 	StatusCode int
 	Duration   time.Duration
-	Error      string
+	Success    bool
 }
 
-// NewReplayPanelModel creates a new replay panel model
+// NewReplayPanelModel creates a new replay panel model.
 func NewReplayPanelModel() *ReplayPanelModel {
 	// Initialize list with custom delegate
 	delegate := list.NewDefaultDelegate()
@@ -140,12 +135,12 @@ func (m *ReplayPanelModel) SetTargetURL(url string) {
 	}
 }
 
-// Init initializes the replay panel
+// Init initializes the replay panel.
 func (m *ReplayPanelModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates the replay panel
+// Update handles messages and updates the replay panel.
 func (m *ReplayPanelModel) Update(msg tea.Msg) (*ReplayPanelModel, tea.Cmd) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -162,9 +157,10 @@ func (m *ReplayPanelModel) Update(msg tea.Msg) (*ReplayPanelModel, tea.Cmd) {
 		m.requestList.SetHeight(m.height - 12)
 
 	case tea.KeyMsg:
-		if m.mode == ReplayViewList {
+		switch m.mode {
+		case ReplayViewList:
 			return m.handleListKeys(msg)
-		} else if m.mode == ReplayViewResults {
+		case ReplayViewResults:
 			return m.handleResultsKeys(msg)
 		}
 	}
@@ -182,7 +178,7 @@ func (m *ReplayPanelModel) Update(msg tea.Msg) (*ReplayPanelModel, tea.Cmd) {
 	return m, cmd
 }
 
-// handleListKeys handles key messages in list view
+// handleListKeys handles key messages in list view.
 func (m *ReplayPanelModel) handleListKeys(msg tea.KeyMsg) (*ReplayPanelModel, tea.Cmd) {
 	switch msg.String() {
 	case " ":
@@ -233,7 +229,7 @@ func (m *ReplayPanelModel) handleListKeys(msg tea.KeyMsg) (*ReplayPanelModel, te
 			m.replaySpeed = speed
 		}
 
-	case "enter":
+	case keyEnter:
 		// View details with type assertion safety
 		selected := m.requestList.SelectedItem()
 		if selected != nil {
@@ -250,7 +246,7 @@ func (m *ReplayPanelModel) handleListKeys(msg tea.KeyMsg) (*ReplayPanelModel, te
 			return m, nil
 		}
 
-	case "esc":
+	case keyEsc:
 		if m.mode == ReplayViewDetail {
 			m.switchToListView()
 			return m, nil
@@ -260,7 +256,7 @@ func (m *ReplayPanelModel) handleListKeys(msg tea.KeyMsg) (*ReplayPanelModel, te
 	return m, nil
 }
 
-// handleResultsKeys handles key messages in results view
+// handleResultsKeys handles key messages in results view.
 func (m *ReplayPanelModel) handleResultsKeys(msg tea.KeyMsg) (*ReplayPanelModel, tea.Cmd) {
 	switch msg.String() {
 	case "e":
@@ -271,7 +267,7 @@ func (m *ReplayPanelModel) handleResultsKeys(msg tea.KeyMsg) (*ReplayPanelModel,
 			}
 		}
 
-	case "esc":
+	case keyEsc:
 		// Return to list
 		m.switchToListView()
 		return m, nil
@@ -280,19 +276,19 @@ func (m *ReplayPanelModel) handleResultsKeys(msg tea.KeyMsg) (*ReplayPanelModel,
 	return m, nil
 }
 
-// updateList updates the list view
+// updateList updates the list view.
 func (m *ReplayPanelModel) updateList(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	*m.requestList, cmd = m.requestList.Update(msg)
 	return cmd
 }
 
-// updateResults updates the results view
+// updateResults updates the results view.
 func (m *ReplayPanelModel) updateResults(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// updateItem updates an item in the list
+// updateItem updates an item in the list.
 func (m *ReplayPanelModel) updateItem(item ReplayRequestItem) {
 	items := m.requestList.Items()
 	for i, listItem := range items {
@@ -309,7 +305,7 @@ func (m *ReplayPanelModel) updateItem(item ReplayRequestItem) {
 	m.requestList.SetItems(items)
 }
 
-// hasSelectedRequests returns true if at least one request is selected
+// hasSelectedRequests returns true if at least one request is selected.
 func (m *ReplayPanelModel) hasSelectedRequests() bool {
 	items := m.requestList.Items()
 	for _, item := range items {
@@ -325,7 +321,7 @@ func (m *ReplayPanelModel) hasSelectedRequests() bool {
 	return false
 }
 
-// getSelectedRequests returns all selected requests
+// getSelectedRequests returns all selected requests.
 func (m *ReplayPanelModel) getSelectedRequests() []ReplayRequestItem {
 	var selected []ReplayRequestItem
 	items := m.requestList.Items()
@@ -342,7 +338,7 @@ func (m *ReplayPanelModel) getSelectedRequests() []ReplayRequestItem {
 	return selected
 }
 
-// SetRequests sets the list of requests
+// SetRequests sets the list of requests.
 func (m *ReplayPanelModel) SetRequests(requests []ReplayRequestItem) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -355,14 +351,14 @@ func (m *ReplayPanelModel) SetRequests(requests []ReplayRequestItem) {
 	log.Printf("[DEBUG] SetRequests: set %d items in list", len(items))
 }
 
-// SetReplayResults sets the replay results
+// SetReplayResults sets the replay results.
 func (m *ReplayPanelModel) SetReplayResults(results *ReplayResults) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.replayResults = results
 }
 
-// UpdateProgress updates the replay progress
+// UpdateProgress updates the replay progress.
 func (m *ReplayPanelModel) UpdateProgress(current, total int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -371,7 +367,7 @@ func (m *ReplayPanelModel) UpdateProgress(current, total int) {
 	}
 }
 
-// startReplay starts the replay process
+// startReplay starts the replay process.
 func (m *ReplayPanelModel) startReplay() {
 	m.replayInProgress = true
 	m.replayResults = &ReplayResults{
@@ -380,7 +376,7 @@ func (m *ReplayPanelModel) startReplay() {
 	m.switchToResultsView()
 }
 
-// stopReplay stops the replay process
+// stopReplay stops the replay process.
 func (m *ReplayPanelModel) stopReplay() {
 	m.replayInProgress = false
 	if m.replayResults != nil {
@@ -389,18 +385,18 @@ func (m *ReplayPanelModel) stopReplay() {
 	}
 }
 
-// switchToListView switches to list view
+// switchToListView switches to list view.
 func (m *ReplayPanelModel) switchToListView() {
 	m.mode = ReplayViewList
 	m.selectedRequest = nil
 }
 
-// switchToResultsView switches to results view
+// switchToResultsView switches to results view.
 func (m *ReplayPanelModel) switchToResultsView() {
 	m.mode = ReplayViewResults
 }
 
-// switchToDetailView switches to detail view
+// switchToDetailView switches to detail view.
 func (m *ReplayPanelModel) switchToDetailView() error {
 	if m.selectedRequest == nil {
 		return fmt.Errorf("no request selected for viewing details")
@@ -410,7 +406,7 @@ func (m *ReplayPanelModel) switchToDetailView() error {
 	return nil
 }
 
-// formatRequestDetail formats request details for display
+// formatRequestDetail formats request details for display.
 func (m *ReplayPanelModel) formatRequestDetail(request *ReplayRequestItem) string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -428,7 +424,7 @@ func (m *ReplayPanelModel) formatRequestDetail(request *ReplayRequestItem) strin
 	)
 }
 
-// View renders the replay panel
+// View renders the replay panel.
 func (m *ReplayPanelModel) View() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -448,7 +444,7 @@ func (m *ReplayPanelModel) View() string {
 	}
 }
 
-// renderListView renders the request list
+// renderListView renders the request list.
 func (m *ReplayPanelModel) renderListView() string {
 	// Render controls info
 	controls := lipgloss.JoinVertical(
@@ -495,7 +491,7 @@ func (m *ReplayPanelModel) renderListView() string {
 	return PanelStyle.Render(content)
 }
 
-// renderResultsView renders the replay results
+// renderResultsView renders the replay results.
 func (m *ReplayPanelModel) renderResultsView() string {
 	// Render progress bar if replay is in progress
 	var progressSection string
@@ -589,7 +585,7 @@ func (m *ReplayPanelModel) renderResultsView() string {
 	return PanelStyle.Render(content)
 }
 
-// renderDetailView renders the request detail view
+// renderDetailView renders the request detail view.
 func (m *ReplayPanelModel) renderDetailView() string {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -611,7 +607,7 @@ func (m *ReplayPanelModel) renderDetailView() string {
 	return PanelStyle.Render(content)
 }
 
-// getStatusIcon returns status icon
+// getStatusIcon returns status icon.
 func (m *ReplayPanelModel) getStatusIcon(success bool) string {
 	if success {
 		return "✓"
@@ -619,37 +615,37 @@ func (m *ReplayPanelModel) getStatusIcon(success bool) string {
 	return "✗"
 }
 
-// ReplayListMsg is sent when request list is received
+// ReplayListMsg is sent when request list is received.
 type ReplayListMsg struct {
 	Requests []ReplayRequestItem
 }
 
-// ReplayStartMsg is sent to start replay
+// ReplayStartMsg is sent to start replay.
 type ReplayStartMsg struct {
+	TargetURL string
 	Requests  []ReplayRequestItem
 	Speed     float64
-	TargetURL string
 }
 
-// ReplayProgressMsg is sent with replay progress update
+// ReplayProgressMsg is sent with replay progress update.
 type ReplayProgressMsg struct {
+	Result  *RequestResult
 	Current int
 	Total   int
-	Result  *RequestResult
 }
 
-// ReplayCompleteMsg is sent when replay completes
+// ReplayCompleteMsg is sent when replay completes.
 type ReplayCompleteMsg struct {
 	Results *ReplayResults
 }
 
-// ReplayStopMsg is sent to stop replay
+// ReplayStopMsg is sent to stop replay.
 type ReplayStopMsg struct{}
 
-// ReplayExportMsg is sent to export replay results
+// ReplayExportMsg is sent to export replay results.
 type ReplayExportMsg struct{}
 
-// ReplayErrorMsg is sent when a replay operation fails
+// ReplayErrorMsg is sent when a replay operation fails.
 type ReplayErrorMsg struct {
 	Err error
 }

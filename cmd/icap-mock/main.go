@@ -1,4 +1,5 @@
-// Package main provides the entry point for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -22,7 +23,7 @@ func main() {
 	serverCmd.TUIRunner = func(cfg interface{}) error {
 		var clientCfg *state.ClientConfig
 		if cfg != nil {
-			clientCfg = cfg.(*state.ClientConfig)
+			clientCfg = cfg.(*state.ClientConfig) //nolint:errcheck
 		}
 		return tui.RunTUIWithVersion(clientCfg, version)
 	}
@@ -43,7 +44,7 @@ func main() {
 	// Check for global flags that work without a subcommand
 	if len(args) > 0 {
 		switch args[0] {
-		case "--help", "-h":
+		case "--help", "-h": //nolint:goconst
 			registry.PrintUsage()
 			os.Exit(0)
 		case "--version":
@@ -132,7 +133,7 @@ func main() {
 // RunWithContext starts the ICAP server with the given context.
 // This function is separated from Run to allow signal handling in main.
 func RunWithContext(ctx context.Context, cfg interface{}) error {
-	return Run(ctx, cfg.(*config.Config))
+	return Run(ctx, cfg.(*config.Config)) //nolint:errcheck
 }
 
 // findClosestCommand returns the closest matching command name using Levenshtein distance.

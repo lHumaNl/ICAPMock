@@ -1,26 +1,5 @@
-// Package metrics provides Prometheus metrics collection for the ICAP Mock Server.
-// It defines and exposes metrics for monitoring request handling, errors,
-// connections, mock scenarios, chaos injection, rate limiting, replay, and streaming.
-//
-// The package uses the Prometheus client library to expose metrics in a format
-// compatible with Prometheus scraping. Metrics are exposed via an HTTP endpoint
-// (typically /metrics) for Prometheus to scrape.
-//
-// Example usage:
-//
-//	reg := prometheus.NewRegistry()
-//	collector, err := metrics.NewCollector(reg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	// Record metrics
-//	collector.RecordRequest("REQMOD")
-//	collector.RecordRequestDuration("REQMOD", time.Since(start))
-//
-//	// Start metrics server
-//	http.Handle("/metrics", metrics.HandlerWithRegistry(reg))
-//	go http.ListenAndServe(":9090", nil)
+// Copyright 2026 ICAP Mock
+
 package metrics
 
 import (
@@ -1038,8 +1017,8 @@ func (c *Collector) RecordRequestContextCancellation(method string, reason strin
 // This method is safe for concurrent use.
 func (c *Collector) RecordStorageBackpressureRejected(queueSize int, maxQueueSize int) {
 	c.storageBackpressureRejected.WithLabelValues(
-		string(rune(queueSize)),
-		string(rune(maxQueueSize)),
+		string(rune(queueSize)),    //nolint:gosec // safe range
+		string(rune(maxQueueSize)), //nolint:gosec // safe range
 	).Inc()
 }
 

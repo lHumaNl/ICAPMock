@@ -1,6 +1,5 @@
-// Package storage_test contains tests for atomic file rotation and crash recovery.
-// These tests verify that file rotation is thread-safe, handles concurrent writes
-// correctly, and tests for crash recovery (file is not corrupted).
+// Copyright 2026 ICAP Mock
+
 package storage_test
 
 import (

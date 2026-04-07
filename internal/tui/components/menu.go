@@ -1,4 +1,5 @@
-// Package components provides reusable UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -7,6 +8,12 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+)
+
+const (
+	keyEnter = "enter"
+	keyEsc   = "esc"
+	keyCtrlS = "ctrl+s"
 )
 
 // MenuItem represents an item in a dropdown menu.
@@ -75,10 +82,10 @@ func (m MenuItem) Description() string {
 // MenuModel represents a dropdown menu component.
 type MenuModel struct {
 	list     list.Model
-	visible  bool
+	onSelect func(id string)
 	width    int
 	height   int
-	onSelect func(id string)
+	visible  bool
 }
 
 // NewMenuModel creates a new menu model.
@@ -123,7 +130,7 @@ func (m *MenuModel) Update(msg tea.Msg) (*MenuModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "enter":
+		case keyEnter:
 			if m.visible && m.onSelect != nil {
 				selected := m.list.SelectedItem()
 				if selected != nil {
@@ -137,7 +144,7 @@ func (m *MenuModel) Update(msg tea.Msg) (*MenuModel, tea.Cmd) {
 					}
 				}
 			}
-		case "esc":
+		case keyEsc:
 			if m.visible {
 				m.visible = false
 				return m, nil
@@ -200,7 +207,7 @@ func (m *MenuModel) GetSelected() *MenuItem {
 	if m.list.SelectedItem() == nil {
 		return nil
 	}
-	item := m.list.SelectedItem().(MenuItem)
+	item := m.list.SelectedItem().(MenuItem) //nolint:errcheck
 	return &item
 }
 
@@ -219,7 +226,7 @@ type MenuItemSelectedMsg struct {
 	ID string
 }
 
-// Menu styles
+// Menu styles.
 var (
 	menuBorderStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

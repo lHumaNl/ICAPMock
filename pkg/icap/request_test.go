@@ -1,9 +1,11 @@
-// Package icap_test provides tests for ICAP Request.
+// Copyright 2026 ICAP Mock
+
 package icap_test
 
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -284,8 +286,8 @@ func TestNewRequest(t *testing.T) {
 // TestRequestValidate tests request validation.
 func TestRequestValidate(t *testing.T) {
 	tests := []struct {
-		name    string
 		req     *icap.Request
+		name    string
 		wantErr bool
 	}{
 		{
@@ -578,8 +580,8 @@ func TestHTTPMessageGetBody(t *testing.T) {
 // TestHTTPMessageHasBody tests HasBody method.
 func TestHTTPMessageHasBody(t *testing.T) {
 	tests := []struct {
-		name        string
 		setupMsg    func() *icap.HTTPMessage
+		name        string
 		wantHasBody bool
 	}{
 		{
@@ -1070,8 +1072,8 @@ func TestStreamingBodyLargePayload(t *testing.T) {
 func TestStreamingBodyChunkedEncoding(t *testing.T) {
 	tests := []struct {
 		name     string
-		chunks   []string
 		expected string
+		chunks   []string
 	}{
 		{
 			name:     "single chunk",
@@ -1337,7 +1339,7 @@ func TestStreamingBodyRESPMOD(t *testing.T) {
 }
 
 // BenchmarkStreamingBodyMemory benchmarks memory usage with streaming.
-// Run with: go test -bench=BenchmarkStreamingBodyMemory -benchmem
+// Run with: go test -bench=BenchmarkStreamingBodyMemory -benchmem.
 func BenchmarkStreamingBodyMemory(b *testing.B) {
 	// Create a large body (100KB)
 	bodySize := 100 * 1024
@@ -1429,7 +1431,7 @@ func TestStreamingBodyType(t *testing.T) {
 		// Read after close should return EOF
 		buf := make([]byte, 10)
 		n, err := sb.Read(buf)
-		if err != io.EOF {
+		if !errors.Is(err, io.EOF) {
 			t.Errorf("Read after close: err = %v, want io.EOF", err)
 		}
 		if n != 0 {

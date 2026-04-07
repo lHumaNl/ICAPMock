@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package integration
 
 import (
@@ -10,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 func TestE2E_FullWorkflow(t *testing.T) {
@@ -540,8 +543,8 @@ func TestE2E_ClientConfiguration(t *testing.T) {
 
 	t.Run("Validate invalid configuration", func(t *testing.T) {
 		testCases := []struct {
-			name    string
 			cfg     *state.ClientConfig
+			name    string
 			wantErr bool
 		}{
 			{"Empty metrics URL", &state.ClientConfig{MetricsURL: "", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: 5}, true},

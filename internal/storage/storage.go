@@ -1,26 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
-//
-// The storage package defines interfaces for persisting ICAP requests
-// and managing mock scenarios. It includes a file-based implementation
-// that stores requests as JSON files with rotation support.
-//
-// Example usage:
-//
-//	cfg := config.StorageConfig{
-//	    Enabled:     true,
-//	    RequestsDir: "./data/requests",
-//	    RotateAfter: 1000,
-//	}
-//	store, err := NewFileStorage(cfg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer store.Close()
-//
-//	// Convert request to stored format
-//	sr := FromICAPRequest(req, 204, processingTime)
-//	err = store.SaveRequest(context.Background(), sr)
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (

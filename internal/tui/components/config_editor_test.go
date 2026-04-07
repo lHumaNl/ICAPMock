@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -204,9 +206,9 @@ func TestConfigEditorModel_ValidateContent_Empty(t *testing.T) {
 
 func TestConfigEditorModel_Update_KeyboardShortcuts(t *testing.T) {
 	tests := []struct {
+		check func(*ConfigEditorModel)
 		name  string
 		key   string
-		check func(*ConfigEditorModel)
 	}{
 		{
 			name: "toggle help",
@@ -443,9 +445,9 @@ func TestConfigEditorModel_ValidateContent_WithWhitespace(t *testing.T) {
 func TestConfigEditorModel_renderValidation(t *testing.T) {
 	tests := []struct {
 		name    string
-		valid   bool
 		error   string
 		message string
+		valid   bool
 	}{
 		{
 			name:    "valid",

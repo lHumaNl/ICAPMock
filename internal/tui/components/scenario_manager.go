@@ -1,4 +1,5 @@
-// Package components provides UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -15,25 +16,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ScenarioItem represents a scenario item in the list
+// ScenarioItem represents a scenario item in the list.
 type ScenarioItem struct {
 	Name     string
-	Priority int
 	Method   string
 	Path     string
+	Priority int
 }
 
-// FilterValue implements list.Item
+// FilterValue implements list.Item.
 func (s ScenarioItem) FilterValue() string {
 	return s.Name
 }
 
-// Title implements list.Item
+// Title implements list.Item.
 func (s ScenarioItem) Title() string {
 	return fmt.Sprintf("%s (priority: %d)", s.Name, s.Priority)
 }
 
-// Description implements list.Item
+// Description implements list.Item.
 func (s ScenarioItem) Description() string {
 	var parts []string
 	if s.Method != "" {
@@ -45,7 +46,7 @@ func (s ScenarioItem) Description() string {
 	return strings.Join(parts, " ")
 }
 
-// ScenarioViewMode represents the current view mode
+// ScenarioViewMode represents the current view mode.
 type ScenarioViewMode int
 
 const (
@@ -55,32 +56,26 @@ const (
 	ScenarioViewCreate
 )
 
-// ScenarioManagerModel represents the scenario manager component
+// ScenarioManagerModel represents the scenario manager component.
 type ScenarioManagerModel struct {
-	mu     sync.RWMutex
-	mode   ScenarioViewMode
-	width  int
-	height int
-	ready  bool
-
-	// List view components
-	scenarioList *list.Model
-
-	// Detail view components
-	selectedScenario *ScenarioItem
-	scenarioDetail   string
-
-	// Edit/Create components
-	nameInput        *textinput.Model
 	priorityInput    *textinput.Model
-	methodInput      *textinput.Model
-	pathInput        *textinput.Model
-	bodyPatternInput *textinput.Model
+	selectedScenario *ScenarioItem
 	yamlEditor       *textarea.Model
+	bodyPatternInput *textinput.Model
+	pathInput        *textinput.Model
+	scenarioList     *list.Model
+	nameInput        *textinput.Model
+	methodInput      *textinput.Model
+	scenarioDetail   string
 	errorMessage     string
+	mode             ScenarioViewMode
+	height           int
+	width            int
+	mu               sync.RWMutex
+	ready            bool
 }
 
-// NewScenarioManagerModel creates a new scenario manager model
+// NewScenarioManagerModel creates a new scenario manager model.
 func NewScenarioManagerModel() *ScenarioManagerModel {
 	// Initialize list
 	delegate := list.NewDefaultDelegate()
@@ -138,12 +133,12 @@ func NewScenarioManagerModel() *ScenarioManagerModel {
 	}
 }
 
-// Init initializes the scenario manager
+// Init initializes the scenario manager.
 func (m *ScenarioManagerModel) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages and updates the scenario manager
+// Update handles messages and updates the scenario manager.
 func (m *ScenarioManagerModel) Update(msg tea.Msg) (*ScenarioManagerModel, tea.Cmd) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -183,11 +178,11 @@ func (m *ScenarioManagerModel) Update(msg tea.Msg) (*ScenarioManagerModel, tea.C
 					return ScenarioReloadMsg{}
 				}
 			}
-		case "esc":
+		case keyEsc:
 			if m.mode == ScenarioViewDetail || m.mode == ScenarioViewEdit || m.mode == ScenarioViewCreate {
 				return m.switchToListMode()
 			}
-		case "enter":
+		case keyEnter:
 			if m.mode == ScenarioViewList {
 				selected := m.scenarioList.SelectedItem()
 				if selected != nil {
@@ -219,7 +214,7 @@ func (m *ScenarioManagerModel) Update(msg tea.Msg) (*ScenarioManagerModel, tea.C
 	return m, cmd
 }
 
-// updateList updates the list view
+// updateList updates the list view.
 func (m *ScenarioManagerModel) updateList(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	*m.scenarioList, cmd = m.scenarioList.Update(msg)
@@ -236,14 +231,14 @@ func (m *ScenarioManagerModel) updateList(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// updateEdit updates the edit view
+// updateEdit updates the edit view.
 func (m *ScenarioManagerModel) updateEdit(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+s":
+		case keyCtrlS:
 			// Save scenario
 			return m.saveScenario()
 		case "tab":
@@ -260,14 +255,14 @@ func (m *ScenarioManagerModel) updateEdit(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// updateCreate updates the create view
+// updateCreate updates the create view.
 func (m *ScenarioManagerModel) updateCreate(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+s":
+		case keyCtrlS:
 			// Create scenario
 			return m.createScenario()
 		case "ctrl+c":
@@ -289,9 +284,9 @@ func (m *ScenarioManagerModel) updateCreate(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// updateInputs updates text inputs
+// updateInputs updates text inputs.
 func (m *ScenarioManagerModel) updateInputs(msg tea.Msg) tea.Cmd {
-	var cmds []tea.Cmd
+	var cmds []tea.Cmd //nolint:prealloc
 	var cmd tea.Cmd
 
 	// Update all input fields
@@ -316,7 +311,7 @@ func (m *ScenarioManagerModel) updateInputs(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// SetScenarios sets the list of scenarios
+// SetScenarios sets the list of scenarios.
 func (m *ScenarioManagerModel) SetScenarios(scenarios []ScenarioItem) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -327,7 +322,7 @@ func (m *ScenarioManagerModel) SetScenarios(scenarios []ScenarioItem) {
 	m.scenarioList.SetItems(items)
 }
 
-// switchToListMode switches to list view
+// switchToListMode switches to list view.
 func (m *ScenarioManagerModel) switchToListMode() (*ScenarioManagerModel, tea.Cmd) {
 	m.mode = ScenarioViewList
 	m.selectedScenario = nil
@@ -335,7 +330,7 @@ func (m *ScenarioManagerModel) switchToListMode() (*ScenarioManagerModel, tea.Cm
 	return m, nil
 }
 
-// switchToDetailMode switches to detail view
+// switchToDetailMode switches to detail view.
 func (m *ScenarioManagerModel) switchToDetailMode() (*ScenarioManagerModel, tea.Cmd) {
 	if m.selectedScenario == nil {
 		return m, nil
@@ -353,7 +348,7 @@ func (m *ScenarioManagerModel) switchToDetailMode() (*ScenarioManagerModel, tea.
 	return m, nil
 }
 
-// switchToEditMode switches to edit mode
+// switchToEditMode switches to edit mode.
 func (m *ScenarioManagerModel) switchToEditMode() (*ScenarioManagerModel, tea.Cmd) {
 	if m.selectedScenario == nil {
 		m.errorMessage = "No scenario selected for editing"
@@ -367,7 +362,7 @@ func (m *ScenarioManagerModel) switchToEditMode() (*ScenarioManagerModel, tea.Cm
 	return m, nil
 }
 
-// switchToCreateMode switches to create mode
+// switchToCreateMode switches to create mode.
 func (m *ScenarioManagerModel) switchToCreateMode() (*ScenarioManagerModel, tea.Cmd) {
 	m.mode = ScenarioViewCreate
 	m.nameInput.SetValue("")
@@ -394,7 +389,7 @@ response:
 	return m, nil
 }
 
-// cycleInputs cycles through input fields
+// cycleInputs cycles through input fields.
 func (m *ScenarioManagerModel) cycleInputs() tea.Cmd {
 	if m.nameInput.Focused() {
 		m.nameInput.Blur()
@@ -418,7 +413,7 @@ func (m *ScenarioManagerModel) cycleInputs() tea.Cmd {
 	return nil
 }
 
-// saveScenario saves the edited scenario
+// saveScenario saves the edited scenario.
 func (m *ScenarioManagerModel) saveScenario() tea.Cmd {
 	if m.selectedScenario == nil {
 		m.errorMessage = "No scenario selected"
@@ -465,7 +460,7 @@ func (m *ScenarioManagerModel) saveScenario() tea.Cmd {
 	}
 }
 
-// createScenario creates a new scenario
+// createScenario creates a new scenario.
 func (m *ScenarioManagerModel) createScenario() tea.Cmd {
 	// Validate name
 	name := strings.TrimSpace(m.nameInput.Value())
@@ -511,7 +506,7 @@ func (m *ScenarioManagerModel) createScenario() tea.Cmd {
 	}
 }
 
-// formatScenarioDetail formats scenario details for display
+// formatScenarioDetail formats scenario details for display.
 func (m *ScenarioManagerModel) formatScenarioDetail(scenario *ScenarioItem) string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -526,7 +521,7 @@ func (m *ScenarioManagerModel) formatScenarioDetail(scenario *ScenarioItem) stri
 	)
 }
 
-// View renders the scenario manager
+// View renders the scenario manager.
 func (m *ScenarioManagerModel) View() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -548,7 +543,7 @@ func (m *ScenarioManagerModel) View() string {
 	}
 }
 
-// renderListView renders the scenario list
+// renderListView renders the scenario list.
 func (m *ScenarioManagerModel) renderListView() string {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -567,7 +562,7 @@ func (m *ScenarioManagerModel) renderListView() string {
 	return PanelStyle.Render(content)
 }
 
-// renderDetailView renders the scenario detail view
+// renderDetailView renders the scenario detail view.
 func (m *ScenarioManagerModel) renderDetailView() string {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -582,7 +577,7 @@ func (m *ScenarioManagerModel) renderDetailView() string {
 	return PanelStyle.Render(content)
 }
 
-// renderEditView renders the edit view
+// renderEditView renders the edit view.
 func (m *ScenarioManagerModel) renderEditView() string {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -614,7 +609,7 @@ func (m *ScenarioManagerModel) renderEditView() string {
 	return PanelStyle.Render(content)
 }
 
-// renderCreateView renders the create view
+// renderCreateView renders the create view.
 func (m *ScenarioManagerModel) renderCreateView() string {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -643,33 +638,33 @@ func (m *ScenarioManagerModel) renderCreateView() string {
 	return PanelStyle.Render(content)
 }
 
-// ScenarioListMsg is sent when scenario list is received
+// ScenarioListMsg is sent when scenario list is received.
 type ScenarioListMsg struct {
 	Scenarios []ScenarioItem
 }
 
-// ScenarioDeleteMsg is sent to delete a scenario
+// ScenarioDeleteMsg is sent to delete a scenario.
 type ScenarioDeleteMsg struct {
 	ScenarioName string
 }
 
-// ScenarioUpdateMsg is sent to update a scenario
+// ScenarioUpdateMsg is sent to update a scenario.
 type ScenarioUpdateMsg struct {
 	ScenarioName string
 	Name         string
 	YAML         string
 }
 
-// ScenarioCreateMsg is sent to create a scenario
+// ScenarioCreateMsg is sent to create a scenario.
 type ScenarioCreateMsg struct {
 	Name string
 	YAML string
 }
 
-// ScenarioReloadMsg is sent to reload scenarios
+// ScenarioReloadMsg is sent to reload scenarios.
 type ScenarioReloadMsg struct{}
 
-// ScenarioErrorMsg is sent when a scenario operation fails
+// ScenarioErrorMsg is sent when a scenario operation fails.
 type ScenarioErrorMsg struct {
 	Err error
 }

@@ -1,4 +1,5 @@
-// Package handler provides ICAP request handlers for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -46,13 +47,13 @@ type OptionsHandlerConfig struct {
 // The OPTIONS method allows an ICAP client to discover the
 // capabilities of an ICAP server before sending modification requests.
 type OptionsHandler struct {
-	mu             sync.RWMutex
 	serviceTag     string
 	serviceID      string
 	methods        []string
 	maxConnections int
 	optionsTTL     time.Duration
 	previewSize    int
+	mu             sync.RWMutex
 }
 
 // NewOptionsHandler creates a new OptionsHandler with the given configuration.

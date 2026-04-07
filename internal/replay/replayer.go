@@ -1,23 +1,5 @@
-// Package replay provides request replay functionality for the ICAP Mock Server.
-//
-// The replay package allows replaying previously recorded ICAP requests to an
-// ICAP server. It supports filtering, speed control, looping, and custom callbacks.
-//
-// Example usage:
-//
-//	cfg := &config.ReplayConfig{
-//	    Enabled:     true,
-//	    RequestsDir: "./data/requests",
-//	    Speed:       1.0,
-//	}
-//	store, _ := storage.NewFileStorage(storageConfig)
-//	replayer := replay.NewReplayer(cfg, store, logger, metrics)
-//
-//	opts := replay.ReplayOptions{
-//	    Speed:     2.0,
-//	    TargetURL: "icap://localhost:1344",
-//	}
-//	err := replayer.Start(ctx, opts)
+// Copyright 2026 ICAP Mock
+
 package replay
 
 import (
@@ -44,59 +26,22 @@ type Logger interface {
 
 // ReplayOptions configures the replay behavior.
 type ReplayOptions struct {
-	// Filter specifies criteria for selecting requests to replay.
-	// An empty filter matches all requests.
-	Filter storage.RequestFilter
-
-	// Speed is the replay speed multiplier.
-	// 1.0 = original speed, 2.0 = 2x faster, 0.5 = half speed.
-	// 0 means no delay between requests (maximum speed).
-	// Default: 1.0
-	Speed float64
-
-	// Loop enables continuous replay mode.
-	// When true, the replay will restart from the beginning after completing.
-	Loop bool
-
-	// TargetURL overrides the ICAP server URL to send requests to.
-	// Format: icap://host:port/service
-	// If empty, uses the URL from the original request.
-	TargetURL string
-
-	// Callback is called after each request is replayed.
-	// The callback receives the original request, the response, and any error.
-	// Callback is optional.
-	Callback func(req *icap.Request, resp *icap.Response, err error)
-
-	// Parallel is the number of concurrent replay workers.
-	// When > 1, requests are dispatched to a pool of workers.
-	// Timing delays are skipped in parallel mode.
-	// Default: 1 (sequential).
-	Parallel int
-
-	// OnProgress is called periodically to report replay progress.
-	// Current is the number of requests replayed so far.
-	// Total is the total number of requests to replay (may be 0 if unknown).
-	// OnProgress is optional.
+	Callback   func(req *icap.Request, resp *icap.Response, err error)
 	OnProgress func(current, total int)
+	TargetURL  string
+	Filter     storage.RequestFilter
+	Speed      float64
+	Parallel   int
+	Loop       bool
 }
 
 // Stats contains replay statistics.
 type Stats struct {
-	// TotalRequests is the total number of requests replayed.
-	TotalRequests int
-
-	// SuccessfulRequests is the number of requests that succeeded.
+	StartTime          time.Time
+	TotalRequests      int
 	SuccessfulRequests int
-
-	// FailedRequests is the number of requests that failed.
-	FailedRequests int
-
-	// TotalDuration is the total time spent replaying.
-	TotalDuration time.Duration
-
-	// StartTime is when the replay started.
-	StartTime time.Time
+	FailedRequests     int
+	TotalDuration      time.Duration
 }
 
 // Replayer handles replaying recorded ICAP requests.
@@ -104,18 +49,16 @@ type Stats struct {
 // Replayer is safe for concurrent use after creation but Start should only
 // be called once at a time.
 type Replayer struct {
-	config  *config.ReplayConfig
-	storage storage.Storage
-	client  *Client
-	logger  Logger
-	metrics *metrics.Collector
-
-	// State management
-	mu       sync.RWMutex
-	running  bool
 	stats    Stats
+	storage  storage.Storage
+	logger   Logger
+	config   *config.ReplayConfig
+	client   *Client
+	metrics  *metrics.Collector
 	stopChan chan struct{}
+	mu       sync.RWMutex
 	stopOnce sync.Once
+	running  bool
 }
 
 // NewReplayer creates a new Replayer instance.
@@ -156,7 +99,7 @@ func NewReplayer(cfg *config.ReplayConfig, store storage.Storage, log Logger, m 
 }
 
 // Start begins replaying recorded requests according to the provided options.
-// This method blocks until the replay completes or the context is cancelled.
+// This method blocks until the replay completes or the context is canceled.
 //
 // Parameters:
 //   - ctx: Context for cancellation
@@ -227,8 +170,8 @@ func (r *Replayer) Start(ctx context.Context, opts ReplayOptions) error {
 		if parallel > 1 {
 			// Parallel replay using worker pool
 			type workItem struct {
-				index     int
 				storedReq *storage.StoredRequest
+				index     int
 			}
 
 			workCh := make(chan workItem, parallel)
@@ -290,7 +233,7 @@ func (r *Replayer) Start(ctx context.Context, opts ReplayOptions) error {
 				case <-ctx.Done():
 					close(workCh)
 					wg.Wait()
-					r.logger.Info("replay cancelled")
+					r.logger.Info("replay canceled")
 					return ctx.Err()
 				case <-r.stopChan:
 					close(workCh)
@@ -308,7 +251,7 @@ func (r *Replayer) Start(ctx context.Context, opts ReplayOptions) error {
 			for i, storedReq := range requests {
 				select {
 				case <-ctx.Done():
-					r.logger.Info("replay cancelled")
+					r.logger.Info("replay canceled")
 					return ctx.Err()
 				case <-r.stopChan:
 					r.logger.Info("replay stopped")

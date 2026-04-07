@@ -1,15 +1,5 @@
-// Package ratelimit provides middleware for per-client rate limiting.
-//
-// This file implements middleware that:
-//   - Extracts client IP from ICAP requests
-//   - Applies per-client rate limiting
-//   - Falls back to global rate limiter when needed
-//   - Records Prometheus metrics
-//
-// The middleware gracefully handles:
-//   - Missing or invalid IP addresses
-//   - Per-client limiter disabled
-//   - Client not in cache (fallback to global limiter)
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -21,6 +11,8 @@ import (
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+const clientIPUnknown = "unknown"
 
 // PerClientMiddleware wraps a rate limiter with per-client limiting logic.
 // It implements middleware that can be used in the ICAP request handling pipeline.
@@ -72,7 +64,7 @@ func (m *PerClientMiddleware) Allow(ctx context.Context, req *icap.Request) (all
 	// Skip per-client limiting for unknown IPs to prevent DoS attacks
 	// Attackers could use spoofed/missing IPs to bypass rate limiting
 	// by sharing a common "unknown" bucket
-	if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && clientIP != "unknown" {
+	if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && clientIP != clientIPUnknown {
 		// Try per-client limiting first
 		allowed, ok := m.perClientLimiter.Allow(clientIP)
 
@@ -112,7 +104,7 @@ func (m *PerClientMiddleware) Wait(ctx context.Context, req *icap.Request) error
 	clientIP := m.extractClientIP(req)
 
 	// Skip per-client limiting for unknown IPs (DoS protection)
-	if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && clientIP != "unknown" {
+	if m.perClientLimiter != nil && m.perClientLimiter.GetConfig().Enabled && clientIP != clientIPUnknown {
 		// Try per-client limiting first
 		allowed, ok := m.perClientLimiter.Allow(clientIP)
 
@@ -171,11 +163,11 @@ func (m *PerClientMiddleware) Wait(ctx context.Context, req *icap.Request) error
 //  4. "unknown" if no IP can be determined
 func (m *PerClientMiddleware) extractClientIP(req *icap.Request) string {
 	if req == nil {
-		return "unknown"
+		return clientIPUnknown
 	}
 
 	// Check ClientIP field (may be set by connection handler)
-	if req.ClientIP != "" && req.ClientIP != "unknown" {
+	if req.ClientIP != "" && req.ClientIP != clientIPUnknown {
 		return req.ClientIP
 	}
 
@@ -208,7 +200,7 @@ func (m *PerClientMiddleware) extractClientIP(req *icap.Request) string {
 		}
 	}
 
-	return "unknown"
+	return clientIPUnknown
 }
 
 // simpleReservation implements Reservation interface for simple cases.

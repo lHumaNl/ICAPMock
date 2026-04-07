@@ -1,4 +1,5 @@
-// Package main provides CLI command execution for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -42,8 +43,8 @@ func PrintVersion() {
 // RunValidateMode validates the configuration and prints results.
 // This is the implementation of --validate/--dry-run mode.
 func RunValidateMode(w io.Writer, cfg *config.Config) error {
-	fmt.Fprintln(w, "Validating configuration...")
-	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Validating configuration...") //nolint:errcheck
+	fmt.Fprintln(w)                                //nolint:errcheck
 
 	// Track validation status
 	allPassed := true
@@ -61,7 +62,7 @@ func RunValidateMode(w io.Writer, cfg *config.Config) error {
 
 	// Print validation summary
 	if allPassed {
-		fmt.Fprintln(w, "Configuration validation: PASSED")
+		fmt.Fprintln(w, "Configuration validation: PASSED") //nolint:errcheck
 		return nil
 	}
 
@@ -70,52 +71,52 @@ func RunValidateMode(w io.Writer, cfg *config.Config) error {
 
 // printServerConfig prints server configuration for validation.
 func printServerConfig(w io.Writer, cfg *config.Config) {
-	fmt.Fprintf(w, "Server Configuration:\n")
-	fmt.Fprintf(w, "  host: %s\n", cfg.Server.Host)
-	fmt.Fprintf(w, "  port: %d\n", cfg.Server.Port)
-	fmt.Fprintf(w, "  read_timeout: %s\n", cfg.Server.ReadTimeout)
-	fmt.Fprintf(w, "  write_timeout: %s\n", cfg.Server.WriteTimeout)
-	fmt.Fprintf(w, "  max_connections: %d\n", cfg.Server.MaxConnections)
-	fmt.Fprintf(w, "  max_body_size: %d bytes\n", cfg.Server.MaxBodySize)
-	fmt.Fprintf(w, "  streaming: %v\n", cfg.Server.Streaming)
+	fmt.Fprintf(w, "Server Configuration:\n")                             //nolint:errcheck
+	fmt.Fprintf(w, "  host: %s\n", cfg.Server.Host)                       //nolint:errcheck
+	fmt.Fprintf(w, "  port: %d\n", cfg.Server.Port)                       //nolint:errcheck
+	fmt.Fprintf(w, "  read_timeout: %s\n", cfg.Server.ReadTimeout)        //nolint:errcheck
+	fmt.Fprintf(w, "  write_timeout: %s\n", cfg.Server.WriteTimeout)      //nolint:errcheck
+	fmt.Fprintf(w, "  max_connections: %d\n", cfg.Server.MaxConnections)  //nolint:errcheck
+	fmt.Fprintf(w, "  max_body_size: %d bytes\n", cfg.Server.MaxBodySize) //nolint:errcheck
+	fmt.Fprintf(w, "  streaming: %v\n", cfg.Server.Streaming)             //nolint:errcheck
 	if cfg.Server.TLS.Enabled {
-		fmt.Fprintf(w, "  tls: enabled (cert=%s)\n", cfg.Server.TLS.CertFile)
+		fmt.Fprintf(w, "  tls: enabled (cert=%s)\n", cfg.Server.TLS.CertFile) //nolint:errcheck
 	} else {
-		fmt.Fprintf(w, "  tls: disabled\n")
+		fmt.Fprintf(w, "  tls: disabled\n") //nolint:errcheck
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(w) //nolint:errcheck
 }
 
 // printLoggingConfig prints logging configuration for validation.
 func printLoggingConfig(w io.Writer, cfg *config.Config) {
-	fmt.Fprintf(w, "Logging Configuration:\n")
-	fmt.Fprintf(w, "  level: %s\n", cfg.Logging.Level)
-	fmt.Fprintf(w, "  format: %s\n", cfg.Logging.Format)
-	fmt.Fprintf(w, "  output: %s\n", cfg.Logging.Output)
-	fmt.Fprintf(w, "  max_size: %d MB\n", cfg.Logging.MaxSize)
-	fmt.Fprintf(w, "  max_backups: %d\n", cfg.Logging.MaxBackups)
-	fmt.Fprintf(w, "  max_age: %d days\n", cfg.Logging.MaxAge)
-	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Logging Configuration:\n")                    //nolint:errcheck
+	fmt.Fprintf(w, "  level: %s\n", cfg.Logging.Level)            //nolint:errcheck
+	fmt.Fprintf(w, "  format: %s\n", cfg.Logging.Format)          //nolint:errcheck
+	fmt.Fprintf(w, "  output: %s\n", cfg.Logging.Output)          //nolint:errcheck
+	fmt.Fprintf(w, "  max_size: %d MB\n", cfg.Logging.MaxSize)    //nolint:errcheck
+	fmt.Fprintf(w, "  max_backups: %d\n", cfg.Logging.MaxBackups) //nolint:errcheck
+	fmt.Fprintf(w, "  max_age: %d days\n", cfg.Logging.MaxAge)    //nolint:errcheck
+	fmt.Fprintln(w)                                               //nolint:errcheck
 }
 
 // printMetricsConfig prints metrics configuration for validation.
 func printMetricsConfig(w io.Writer, cfg *config.Config) {
-	fmt.Fprintf(w, "Metrics Configuration:\n")
-	fmt.Fprintf(w, "  enabled: %v\n", cfg.Metrics.Enabled)
+	fmt.Fprintf(w, "Metrics Configuration:\n")             //nolint:errcheck
+	fmt.Fprintf(w, "  enabled: %v\n", cfg.Metrics.Enabled) //nolint:errcheck
 	if cfg.Metrics.Enabled {
-		fmt.Fprintf(w, "  host: %s\n", cfg.Metrics.Host)
-		fmt.Fprintf(w, "  port: %d\n", cfg.Metrics.Port)
-		fmt.Fprintf(w, "  path: %s\n", cfg.Metrics.Path)
+		fmt.Fprintf(w, "  host: %s\n", cfg.Metrics.Host) //nolint:errcheck
+		fmt.Fprintf(w, "  port: %d\n", cfg.Metrics.Port) //nolint:errcheck
+		fmt.Fprintf(w, "  path: %s\n", cfg.Metrics.Path) //nolint:errcheck
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(w) //nolint:errcheck
 }
 
 // printMockConfig prints mock configuration for validation.
 func printMockConfig(w io.Writer, cfg *config.Config, allPassed *bool) {
-	fmt.Fprintf(w, "Mock Configuration:\n")
-	fmt.Fprintf(w, "  default_mode: %s\n", cfg.Mock.DefaultMode)
-	fmt.Fprintf(w, "  scenarios_dir: %s\n", cfg.Mock.ScenariosDir)
-	fmt.Fprintf(w, "  default_timeout: %s\n", cfg.Mock.DefaultTimeout)
+	fmt.Fprintf(w, "Mock Configuration:\n")                            //nolint:errcheck
+	fmt.Fprintf(w, "  default_mode: %s\n", cfg.Mock.DefaultMode)       //nolint:errcheck
+	fmt.Fprintf(w, "  scenarios_dir: %s\n", cfg.Mock.ScenariosDir)     //nolint:errcheck
+	fmt.Fprintf(w, "  default_timeout: %s\n", cfg.Mock.DefaultTimeout) //nolint:errcheck
 
 	// Check scenarios directory
 	if cfg.Mock.ScenariosDir != "" {
@@ -130,84 +131,84 @@ func printMockConfig(w io.Writer, cfg *config.Config, allPassed *bool) {
 						scenarioCount++
 					}
 				}
-				fmt.Fprintf(w, "  scenarios loaded: %d files found\n", scenarioCount)
+				fmt.Fprintf(w, "  scenarios loaded: %d files found\n", scenarioCount) //nolint:errcheck
 			}
 		} else {
-			fmt.Fprintf(w, "  WARNING: scenarios directory not found: %s\n", cfg.Mock.ScenariosDir)
+			fmt.Fprintf(w, "  WARNING: scenarios directory not found: %s\n", cfg.Mock.ScenariosDir) //nolint:errcheck
 			*allPassed = false
 		}
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(w) //nolint:errcheck
 }
 
 // printChaosConfig prints chaos configuration for validation.
 func printChaosConfig(w io.Writer, cfg *config.Config) {
 	if cfg.Chaos.Enabled {
-		fmt.Fprintf(w, "Chaos Configuration:\n")
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.Chaos.Enabled)
-		fmt.Fprintf(w, "  error_rate: %.2f\n", cfg.Chaos.ErrorRate)
-		fmt.Fprintf(w, "  timeout_rate: %.2f\n", cfg.Chaos.TimeoutRate)
-		fmt.Fprintf(w, "  latency: %d-%d ms\n", cfg.Chaos.MinLatencyMs, cfg.Chaos.MaxLatencyMs)
-		fmt.Fprintf(w, "  connection_drop_rate: %.2f\n", cfg.Chaos.ConnectionDropRate)
-		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Chaos Configuration:\n")                                                //nolint:errcheck
+		fmt.Fprintf(w, "  enabled: %v\n", cfg.Chaos.Enabled)                                    //nolint:errcheck
+		fmt.Fprintf(w, "  error_rate: %.2f\n", cfg.Chaos.ErrorRate)                             //nolint:errcheck
+		fmt.Fprintf(w, "  timeout_rate: %.2f\n", cfg.Chaos.TimeoutRate)                         //nolint:errcheck
+		fmt.Fprintf(w, "  latency: %d-%d ms\n", cfg.Chaos.MinLatencyMs, cfg.Chaos.MaxLatencyMs) //nolint:errcheck
+		fmt.Fprintf(w, "  connection_drop_rate: %.2f\n", cfg.Chaos.ConnectionDropRate)          //nolint:errcheck
+		fmt.Fprintln(w)                                                                         //nolint:errcheck
 	}
 }
 
 // printStorageConfig prints storage configuration for validation.
 func printStorageConfig(w io.Writer, cfg *config.Config) {
 	if cfg.Storage.Enabled {
-		fmt.Fprintf(w, "Storage Configuration:\n")
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.Storage.Enabled)
-		fmt.Fprintf(w, "  requests_dir: %s\n", cfg.Storage.RequestsDir)
-		fmt.Fprintf(w, "  max_file_size: %d bytes\n", cfg.Storage.MaxFileSize)
-		fmt.Fprintf(w, "  rotate_after: %d requests\n", cfg.Storage.RotateAfter)
-		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Storage Configuration:\n")                               //nolint:errcheck
+		fmt.Fprintf(w, "  enabled: %v\n", cfg.Storage.Enabled)                   //nolint:errcheck
+		fmt.Fprintf(w, "  requests_dir: %s\n", cfg.Storage.RequestsDir)          //nolint:errcheck
+		fmt.Fprintf(w, "  max_file_size: %d bytes\n", cfg.Storage.MaxFileSize)   //nolint:errcheck
+		fmt.Fprintf(w, "  rotate_after: %d requests\n", cfg.Storage.RotateAfter) //nolint:errcheck
+		fmt.Fprintln(w)                                                          //nolint:errcheck
 	}
 }
 
 // printRateLimitConfig prints rate limit configuration for validation.
 func printRateLimitConfig(w io.Writer, cfg *config.Config) {
 	if cfg.RateLimit.Enabled {
-		fmt.Fprintf(w, "Rate Limit Configuration:\n")
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.RateLimit.Enabled)
-		fmt.Fprintf(w, "  requests_per_second: %.0f\n", cfg.RateLimit.RequestsPerSecond)
-		fmt.Fprintf(w, "  burst: %d\n", cfg.RateLimit.Burst)
-		fmt.Fprintf(w, "  algorithm: %s\n", cfg.RateLimit.Algorithm)
-		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Rate Limit Configuration:\n")                                    //nolint:errcheck
+		fmt.Fprintf(w, "  enabled: %v\n", cfg.RateLimit.Enabled)                         //nolint:errcheck
+		fmt.Fprintf(w, "  requests_per_second: %.0f\n", cfg.RateLimit.RequestsPerSecond) //nolint:errcheck
+		fmt.Fprintf(w, "  burst: %d\n", cfg.RateLimit.Burst)                             //nolint:errcheck
+		fmt.Fprintf(w, "  algorithm: %s\n", cfg.RateLimit.Algorithm)                     //nolint:errcheck
+		fmt.Fprintln(w)                                                                  //nolint:errcheck
 	}
 }
 
 // printHealthConfig prints health configuration for validation.
 func printHealthConfig(w io.Writer, cfg *config.Config) {
-	fmt.Fprintf(w, "Health Configuration:\n")
-	fmt.Fprintf(w, "  enabled: %v\n", cfg.Health.Enabled)
+	fmt.Fprintf(w, "Health Configuration:\n")             //nolint:errcheck
+	fmt.Fprintf(w, "  enabled: %v\n", cfg.Health.Enabled) //nolint:errcheck
 	if cfg.Health.Enabled {
-		fmt.Fprintf(w, "  port: %d\n", cfg.Health.Port)
-		fmt.Fprintf(w, "  health_path: %s\n", cfg.Health.HealthPath)
-		fmt.Fprintf(w, "  ready_path: %s\n", cfg.Health.ReadyPath)
+		fmt.Fprintf(w, "  port: %d\n", cfg.Health.Port)              //nolint:errcheck
+		fmt.Fprintf(w, "  health_path: %s\n", cfg.Health.HealthPath) //nolint:errcheck
+		fmt.Fprintf(w, "  ready_path: %s\n", cfg.Health.ReadyPath)   //nolint:errcheck
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(w) //nolint:errcheck
 }
 
 // printPluginConfig prints plugin configuration for validation.
 func printPluginConfig(w io.Writer, cfg *config.Config) {
 	if cfg.Plugin.Enabled {
-		fmt.Fprintf(w, "Plugin Configuration:\n")
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.Plugin.Enabled)
-		fmt.Fprintf(w, "  dir: %s\n", cfg.Plugin.Dir)
-		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Plugin Configuration:\n")             //nolint:errcheck
+		fmt.Fprintf(w, "  enabled: %v\n", cfg.Plugin.Enabled) //nolint:errcheck
+		fmt.Fprintf(w, "  dir: %s\n", cfg.Plugin.Dir)         //nolint:errcheck
+		fmt.Fprintln(w)                                       //nolint:errcheck
 	}
 }
 
 // Run starts the ICAP server with the given configuration.
-// The provided context controls the server lifecycle — cancelling it triggers graceful shutdown.
+// The provided context controls the server lifecycle — canceling it triggers graceful shutdown.
 func Run(ctx context.Context, cfg *config.Config) error {
 	// Initialize logger
 	log, err := logger.New(cfg.Logging)
 	if err != nil {
 		return fmt.Errorf("initializing logger: %w", err)
 	}
-	defer log.Close()
+	defer log.Close() //nolint:errcheck
 
 	// Create metrics collector
 	metricsRegistry, collector, err := createMetricsCollector(cfg)
@@ -241,16 +242,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		if err != nil {
 			return fmt.Errorf("creating storage middleware: %w", err)
 		}
-		defer storageMiddleware.Shutdown(context.Background())
+		defer storageMiddleware.Shutdown(context.Background()) //nolint:errcheck
 	}
 
 	// Determine server entries: use Servers map if present, otherwise fall back to legacy config
 	type serverEntry struct {
-		name            string
+		inlineScenarios map[string]config.InlineScenarioEntry
 		serverCfg       config.ServerConfig
+		name            string
 		scenariosDir    string
 		serviceID       string
-		inlineScenarios map[string]config.InlineScenarioEntry
 	}
 	var serverEntries []serverEntry
 
@@ -291,7 +292,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 	defer func() {
 		if pluginLoader != nil {
-			pluginLoader.Close()
+			_ = pluginLoader.Close()
 		}
 	}()
 
@@ -569,7 +570,7 @@ func loadPlugins(cfg *config.Config, log *logger.Logger) (*plugin.Loader, error)
 
 	// Load all plugins from directory
 	if err := loader.LoadDir(cfg.Plugin.Dir); err != nil {
-		loader.Close()
+		_ = loader.Close()
 		return nil, fmt.Errorf("loading plugins: %w", err)
 	}
 

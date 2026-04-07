@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
@@ -11,18 +13,18 @@ import (
 	"github.com/icap-mock/icap-mock/internal/tui/utils"
 )
 
-// MetricsState manages metrics data for the TUI
+// MetricsState manages metrics data for the TUI.
 type MetricsState struct {
-	mu         sync.RWMutex
 	snapshot   *MetricsSnapshot
 	history    *utils.RingBuffer[*MetricsSnapshot]
-	maxHistory int
-	streaming  bool
 	client     *MetricsClient
 	cancel     context.CancelFunc
+	maxHistory int
+	mu         sync.RWMutex
+	streaming  bool
 }
 
-// MetricsSnapshot represents a snapshot of server metrics
+// MetricsSnapshot represents a snapshot of server metrics.
 type MetricsSnapshot struct {
 	Timestamp     time.Time
 	RPS           float64
@@ -35,7 +37,7 @@ type MetricsSnapshot struct {
 	BytesReceived int64
 }
 
-// NewMetricsState creates a new metrics state with provided configuration
+// NewMetricsState creates a new metrics state with provided configuration.
 func NewMetricsState(cfg *ClientConfig) *MetricsState {
 	// Validate configuration
 	if cfg == nil {
@@ -77,7 +79,7 @@ func NewMetricsState(cfg *ClientConfig) *MetricsState {
 	}
 }
 
-// StartStreaming begins streaming metrics updates
+// StartStreaming begins streaming metrics updates.
 func (s *MetricsState) StartStreaming() tea.Cmd {
 	s.mu.Lock()
 	s.streaming = true
@@ -106,7 +108,7 @@ func (s *MetricsState) StartStreaming() tea.Cmd {
 	})
 }
 
-// Refresh fetches the latest metrics from the server
+// Refresh fetches the latest metrics from the server.
 func (s *MetricsState) Refresh() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -121,7 +123,7 @@ func (s *MetricsState) Refresh() tea.Cmd {
 	}
 }
 
-// Update updates the metrics state with a new snapshot
+// Update updates the metrics state with a new snapshot.
 func (s *MetricsState) Update(snapshot *MetricsSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,26 +134,26 @@ func (s *MetricsState) Update(snapshot *MetricsSnapshot) {
 	s.history.Add(snapshot)
 }
 
-// GetCurrent returns the current metrics snapshot
+// GetCurrent returns the current metrics snapshot.
 func (s *MetricsState) GetCurrent() *MetricsSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.snapshot
 }
 
-// GetHistory returns the metrics history
+// GetHistory returns the metrics history.
 func (s *MetricsState) GetHistory() []*MetricsSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.history.GetAll()
 }
 
-// MetricsUpdatedMsg is sent when metrics are refreshed
+// MetricsUpdatedMsg is sent when metrics are refreshed.
 type MetricsUpdatedMsg struct {
 	Data *MetricsSnapshot
 }
 
-// StopStreaming stops the metrics streaming
+// StopStreaming stops the metrics streaming.
 func (s *MetricsState) StopStreaming() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +165,7 @@ func (s *MetricsState) StopStreaming() {
 	}
 }
 
-// Shutdown releases all resources
+// Shutdown releases all resources.
 func (s *MetricsState) Shutdown() {
 	s.StopStreaming()
 }

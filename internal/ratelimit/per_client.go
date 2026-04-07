@@ -1,17 +1,5 @@
-// Package ratelimit provides per-client rate limiting implementations
-// for protection against DoS attacks.
-//
-// This file implements a per-client rate limiter that:
-//   - Uses IP address as the client identifier
-//   - Each client has an independent token bucket
-//   - Uses LRU (Least Recently Used) cache eviction
-//   - Provides O(1) lookup for existing clients
-//   - Gracefully degrades when cache is full
-//
-// The per-client limiter is particularly effective against:
-//   - Distributed DoS attacks where many IPs participate
-//   - Rate limiting specific abusive clients
-//   - Preventing single IP from monopolizing resources
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -43,10 +31,11 @@ type PerClientRateLimitConfig struct {
 
 // clientState holds the rate limiter state for a single client.
 type clientState struct {
-	ip         string // Client IP address (key)
-	limiter    *TokenBucketLimiter
 	lastAccess time.Time
-	prev, next *clientState // Linked list for LRU
+	limiter    *TokenBucketLimiter
+	prev       *clientState
+	next       *clientState
+	ip         string
 }
 
 // PerClientRateLimiter implements per-client rate limiting with LRU cache eviction.
@@ -60,22 +49,14 @@ type clientState struct {
 //
 // Thread-safe: All operations are protected by mutex for concurrent access.
 type PerClientRateLimiter struct {
-	config PerClientRateLimitConfig
-
-	// Cache for client limiters
-	cache map[string]*clientState // IP -> client state
-	head  *clientState            // Most recently used (MRU)
-	tail  *clientState            // Least recently used (LRU)
-
-	// Mutex for thread-safe operations
-	mu sync.RWMutex
-
-	// Statistics
-	evictions atomic.Uint64 // Number of evictions
-
-	// Cleanup ticker
+	cache         map[string]*clientState
+	head          *clientState
+	tail          *clientState
 	cleanupTicker *time.Ticker
 	stopCleanup   chan struct{}
+	config        PerClientRateLimitConfig
+	evictions     atomic.Uint64
+	mu            sync.RWMutex
 }
 
 // NewPerClientRateLimiter creates a new per-client rate limiter.

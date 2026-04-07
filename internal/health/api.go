@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package health
 
 import (
@@ -14,8 +16,8 @@ import (
 // APIHandler provides REST API endpoints for managing scenarios and configuration.
 type APIHandler struct {
 	registry storage.ScenarioRegistry
-	apiToken string
 	logger   *slog.Logger
+	apiToken string
 }
 
 // NewAPIHandler creates a new API handler with the given scenario registry.
@@ -190,5 +192,5 @@ func (h *APIHandler) audit(action string, r *http.Request, extra ...any) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

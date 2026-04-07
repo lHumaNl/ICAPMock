@@ -1,4 +1,5 @@
-// Package handler provides ICAP request handlers for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -17,11 +18,11 @@ import (
 // baseHandler contains the shared logic for REQMOD and RESPMOD handlers.
 // It is not exported; ReqmodHandler and RespmodHandler embed it.
 type baseHandler struct {
-	method             string
-	processorVal       atomic.Value // stores processor.Processor
-	metricsVal         atomic.Value // stores *metrics.Collector
+	processorVal       atomic.Value
+	metricsVal         atomic.Value
 	logger             *slog.Logger
 	previewRateLimiter *PreviewRateLimiter
+	method             string
 }
 
 func newBaseHandler(method string, proc processor.Processor, m *metrics.Collector, logger *slog.Logger, previewRateLimiter *PreviewRateLimiter) baseHandler {
@@ -44,7 +45,7 @@ func (h *baseHandler) getProcessor() processor.Processor {
 	if v == nil {
 		return nil
 	}
-	return v.(processor.Processor)
+	return v.(processor.Processor) //nolint:errcheck
 }
 
 func (h *baseHandler) getMetrics() *metrics.Collector {
@@ -52,7 +53,7 @@ func (h *baseHandler) getMetrics() *metrics.Collector {
 	if v == nil {
 		return nil
 	}
-	return v.(*metrics.Collector)
+	return v.(*metrics.Collector) //nolint:errcheck
 }
 
 // SetProcessor allows updating the processor at runtime.
@@ -145,7 +146,7 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 		if err == nil && ctx.Err() != nil {
 			reason, ctxErr := util.CheckCancellation(ctx)
 			if h.logger != nil {
-				h.logger.WarnContext(ctx, "preview request context cancelled after processing",
+				h.logger.WarnContext(ctx, "preview request context canceled after processing",
 					"request_id", util.RequestIDFromContext(ctx),
 					"reason", reason,
 					"error", ctxErr,
@@ -222,7 +223,7 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 	if err == nil && ctx.Err() != nil {
 		reason, ctxErr := util.CheckCancellation(ctx)
 		if h.logger != nil {
-			h.logger.WarnContext(ctx, "request context cancelled after processing",
+			h.logger.WarnContext(ctx, "request context canceled after processing",
 				"request_id", util.RequestIDFromContext(ctx),
 				"reason", reason,
 				"error", ctxErr,

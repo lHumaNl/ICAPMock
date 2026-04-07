@@ -1,4 +1,5 @@
-// Package config provides configuration validation tests
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (
@@ -7,7 +8,7 @@ import (
 	"time"
 )
 
-// TestValidator_Validate_ValidConfig tests validation of a valid configuration
+// TestValidator_Validate_ValidConfig tests validation of a valid configuration.
 func TestValidator_Validate_ValidConfig(t *testing.T) {
 	cfg := &Config{}
 	cfg.SetDefaults()
@@ -20,7 +21,7 @@ func TestValidator_Validate_ValidConfig(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_ServerPort tests port validation
+// TestValidator_Validate_ServerPort tests port validation.
 func TestValidator_Validate_ServerPort(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -64,7 +65,7 @@ func TestValidator_Validate_ServerPort(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_LogLevel tests log level validation
+// TestValidator_Validate_LogLevel tests log level validation.
 func TestValidator_Validate_LogLevel(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -108,7 +109,7 @@ func TestValidator_Validate_LogLevel(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_LogFormat tests log format validation
+// TestValidator_Validate_LogFormat tests log format validation.
 func TestValidator_Validate_LogFormat(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -148,7 +149,7 @@ func TestValidator_Validate_LogFormat(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_ChaosRates tests chaos rate validation
+// TestValidator_Validate_ChaosRates tests chaos rate validation.
 func TestValidator_Validate_ChaosRates(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -202,7 +203,7 @@ func TestValidator_Validate_ChaosRates(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_RateLimitAlgorithm tests rate limit algorithm validation
+// TestValidator_Validate_RateLimitAlgorithm tests rate limit algorithm validation.
 func TestValidator_Validate_RateLimitAlgorithm(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -244,7 +245,7 @@ func TestValidator_Validate_RateLimitAlgorithm(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_MockMode tests mock mode validation
+// TestValidator_Validate_MockMode tests mock mode validation.
 func TestValidator_Validate_MockMode(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -285,7 +286,7 @@ func TestValidator_Validate_MockMode(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_TLS tests TLS configuration validation
+// TestValidator_Validate_TLS tests TLS configuration validation.
 func TestValidator_Validate_TLS(t *testing.T) {
 	// Create temporary certificate files for testing
 	tempDir := t.TempDir()
@@ -302,9 +303,9 @@ func TestValidator_Validate_TLS(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		enabled     bool
 		certFile    string
 		keyFile     string
+		enabled     bool
 		expectError bool
 	}{
 		{"disabled - no files needed", false, "", "", false},
@@ -348,7 +349,7 @@ func TestValidator_Validate_TLS(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_Timeout tests timeout validation
+// TestValidator_Validate_Timeout tests timeout validation.
 func TestValidator_Validate_Timeout(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -388,7 +389,7 @@ func TestValidator_Validate_Timeout(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_Latency tests latency validation
+// TestValidator_Validate_Latency tests latency validation.
 func TestValidator_Validate_Latency(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -435,7 +436,7 @@ func TestValidator_Validate_Latency(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_ReplaySpeed tests replay speed validation
+// TestValidator_Validate_ReplaySpeed tests replay speed validation.
 func TestValidator_Validate_ReplaySpeed(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -479,7 +480,7 @@ func TestValidator_Validate_ReplaySpeed(t *testing.T) {
 	}
 }
 
-// TestValidationError tests ValidationError structure
+// TestValidationError tests ValidationError structure.
 func TestValidationError(t *testing.T) {
 	err := ValidationError{
 		Field:   "server.port",
@@ -503,7 +504,7 @@ func TestValidationError(t *testing.T) {
 	}
 }
 
-// TestValidator_Validate_MultipleErrors tests that multiple errors are returned
+// TestValidator_Validate_MultipleErrors tests that multiple errors are returned.
 func TestValidator_Validate_MultipleErrors(t *testing.T) {
 	cfg := &Config{}
 	cfg.Server.Port = -1           // invalid

@@ -1,4 +1,5 @@
-// Package config provides configuration loading tests
+// Copyright 2026 ICAP Mock
+
 package config
 
 import (
@@ -8,7 +9,7 @@ import (
 	"time"
 )
 
-// TestLoader_LoadYAML tests loading configuration from YAML file
+// TestLoader_LoadYAML tests loading configuration from YAML file.
 func TestLoader_LoadYAML(t *testing.T) {
 	yamlContent := `
 server:
@@ -198,7 +199,7 @@ replay:
 	}
 }
 
-// TestLoader_LoadJSON tests loading configuration from JSON file
+// TestLoader_LoadJSON tests loading configuration from JSON file.
 func TestLoader_LoadJSON(t *testing.T) {
 	jsonContent := `{
 		"server": {
@@ -303,7 +304,7 @@ func TestLoader_LoadJSON(t *testing.T) {
 	}
 }
 
-// TestLoader_LoadFromFile_InvalidFile tests error handling for invalid files
+// TestLoader_LoadFromFile_InvalidFile tests error handling for invalid files.
 func TestLoader_LoadFromFile_InvalidFile(t *testing.T) {
 	loader := NewLoader()
 
@@ -314,7 +315,7 @@ func TestLoader_LoadFromFile_InvalidFile(t *testing.T) {
 	}
 }
 
-// TestLoader_LoadFromFile_InvalidYAML tests error handling for invalid YAML
+// TestLoader_LoadFromFile_InvalidYAML tests error handling for invalid YAML.
 func TestLoader_LoadFromFile_InvalidYAML(t *testing.T) {
 	invalidYAML := `
 server:
@@ -335,7 +336,7 @@ server:
 	}
 }
 
-// TestLoader_LoadFromEnv tests loading configuration from environment variables
+// TestLoader_LoadFromEnv tests loading configuration from environment variables.
 func TestLoader_LoadFromEnv(t *testing.T) {
 	// Set environment variables
 	envVars := map[string]string{
@@ -391,7 +392,7 @@ func TestLoader_LoadFromEnv(t *testing.T) {
 	}
 }
 
-// TestLoader_Merge tests merging multiple configuration sources
+// TestLoader_Merge tests merging multiple configuration sources.
 func TestLoader_Merge(t *testing.T) {
 	// Create a base config file
 	yamlContent := `
@@ -444,7 +445,7 @@ logging:
 	}
 }
 
-// TestLoader_DefaultsOnly tests loading with defaults only
+// TestLoader_DefaultsOnly tests loading with defaults only.
 func TestLoader_DefaultsOnly(t *testing.T) {
 	loader := NewLoader()
 	cfg, err := loader.Load(LoadOptions{})
@@ -464,7 +465,7 @@ func TestLoader_DefaultsOnly(t *testing.T) {
 	}
 }
 
-// TestLoadOptions tests LoadOptions configuration
+// TestLoadOptions tests LoadOptions configuration.
 func TestLoadOptions(t *testing.T) {
 	opts := LoadOptions{
 		ConfigPath: "/path/to/config.yaml",
@@ -475,11 +476,11 @@ func TestLoadOptions(t *testing.T) {
 	}
 }
 
-// mockMetricsCollector is a mock implementation of MetricsCollector for testing
+// mockMetricsCollector is a mock implementation of MetricsCollector for testing.
 type mockMetricsCollector struct {
 	reloadCounts     map[string]int
-	reloadDurations  []time.Duration
 	lastReloadStatus *bool
+	reloadDurations  []time.Duration
 }
 
 func newMockMetricsCollector() *mockMetricsCollector {
@@ -500,7 +501,7 @@ func (m *mockMetricsCollector) SetConfigLastReloadStatus(success bool) {
 	m.lastReloadStatus = &success
 }
 
-// TestLoader_WithMetrics tests that WithMetrics sets the metrics collector
+// TestLoader_WithMetrics tests that WithMetrics sets the metrics collector.
 func TestLoader_WithMetrics(t *testing.T) {
 	mock := newMockMetricsCollector()
 	loader := NewLoader().WithMetrics(mock)
@@ -510,7 +511,7 @@ func TestLoader_WithMetrics(t *testing.T) {
 	}
 }
 
-// TestLoader_LoadWithMetrics_Success tests that metrics are recorded on successful load
+// TestLoader_LoadWithMetrics_Success tests that metrics are recorded on successful load.
 func TestLoader_LoadWithMetrics_Success(t *testing.T) {
 	mock := newMockMetricsCollector()
 	loader := NewLoader().WithMetrics(mock)
@@ -532,7 +533,7 @@ func TestLoader_LoadWithMetrics_Success(t *testing.T) {
 	}
 }
 
-// TestLoader_LoadWithMetrics_Failure tests that metrics are recorded on failed load
+// TestLoader_LoadWithMetrics_Failure tests that metrics are recorded on failed load.
 func TestLoader_LoadWithMetrics_Failure(t *testing.T) {
 	mock := newMockMetricsCollector()
 	loader := NewLoader().WithMetrics(mock)
@@ -555,7 +556,7 @@ func TestLoader_LoadWithMetrics_Failure(t *testing.T) {
 	}
 }
 
-// TestLoader_LoadWithoutMetrics tests that loader works without metrics collector
+// TestLoader_LoadWithoutMetrics tests that loader works without metrics collector.
 func TestLoader_LoadWithoutMetrics(t *testing.T) {
 	loader := NewLoader()
 

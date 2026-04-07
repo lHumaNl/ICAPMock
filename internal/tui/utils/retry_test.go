@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package utils
 
 import (
@@ -465,8 +467,8 @@ func TestDoWithRetryHTTP_WithBody(t *testing.T) {
 
 func TestShouldRetryError(t *testing.T) {
 	tests := []struct {
-		name     string
 		err      error
+		name     string
 		expected bool
 	}{
 		{"nil error", nil, false},

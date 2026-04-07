@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package state
 
 import (
@@ -130,13 +132,13 @@ func TestRateLimiter_ContextCancellation(t *testing.T) {
 	err := rl.Acquire(ctx)
 	require.NoError(t, err)
 
-	// Try to acquire with cancelled context
+	// Try to acquire with canceled context
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	err = rl.Acquire(cancelledCtx)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cancelled")
+	assert.Contains(t, err.Error(), "canceled")
 }
 
 func TestRateLimiter_ContextCancellationDuringWait(t *testing.T) {
@@ -147,7 +149,7 @@ func TestRateLimiter_ContextCancellationDuringWait(t *testing.T) {
 	err := rl.Acquire(ctx)
 	require.NoError(t, err)
 
-	// Create a context that will be cancelled
+	// Create a context that will be canceled
 	cancelCtx, cancel := context.WithCancel(context.Background())
 
 	// Start a goroutine that tries to acquire and will block
@@ -166,9 +168,9 @@ func TestRateLimiter_ContextCancellationDuringWait(t *testing.T) {
 	select {
 	case err := <-errChan:
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cancelled")
+		assert.Contains(t, err.Error(), "canceled")
 	case <-time.After(1 * time.Second):
-		t.Fatal("timeout waiting for cancelled context error")
+		t.Fatal("timeout waiting for canceled context error")
 	}
 }
 
@@ -292,7 +294,7 @@ func TestRateLimiter_RequestQueueBlocking(t *testing.T) {
 	elapsed := time.Since(start)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cancelled")
+	assert.Contains(t, err.Error(), "canceled")
 	assert.GreaterOrEqual(t, elapsed, 50*time.Millisecond)
 }
 
@@ -381,7 +383,7 @@ func TestRateLimiter_ContextCancellationInQueue(t *testing.T) {
 	err := rl.Acquire(ctx)
 	require.NoError(t, err)
 
-	// Try to acquire with a context that gets cancelled quickly
+	// Try to acquire with a context that gets canceled quickly
 	cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 
 	start := time.Now()
@@ -389,7 +391,7 @@ func TestRateLimiter_ContextCancellationInQueue(t *testing.T) {
 	elapsed := time.Since(start)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cancelled")
+	assert.Contains(t, err.Error(), "canceled")
 	assert.GreaterOrEqual(t, elapsed, 10*time.Millisecond)
 	cancel()
 }

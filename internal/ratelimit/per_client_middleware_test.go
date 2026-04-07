@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
@@ -5,9 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TestNewPerClientMiddleware tests the middleware constructor.

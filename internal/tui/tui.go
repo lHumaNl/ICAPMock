@@ -1,2 +1,3 @@
-// Package tui provides the terminal user interface for ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package tui

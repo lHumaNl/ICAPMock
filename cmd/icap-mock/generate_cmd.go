@@ -1,4 +1,5 @@
-// Package main provides the entry point for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -17,13 +18,12 @@ import (
 
 // GenerateCommand handles the generate subcommand.
 type GenerateCommand struct {
-	fs *flag.FlagSet
-
+	fs         *flag.FlagSet
 	fromDir    string
 	output     string
 	method     string
-	minCount   int
 	namePrefix string
+	minCount   int
 }
 
 // NewGenerateCommand creates a new generate command.
@@ -142,28 +142,28 @@ func (c *GenerateCommand) Run(ctx context.Context) error {
 
 	// Write output
 	if c.output != "" {
-		if err := os.WriteFile(c.output, data, 0644); err != nil {
+		if err := os.WriteFile(c.output, data, 0644); err != nil { //nolint:gosec // wider permissions acceptable
 			return fmt.Errorf("writing %s: %w", c.output, err)
 		}
 		fmt.Fprintf(os.Stderr, "Generated %d scenarios -> %s\n", len(scenarios), c.output)
 	} else {
-		fmt.Fprint(os.Stdout, string(data))
+		fmt.Fprint(os.Stdout, string(data)) //nolint:errcheck
 		fmt.Fprintf(os.Stderr, "Generated %d scenarios\n", len(scenarios))
 	}
 
 	return nil
 }
 
-// YAML output structs (separate from internal types to control output format)
+// YAML output structs (separate from internal types to control output format).
 type scenarioFileYAML struct {
 	Scenarios []scenarioYAML `yaml:"scenarios"`
 }
 
 type scenarioYAML struct {
-	Name     string       `yaml:"name"`
-	Priority int          `yaml:"priority"`
 	Match    matchYAML    `yaml:"match"`
+	Name     string       `yaml:"name"`
 	Response responseYAML `yaml:"response"`
+	Priority int          `yaml:"priority"`
 }
 
 type matchYAML struct {

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package tui
 
 import (
@@ -9,12 +11,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/icap-mock/icap-mock/internal/tui/components"
 	"github.com/icap-mock/icap-mock/internal/tui/server"
 	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
-// Screen represents different views in application
+// Screen represents different views in application.
 type Screen int
 
 const (
@@ -45,80 +48,43 @@ func (s Screen) String() string {
 	}
 }
 
-// Model represents complete application state
+// Model represents complete application state.
 type Model struct {
-	// Navigation state
-	currentScreen  Screen
-	previousScreen Screen
-
-	// Navigation components
-	header *components.HeaderModel
-	footer *components.FooterModel
-	tabs   *components.TabsModel
-	layout *components.LayoutModel
-
-	// Dashboard component
-	dashboard *components.DashboardModel
-
-	// Health monitor component
-	healthMonitor *components.HealthMonitorModel
-
-	// Service controls component
-	serviceControls *components.ServiceControlsModel
-
-	// Config editor component
-	configEditor *components.ConfigEditorModel
-
-	// Log viewer component
-	logViewer *components.LogViewerModel
-
-	// Scenario manager component
+	metricsState    *state.MetricsState
+	configEditor    *components.ConfigEditorModel
+	header          *components.HeaderModel
+	footer          *components.FooterModel
+	tabs            *components.TabsModel
+	layout          *components.LayoutModel
+	dashboard       *components.DashboardModel
+	healthMonitor   *components.HealthMonitorModel
+	shutdownDone    chan struct{}
+	replayClient    *server.ReplayClient
+	logViewer       *components.LogViewerModel
 	scenarioManager *components.ScenarioManagerModel
-
-	// Replay panel component
-	replayPanel *components.ReplayPanelModel
-
-	// HTTP clients
-	scenarioClient *server.ScenarioClient
-	replayClient   *server.ReplayClient
-	configClient   *server.ConfigClient
-
-	// Shared state
-	metricsState *state.MetricsState
-	logsState    *state.LogsState
-	serverStatus *state.ServerStatus
-
-	// UI dimensions
-	width  int
-	height int
-
-	// Ready flag
-	ready bool
-
-	// Last message
-	lastMessage string
-
-	// confirmExit is set when the user presses Esc on a screen with unsaved changes
-	confirmExit bool
-
-	// showHelp toggles the full help overlay
-	showHelp bool
-
-	// App info
-	appName string
-	version string
-
-	// Server address for error context
+	replayPanel     *components.ReplayPanelModel
+	scenarioClient  *server.ScenarioClient
+	shutdownCancel  context.CancelFunc
+	logsState       *state.LogsState
+	serviceControls *components.ServiceControlsModel
+	configClient    *server.ConfigClient
+	serverStatus    *state.ServerStatus
+	tickerCancel    context.CancelFunc
+	lastMessage     string
+	appName         string
+	version         string
 	serverStatusURL string
-
-	// Cleanup
-	tickerCancel   context.CancelFunc
-	shutdownCancel context.CancelFunc
-	shutdownDone   chan struct{}
-	shutdownMu     sync.Mutex
+	height          int
+	width           int
+	previousScreen  Screen
+	currentScreen   Screen
+	shutdownMu      sync.Mutex
+	ready           bool
+	confirmExit     bool
+	showHelp        bool
 }
 
-// InitialModel creates initial application state with configuration
+// InitialModel creates initial application state with configuration.
 func InitialModel(appName, version string, cfg *state.ClientConfig) *Model {
 	model := &Model{
 		currentScreen:  ScreenDashboard,
@@ -201,7 +167,7 @@ func InitialModel(appName, version string, cfg *state.ClientConfig) *Model {
 	return model
 }
 
-// Init initializes model and returns any initial commands
+// Init initializes model and returns any initial commands.
 func (m *Model) Init() tea.Cmd {
 	// Create context for ticker cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -222,10 +188,10 @@ func (m *Model) Init() tea.Cmd {
 	)
 }
 
-// tickCmd returns a command that sends TickMsg every second
+// tickCmd returns a command that sends TickMsg every second.
 func (m *Model) tickCmd(ctx context.Context) tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		// Check if context is cancelled
+		// Check if context is canceled
 		select {
 		case <-ctx.Done():
 			return nil
@@ -235,14 +201,14 @@ func (m *Model) tickCmd(ctx context.Context) tea.Cmd {
 	})
 }
 
-// Cleanup releases resources and stops tickers
+// Cleanup releases resources and stops tickers.
 func (m *Model) Cleanup() {
 	if m.tickerCancel != nil {
 		m.tickerCancel()
 	}
 }
 
-// Shutdown gracefully stops all components
+// Shutdown gracefully stops all components.
 func (m *Model) Shutdown() {
 	// Cancel ticker
 	if m.tickerCancel != nil {

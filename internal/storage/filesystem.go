@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -20,6 +20,8 @@ import (
 	"github.com/icap-mock/icap-mock/internal/config"
 	prometheusmetrics "github.com/icap-mock/icap-mock/internal/metrics"
 )
+
+const extJSONL = ".jsonl"
 
 // Compile-time interface assertions to ensure FileStorage implements
 // both RequestReader and RequestWriter interfaces (ISP compliance).
@@ -61,32 +63,24 @@ var (
 //
 // P0 FIX: Rotation is now non-blocking - separate goroutine handles rotation.
 type FileStorage struct {
-	config    config.StorageConfig
-	mu        sync.RWMutex
-	closed    atomic.Bool // CRIT-001: atomic flag for thread-safe close detection
-	counter   int64       // Legacy counter for filename generation
-	date      string      // Current date for filename generation
-	requestCh chan *StoredRequest
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-
-	// P0 FIX: Prometheus metrics collector
-	metrics *prometheusmetrics.Collector
-
-	// P1 FIX: Disk space monitoring
-	diskMonitor *DiskMonitor
-	logger      *slog.Logger
-
-	// CRIT-008: Rotation support
-	currentFile  *os.File   // Current batch file handle
-	fileCounter  int64      // Rotation counter for batch filenames
-	requestCount int64      // Number of requests in current file
-	rotationMu   sync.Mutex // Mutex for rotation operations (separate from main mu)
-
-	// P0 FIX: Non-blocking rotation channel
-	rotationSignal   chan struct{} // Signal for rotation (non-blocking)
-	pendingRotations atomic.Int32  // Number of pending rotations (for backpressure)
+	ctx              context.Context
+	currentFile      *os.File
+	diskMonitor      *DiskMonitor
+	rotationSignal   chan struct{}
+	requestCh        chan *StoredRequest
+	logger           *slog.Logger
+	cancel           context.CancelFunc
+	metrics          *prometheusmetrics.Collector
+	date             string
+	config           config.StorageConfig
+	wg               sync.WaitGroup
+	fileCounter      int64
+	requestCount     int64
+	counter          int64
+	mu               sync.RWMutex
+	rotationMu       sync.Mutex
+	closed           atomic.Bool
+	pendingRotations atomic.Int32
 }
 
 // NewFileStorage creates a new file-based storage instance.
@@ -101,7 +95,7 @@ func NewFileStorage(cfg config.StorageConfig, metrics *prometheusmetrics.Collect
 	}
 
 	// Ensure the directory exists
-	if err := os.MkdirAll(cfg.RequestsDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.RequestsDir, 0755); err != nil { //nolint:gosec // path is validated
 		return nil, fmt.Errorf("creating storage directory: %w", err)
 	}
 
@@ -355,7 +349,7 @@ func (fs *FileStorage) initBatchFile() error {
 		fmt.Sprintf("%s_batch_%06d.jsonl", dateStr, fs.fileCounter),
 	)
 
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // path is validated
 	if err != nil {
 		return fmt.Errorf("creating batch file: %w", err)
 	}
@@ -398,7 +392,7 @@ func (fs *FileStorage) rotateFile() error {
 		fmt.Sprintf("%s_batch_%06d.jsonl", dateStr, fs.fileCounter),
 	)
 
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // path is validated
 	if err != nil {
 		return fmt.Errorf("creating new batch file: %w", err)
 	}
@@ -409,7 +403,7 @@ func (fs *FileStorage) rotateFile() error {
 }
 
 // generateFilename generates a unique filename for a request.
-// Format: YYYY-MM-DD_NNN.json
+// Format: YYYY-MM-DD_NNN.json.
 func (fs *FileStorage) generateFilename(t time.Time) string {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -538,7 +532,7 @@ func (fs *FileStorage) ListRequests(ctx context.Context, filter RequestFilter) (
 		for _, path := range matches {
 			// Check file extension to determine format
 			ext := filepath.Ext(path)
-			if ext == ".jsonl" {
+			if ext == extJSONL { //nolint:goconst
 				// New batch format - read all requests from file
 				requests, err := fs.readBatchFile(path)
 				if err != nil {
@@ -607,7 +601,7 @@ func (fs *FileStorage) matchesFilter(sr *StoredRequest, filter RequestFilter) bo
 // readRequestFile reads and parses a request from a file.
 // Supports both old format (single JSON object) and new format (NDJSON batch).
 func (fs *FileStorage) readRequestFile(path string) (*StoredRequest, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is validated
 	if err != nil {
 		return nil, fmt.Errorf("reading request file: %w", err)
 	}
@@ -637,7 +631,7 @@ func (fs *FileStorage) readRequestFile(path string) (*StoredRequest, error) {
 
 // readBatchFile reads all requests from an NDJSON batch file.
 func (fs *FileStorage) readBatchFile(path string) ([]*StoredRequest, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is validated
 	if err != nil {
 		return nil, fmt.Errorf("reading batch file: %w", err)
 	}
@@ -689,7 +683,7 @@ func (fs *FileStorage) DeleteRequest(ctx context.Context, id string) error {
 
 		for _, path := range matches {
 			ext := filepath.Ext(path)
-			if ext == ".jsonl" {
+			if ext == extJSONL {
 				// Batch file - search within
 				requests, err := fs.readBatchFile(path)
 				if err != nil {
@@ -753,7 +747,7 @@ func (fs *FileStorage) rewriteBatchFile(path string, requests []*StoredRequest) 
 
 	// Write to temp file first for atomicity
 	tempPath := path + ".tmp"
-	f, err := os.Create(tempPath)
+	f, err := os.Create(tempPath) //nolint:gosec // path is validated
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
@@ -761,20 +755,20 @@ func (fs *FileStorage) rewriteBatchFile(path string, requests []*StoredRequest) 
 	encoder := json.NewEncoder(f)
 	for _, sr := range requests {
 		if err := encoder.Encode(sr); err != nil {
-			f.Close()
-			os.Remove(tempPath)
+			_ = f.Close()
+			_ = os.Remove(tempPath)
 			return fmt.Errorf("encoding request: %w", err)
 		}
 	}
 
 	if err := f.Close(); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("closing temp file: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tempPath, path); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return fmt.Errorf("renaming file: %w", err)
 	}
 
@@ -950,7 +944,7 @@ func (fs *FileStorage) Clear(ctx context.Context) (int64, error) {
 		for _, path := range matches {
 			// Count requests in the file before deleting
 			ext := filepath.Ext(path)
-			if ext == ".jsonl" {
+			if ext == extJSONL {
 				requests, err := fs.readBatchFile(path)
 				if err == nil {
 					count += int64(len(requests))
@@ -1001,7 +995,7 @@ func (fs *FileStorage) DeleteRequests(ctx context.Context, filter RequestFilter)
 
 		for _, path := range matches {
 			ext := filepath.Ext(path)
-			if ext == ".jsonl" {
+			if ext == extJSONL {
 				// Batch file - find and remove matching requests
 				requests, err := fs.readBatchFile(path)
 				if err != nil {

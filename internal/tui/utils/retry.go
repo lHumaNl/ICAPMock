@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package utils
 
 import (
@@ -18,17 +20,17 @@ var (
 	ErrNonRetryableError   = errors.New("non-retryable error")
 )
 
-// RetryConfig holds configuration for retry behavior
+// RetryConfig holds configuration for retry behavior.
 type RetryConfig struct {
+	RetryableErrors []error
 	MaxAttempts     int
 	InitialDelay    time.Duration
 	MaxDelay        time.Duration
 	Multiplier      float64
 	Jitter          float64
-	RetryableErrors []error
 }
 
-// DefaultRetryConfig returns a conservative default retry configuration
+// DefaultRetryConfig returns a conservative default retry configuration.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxAttempts:     3,
@@ -40,7 +42,7 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
-// DoWithRetry executes a function with exponential backoff retry
+// DoWithRetry executes a function with exponential backoff retry.
 func DoWithRetry(ctx context.Context, config RetryConfig, fn func() error) error {
 	var lastErr error
 
@@ -50,7 +52,7 @@ func DoWithRetry(ctx context.Context, config RetryConfig, fn func() error) error
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return fmt.Errorf("%w: %v", ErrContextCanceled, ctx.Err())
+				return fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
 			}
 		}
 
@@ -66,10 +68,10 @@ func DoWithRetry(ctx context.Context, config RetryConfig, fn func() error) error
 		}
 	}
 
-	return fmt.Errorf("%w: %v", ErrMaxAttemptsExceeded, lastErr)
+	return fmt.Errorf("%w: %w", ErrMaxAttemptsExceeded, lastErr)
 }
 
-// DoWithRetryHTTP executes an HTTP request with retry logic
+// DoWithRetryHTTP executes an HTTP request with retry logic.
 func DoWithRetryHTTP(ctx context.Context, config RetryConfig, httpClient *http.Client, req *http.Request) (*http.Response, error) {
 	var lastErr error
 	var lastResp *http.Response
@@ -80,7 +82,7 @@ func DoWithRetryHTTP(ctx context.Context, config RetryConfig, httpClient *http.C
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return nil, fmt.Errorf("%w: %v", ErrContextCanceled, ctx.Err())
+				return nil, fmt.Errorf("%w: %w", ErrContextCanceled, ctx.Err())
 			}
 		}
 
@@ -95,7 +97,7 @@ func DoWithRetryHTTP(ctx context.Context, config RetryConfig, httpClient *http.C
 			return nil, fmt.Errorf("cannot retry request with body without GetBody function")
 		}
 
-		resp, err := httpClient.Do(retryReq)
+		resp, err := httpClient.Do(retryReq) //nolint:gosec // URL is controlled
 		if err != nil {
 			if !shouldRetryError(err, config) {
 				return nil, err
@@ -115,13 +117,13 @@ func DoWithRetryHTTP(ctx context.Context, config RetryConfig, httpClient *http.C
 	}
 
 	if lastResp != nil {
-		return lastResp, fmt.Errorf("%w: %v", ErrMaxAttemptsExceeded, lastErr)
+		return lastResp, fmt.Errorf("%w: %w", ErrMaxAttemptsExceeded, lastErr)
 	}
 
-	return nil, fmt.Errorf("%w: %v", ErrMaxAttemptsExceeded, lastErr)
+	return nil, fmt.Errorf("%w: %w", ErrMaxAttemptsExceeded, lastErr)
 }
 
-// calculateBackoff calculates the delay for a given retry attempt with exponential backoff and jitter
+// calculateBackoff calculates the delay for a given retry attempt with exponential backoff and jitter.
 func calculateBackoff(config RetryConfig, attempt int) time.Duration {
 	baseDelay := config.InitialDelay
 
@@ -138,7 +140,7 @@ func calculateBackoff(config RetryConfig, attempt int) time.Duration {
 
 	if config.Jitter > 0 {
 		jitterRange := float64(delay) * config.Jitter
-		jitter := (rand.Float64()*2 - 1) * jitterRange
+		jitter := (rand.Float64()*2 - 1) * jitterRange //nolint:gosec // crypto not needed here
 		delay = time.Duration(float64(delay) + jitter)
 		if delay < 0 {
 			delay = 0
@@ -148,7 +150,7 @@ func calculateBackoff(config RetryConfig, attempt int) time.Duration {
 	return delay
 }
 
-// shouldRetry determines if an error should be retried
+// shouldRetry determines if an error should be retried.
 func shouldRetry(err error, config RetryConfig) bool {
 	if err == nil {
 		return false
@@ -167,7 +169,7 @@ func shouldRetry(err error, config RetryConfig) bool {
 	return shouldRetryError(err, config)
 }
 
-// shouldRetryError determines if an error is retryable based on error type
+// shouldRetryError determines if an error is retryable based on error type.
 func shouldRetryError(err error, config RetryConfig) bool {
 	if err == nil {
 		return false
@@ -215,7 +217,7 @@ func shouldRetryError(err error, config RetryConfig) bool {
 	return true
 }
 
-// shouldRetryResponse determines if an HTTP response status code indicates a retryable error
+// shouldRetryResponse determines if an HTTP response status code indicates a retryable error.
 func shouldRetryResponse(resp *http.Response) bool {
 	if resp == nil {
 		return false
@@ -230,7 +232,7 @@ func shouldRetryResponse(resp *http.Response) bool {
 	return false
 }
 
-// ioCopyAndClose copies and closes the response body
+// ioCopyAndClose copies and closes the response body.
 func ioCopyAndClose(r io.ReadCloser) {
 	if r == nil {
 		return

@@ -1,4 +1,5 @@
-// Package components provides reusable UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -12,9 +13,9 @@ import (
 // SidebarModel represents a sidebar menu component.
 type SidebarModel struct {
 	list          list.Model
+	currentScreen string
 	width         int
 	height        int
-	currentScreen string
 	mu            sync.RWMutex
 }
 

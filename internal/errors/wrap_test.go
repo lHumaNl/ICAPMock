@@ -1,4 +1,5 @@
-// Package errors_test provides tests for error wrapping utilities.
+// Copyright 2026 ICAP Mock
+
 package errors_test
 
 import (
@@ -26,7 +27,7 @@ func TestWrap(t *testing.T) {
 	if err.ICAPStatus != 400 {
 		t.Errorf("ICAPStatus = %d, want 400", err.ICAPStatus)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Error("Cause not set correctly")
 	}
 }
@@ -57,7 +58,7 @@ func TestWrapf(t *testing.T) {
 	if err.ICAPStatus != 400 {
 		t.Errorf("ICAPStatus = %d, want 400", err.ICAPStatus)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Error("Cause not set correctly")
 	}
 }
@@ -84,7 +85,7 @@ func TestWrapPredefined(t *testing.T) {
 	if err.ICAPStatus != icaperrors.ErrTimeout.ICAPStatus {
 		t.Errorf("ICAPStatus = %d, want %d", err.ICAPStatus, icaperrors.ErrTimeout.ICAPStatus)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Error("Cause not set correctly")
 	}
 }
@@ -104,7 +105,7 @@ func TestCause(t *testing.T) {
 	level2 := icaperrors.Wrap(level1, 1002, "level 2", 500)
 
 	cause := icaperrors.Cause(level2)
-	if cause != root {
+	if !errors.Is(cause, root) {
 		t.Errorf("Cause() = %v, want %v", cause, root)
 	}
 }
@@ -113,7 +114,7 @@ func TestCause(t *testing.T) {
 func TestCause_NoWrap(t *testing.T) {
 	err := errors.New("simple error")
 	cause := icaperrors.Cause(err)
-	if cause != err {
+	if !errors.Is(cause, err) {
 		t.Errorf("Cause() on non-wrapped error should return same error")
 	}
 }
@@ -132,7 +133,7 @@ func TestCause_StandardErrorChain(t *testing.T) {
 	wrapped := fmtErrorf("wrapped: %w", root)
 
 	cause := icaperrors.Cause(wrapped)
-	if cause != root {
+	if !errors.Is(cause, root) {
 		t.Errorf("Cause() = %v, want %v", cause, root)
 	}
 }
@@ -166,7 +167,7 @@ func TestWrap_ICAPError(t *testing.T) {
 	outer := icaperrors.Wrap(inner, 1002, "outer error", 500)
 
 	// Chain should be preserved
-	if outer.Cause != inner {
+	if !errors.Is(outer.Cause, inner) {
 		t.Error("outer.Cause should be inner error")
 	}
 
@@ -185,7 +186,7 @@ func TestCause_DeepChain(t *testing.T) {
 	}
 
 	cause := icaperrors.Cause(current)
-	if cause != root {
+	if !errors.Is(cause, root) {
 		t.Errorf("Cause() on deep chain = %v, want %v", cause, root)
 	}
 }

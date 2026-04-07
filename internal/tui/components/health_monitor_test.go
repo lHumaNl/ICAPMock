@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -7,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 func TestNewHealthMonitorModel(t *testing.T) {
@@ -189,9 +192,9 @@ func TestHealthMonitorModel_getStatusStyle(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		contains string
 		healthy  bool
 		ready    bool
-		contains string
 	}{
 		{"healthy and ready", true, true, "running"},
 		{"unhealthy", false, true, "stopped"},
@@ -244,9 +247,9 @@ func TestHealthMonitorModel_renderCurrentHealth(t *testing.T) {
 
 	tests := []struct {
 		name       string
+		statusText string
 		healthy    bool
 		ready      bool
-		statusText string
 	}{
 		{"healthy and ready", true, true, "OK"},
 		{"unhealthy", false, true, "Unhealthy"},
@@ -411,9 +414,9 @@ func TestHealthMonitorModel_renderCurrentHealth_StatusStyles(t *testing.T) {
 	model := NewHealthMonitorModel()
 
 	tests := []struct {
+		shouldContain []string
 		healthy       bool
 		ready         bool
-		shouldContain []string
 	}{
 		{true, true, []string{"OK"}},
 		{false, true, []string{"Unhealthy"}},
@@ -616,9 +619,9 @@ func TestHealthMonitorModel_renderHistory_StatusIndicators(t *testing.T) {
 	model := NewHealthMonitorModel()
 
 	checks := []struct {
+		status  string
 		healthy bool
 		ready   bool
-		status  string
 	}{
 		{true, true, "OK"},
 		{false, true, "FAIL"},

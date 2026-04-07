@@ -1,9 +1,5 @@
-// Package handler provides rate limiting for ICAP preview mode requests.
-// This prevents DoS attacks by limiting the number of preview requests
-// per client within a time window.
-//
-// The implementation uses a sliding window algorithm for accurate rate limiting
-// and is thread-safe for concurrent access.
+// Copyright 2026 ICAP Mock
+
 package handler
 
 import (
@@ -11,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"log/slog"
 )
 
 // PreviewRateLimiter provides rate limiting for preview mode requests.
@@ -22,26 +19,14 @@ import (
 //
 // Thread-safety: All methods are safe for concurrent use.
 type PreviewRateLimiter struct {
-	mu sync.RWMutex
-
-	// Configuration
-	config PreviewRateLimiterConfig
-
-	// Per-client tracking map: clientID -> *clientTracker
+	ctx     context.Context
 	clients map[string]*clientTracker
-
-	// Metrics collector
 	metrics *metrics.Collector
-
-	// Logger
-	logger *slog.Logger
-
-	// Context for goroutine lifecycle management
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	// Wait group for cleanup goroutine
-	wg sync.WaitGroup
+	logger  *slog.Logger
+	cancel  context.CancelFunc
+	config  PreviewRateLimiterConfig
+	wg      sync.WaitGroup
+	mu      sync.RWMutex
 }
 
 // PreviewRateLimiterConfig contains configuration for preview rate limiting.
@@ -72,16 +57,10 @@ type PreviewRateLimiterConfig struct {
 
 // clientTracker tracks request timestamps for a single client.
 type clientTracker struct {
-	clientID string
-
-	// Sliding window of request timestamps
-	requests []time.Time
-
-	// Last access time for LRU eviction
 	lastAccess time.Time
-
-	// Current remaining count for the window
-	remaining int
+	clientID   string
+	requests   []time.Time
+	remaining  int
 }
 
 // NewPreviewRateLimiter creates a new preview rate limiter with the given configuration.
@@ -124,7 +103,7 @@ func NewPreviewRateLimiter(
 	}
 
 	// Create context for goroutine lifecycle management
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel managed elsewhere
 
 	limiter := &PreviewRateLimiter{
 		config:  config,
@@ -350,7 +329,7 @@ func (l *PreviewRateLimiter) cleanupLoop() {
 		case <-ticker.C:
 			l.cleanup()
 		case <-l.ctx.Done():
-			// Context cancelled, exit gracefully
+			// Context canceled, exit gracefully
 			if l.logger != nil {
 				l.logger.Debug("preview rate limiter cleanup loop shutting down")
 			}

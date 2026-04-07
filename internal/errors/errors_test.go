@@ -1,4 +1,5 @@
-// Package errors_test provides comprehensive tests for the ICAP Mock Server error package.
+// Copyright 2026 ICAP Mock
+
 package errors_test
 
 import (
@@ -169,8 +170,8 @@ func TestError_ErrorsAsIntegration(t *testing.T) {
 // TestPredefinedErrors verifies all predefined errors have correct values.
 func TestPredefinedErrors(t *testing.T) {
 	tests := []struct {
-		name       string
 		err        *icaperrors.Error
+		name       string
 		code       int
 		icapStatus int
 	}{
@@ -214,7 +215,7 @@ func TestNewICAPError(t *testing.T) {
 	if err.ICAPStatus != 418 {
 		t.Errorf("ICAPStatus = %d, want 418", err.ICAPStatus)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Error("Cause not set correctly")
 	}
 }
@@ -242,7 +243,7 @@ func TestNewConnectionError(t *testing.T) {
 	if err.ICAPStatus != 502 {
 		t.Errorf("ICAPStatus = %d, want 502", err.ICAPStatus)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Error("Cause not set correctly")
 	}
 }
@@ -367,8 +368,8 @@ func findSubstring(s, substr string) bool {
 // TestTimeoutErrorTypes verifies all timeout error types have correct values.
 func TestTimeoutErrorTypes(t *testing.T) {
 	tests := []struct {
-		name       string
 		err        *icaperrors.Error
+		name       string
 		code       int
 		icapStatus int
 	}{
@@ -457,8 +458,8 @@ func TestNewIdleTimeout(t *testing.T) {
 // TestIsTimeout tests the IsTimeout helper function.
 func TestIsTimeout(t *testing.T) {
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{"ErrReadTimeout", icaperrors.ErrReadTimeout, true},

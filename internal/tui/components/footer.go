@@ -1,4 +1,5 @@
-// Package components provides reusable UI components for the TUI.
+// Copyright 2026 ICAP Mock
+
 package components
 
 import (
@@ -9,11 +10,11 @@ import (
 
 // FooterModel represents the footer component.
 type FooterModel struct {
+	status      string
+	errorMsg    string
 	keyBindings []KeyBinding
 	width       int
 	height      int
-	status      string
-	errorMsg    string
 }
 
 // KeyBinding represents a keyboard shortcut and its description.
@@ -150,7 +151,7 @@ func (m *FooterModel) GetHeight() int {
 	return 1
 }
 
-// Footer styles
+// Footer styles.
 var (
 	footerStyle = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, true, false).

@@ -1,5 +1,5 @@
-// Package storage provides request persistence and scenario management
-// for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package storage
 
 import (
@@ -70,7 +70,7 @@ func TestScenarioError_Unwrap(t *testing.T) {
 	}
 
 	unwrapped := err.Unwrap()
-	if unwrapped != cause {
+	if !errors.Is(unwrapped, cause) {
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, cause)
 	}
 
@@ -92,7 +92,7 @@ func TestNewScenarioLoadError(t *testing.T) {
 	if err.FilePath != "/path/to/file.yaml" {
 		t.Errorf("FilePath = %q, want /path/to/file.yaml", err.FilePath)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Errorf("Cause = %v, want %v", err.Cause, cause)
 	}
 	if !strings.Contains(err.Suggestion, "verify") {
@@ -111,7 +111,7 @@ func TestNewScenarioParseError(t *testing.T) {
 	if err.FilePath != "/path/to/file.yaml" {
 		t.Errorf("FilePath = %q, want /path/to/file.yaml", err.FilePath)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Errorf("Cause = %v, want %v", err.Cause, cause)
 	}
 	if !strings.Contains(err.Suggestion, "YAML") {
@@ -179,7 +179,7 @@ func TestNewScenarioRegexError(t *testing.T) {
 	if err.Value != "[invalid(regex" {
 		t.Errorf("Value = %q, want [invalid(regex", err.Value)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Errorf("Cause = %v, want %v", err.Cause, cause)
 	}
 	if !strings.Contains(err.Suggestion, "regex") {
@@ -212,7 +212,7 @@ func TestNewScenarioBodyFileError(t *testing.T) {
 	if err.Value != "/path/to/body.txt" {
 		t.Errorf("Value = %q, want /path/to/body.txt", err.Value)
 	}
-	if err.Cause != cause {
+	if !errors.Is(err.Cause, cause) {
 		t.Errorf("Cause = %v, want %v", err.Cause, cause)
 	}
 }
@@ -229,7 +229,7 @@ func TestNewScenarioMatchError(t *testing.T) {
 		if err.Message != "failed to match request body" {
 			t.Errorf("Message = %q, want 'failed to match request body'", err.Message)
 		}
-		if err.Cause != cause {
+		if !errors.Is(err.Cause, cause) {
 			t.Errorf("Cause = %v, want %v", err.Cause, cause)
 		}
 	})

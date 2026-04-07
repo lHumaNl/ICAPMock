@@ -1,4 +1,5 @@
-// Package handler_test provides tests for the OPTIONS handler.
+// Copyright 2026 ICAP Mock
+
 package handler_test
 
 import (
@@ -53,11 +54,11 @@ func TestOptionsHandlerHeaders(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		config         handler.OptionsHandlerConfig
 		expectedMethod string
+		expectedSID    string
+		config         handler.OptionsHandlerConfig
 		expectedTTL    int
 		expectedMax    int
-		expectedSID    string
 	}{
 		{
 			name: "standard configuration",
@@ -205,7 +206,7 @@ func TestOptionsHandlerHeaders(t *testing.T) {
 func TestOptionsHandlerContextCancellation(t *testing.T) {
 	t.Parallel()
 
-	t.Run("handles cancelled context", func(t *testing.T) {
+	t.Run("handles canceled context", func(t *testing.T) {
 		h := handler.NewOptionsHandler(handler.OptionsHandlerConfig{
 			ServiceTag: `"test"`,
 			Methods:    []string{"REQMOD"},
@@ -217,7 +218,7 @@ func TestOptionsHandlerContextCancellation(t *testing.T) {
 		req, _ := icap.NewRequest(icap.MethodOPTIONS, "icap://localhost/")
 		resp, err := h.Handle(ctx, req)
 
-		// OPTIONS handler should still return a response even with cancelled context
+		// OPTIONS handler should still return a response even with canceled context
 		// since it's a simple operation
 		if err != nil {
 			t.Errorf("Handle() returned error: %v", err)
@@ -274,8 +275,8 @@ func TestOptionsHandlerServiceID(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		config      handler.OptionsHandlerConfig
 		expectedSID string
+		config      handler.OptionsHandlerConfig
 	}{
 		{
 			name: "custom Service-ID",

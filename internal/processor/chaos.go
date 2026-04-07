@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package processor
 
 import (
@@ -54,11 +56,11 @@ type ChaosConfig struct {
 //
 // ChaosProcessor is thread-safe and uses a thread-safe random number generator.
 type ChaosProcessor struct {
-	config   ChaosConfig
-	random   *rand.Rand
-	mu       sync.Mutex
 	delegate Processor
+	random   *rand.Rand
 	logger   *logger.Logger
+	config   ChaosConfig
+	mu       sync.Mutex
 }
 
 // NewChaosProcessor creates a new ChaosProcessor with the given configuration.
@@ -73,7 +75,7 @@ func NewChaosProcessor(config ChaosConfig, delegate Processor, log *logger.Logge
 	config = clampChaosConfig(config)
 	return &ChaosProcessor{
 		config:   config,
-		random:   rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
+		random:   rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())), //nolint:gosec // crypto not needed here
 		delegate: delegate,
 		logger:   log,
 	}
@@ -178,7 +180,7 @@ func (p *ChaosProcessor) Process(ctx context.Context, req *icap.Request) (*icap.
 				"timeout_rate", config.TimeoutRate,
 			)
 		}
-		// Wait for context to timeout or be cancelled
+		// Wait for context to timeout or be canceled
 		<-ctx.Done()
 		return nil, context.DeadlineExceeded
 	}
@@ -288,5 +290,5 @@ func (p *ChaosProcessor) SetLogger(log *logger.Logger) {
 func (p *ChaosProcessor) Seed(seed uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.random = rand.New(rand.NewPCG(seed, seed))
+	p.random = rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // crypto not needed here
 }

@@ -1,6 +1,5 @@
-// Package main provides integration tests for pprof endpoints.
-// These tests verify that pprof profiling endpoints work correctly
-// and are properly secured (disabled by default).
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -139,8 +138,8 @@ func TestPprofEndpointsEnabledWhenConfigEnabled(t *testing.T) {
 	tests := []struct {
 		name         string
 		endpoint     string
-		expectStatus int
 		contains     string
+		expectStatus int
 	}{
 		{
 			name:         "pprof index",
@@ -317,7 +316,7 @@ func TestPprofConfigCanBeEnabledViaCLI(t *testing.T) {
 	}
 }
 
-// Flag is a minimal interface for testing
+// Flag is a minimal interface for testing.
 type Flag struct {
 	Name  string
 	Value string
@@ -439,7 +438,7 @@ func TestPprofMultipleEndpointsConcurrent(t *testing.T) {
 	}
 }
 
-// Helper function
+// Helper function.
 func min(a, b int) int {
 	if a < b {
 		return a

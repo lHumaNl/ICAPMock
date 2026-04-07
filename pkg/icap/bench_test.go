@@ -1,4 +1,5 @@
-// Package icap_test provides benchmarks for ICAP request parsing and response writing.
+// Copyright 2026 ICAP Mock
+
 package icap_test
 
 import (
@@ -96,7 +97,7 @@ func BenchmarkParseRequest_Large(b *testing.B) {
 }
 
 // BenchmarkNewResponse benchmarks creating a new ICAP response, setting common
-// headers, and serialising it to a bytes.Buffer.
+// headers, and serializing it to a bytes.Buffer.
 func BenchmarkNewResponse(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()

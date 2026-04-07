@@ -1,7 +1,10 @@
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -32,7 +35,7 @@ func TestNewLimiter_SlidingWindow(t *testing.T) {
 
 func TestNewLimiter_UnsupportedAlgorithm(t *testing.T) {
 	_, err := NewLimiter("invalid_algorithm", 100, 10)
-	if err != ErrUnsupportedAlgorithm {
+	if !errors.Is(err, ErrUnsupportedAlgorithm) {
 		t.Errorf("expected ErrUnsupportedAlgorithm, got: %v", err)
 	}
 }
@@ -109,7 +112,7 @@ func TestNewLimiterWithConfig_UnsupportedAlgorithm(t *testing.T) {
 	}
 
 	_, err := NewLimiterWithConfig("invalid_algorithm", cfg)
-	if err != ErrUnsupportedAlgorithm {
+	if !errors.Is(err, ErrUnsupportedAlgorithm) {
 		t.Errorf("expected ErrUnsupportedAlgorithm, got: %v", err)
 	}
 }
@@ -169,7 +172,7 @@ func TestLimiterInterface_SlidingWindow(t *testing.T) {
 func TestReservationInterface(t *testing.T) {
 	limiter := NewTokenBucketLimiter(10, 5)
 
-	var res Reservation = limiter.Reserve()
+	var res = limiter.Reserve()
 
 	// Test OK
 	if !res.OK() {

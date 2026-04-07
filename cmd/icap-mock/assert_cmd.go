@@ -1,4 +1,5 @@
-// Package main provides the entry point for the ICAP Mock Server.
+// Copyright 2026 ICAP Mock
+
 package main
 
 import (
@@ -15,12 +16,11 @@ import (
 
 // AssertCommand handles the assert subcommand for CI/CD integration.
 type AssertCommand struct {
-	fs *flag.FlagSet
-
+	fs           *flag.FlagSet
 	metricsURL   string
+	scenarioHit  string
 	minRequests  int64
 	maxErrorRate float64
-	scenarioHit  string
 	maxP95Ms     float64
 	timeout      time.Duration
 }
@@ -55,7 +55,7 @@ func (c *AssertCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetching metrics from %s: %w", c.metricsURL, err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("metrics endpoint returned %d", resp.StatusCode)
@@ -77,7 +77,7 @@ func (c *AssertCommand) Run(ctx context.Context) error {
 		if total < float64(c.minRequests) {
 			failures = append(failures, fmt.Sprintf("min-requests: got %.0f, want >= %d", total, c.minRequests))
 		} else {
-			fmt.Fprintf(os.Stdout, "PASS: requests total = %.0f (>= %d)\n", total, c.minRequests)
+			fmt.Fprintf(os.Stdout, "PASS: requests total = %.0f (>= %d)\n", total, c.minRequests) //nolint:errcheck
 		}
 	}
 
@@ -90,10 +90,10 @@ func (c *AssertCommand) Run(ctx context.Context) error {
 			if rate > c.maxErrorRate {
 				failures = append(failures, fmt.Sprintf("max-error-rate: got %.4f, want <= %.4f", rate, c.maxErrorRate))
 			} else {
-				fmt.Fprintf(os.Stdout, "PASS: error rate = %.4f (<= %.4f)\n", rate, c.maxErrorRate)
+				fmt.Fprintf(os.Stdout, "PASS: error rate = %.4f (<= %.4f)\n", rate, c.maxErrorRate) //nolint:errcheck
 			}
 		} else {
-			fmt.Fprintf(os.Stdout, "PASS: error rate = 0 (no requests)\n")
+			fmt.Fprintf(os.Stdout, "PASS: error rate = 0 (no requests)\n") //nolint:errcheck
 		}
 	}
 
@@ -103,7 +103,7 @@ func (c *AssertCommand) Run(ctx context.Context) error {
 		if hits == 0 {
 			failures = append(failures, fmt.Sprintf("scenario-hit: scenario %q was never matched", c.scenarioHit))
 		} else {
-			fmt.Fprintf(os.Stdout, "PASS: scenario %q matched %.0f times\n", c.scenarioHit, hits)
+			fmt.Fprintf(os.Stdout, "PASS: scenario %q matched %.0f times\n", c.scenarioHit, hits) //nolint:errcheck
 		}
 	}
 
@@ -115,29 +115,29 @@ func (c *AssertCommand) Run(ctx context.Context) error {
 			if p95Ms > c.maxP95Ms {
 				failures = append(failures, fmt.Sprintf("max-p95-ms: got %.1fms, want <= %.1fms", p95Ms, c.maxP95Ms))
 			} else {
-				fmt.Fprintf(os.Stdout, "PASS: P95 latency = %.1fms (<= %.1fms)\n", p95Ms, c.maxP95Ms)
+				fmt.Fprintf(os.Stdout, "PASS: P95 latency = %.1fms (<= %.1fms)\n", p95Ms, c.maxP95Ms) //nolint:errcheck
 			}
 		} else {
-			fmt.Fprintf(os.Stdout, "SKIP: P95 latency metric not found\n")
+			fmt.Fprintf(os.Stdout, "SKIP: P95 latency metric not found\n") //nolint:errcheck
 		}
 	}
 
 	if len(failures) > 0 {
-		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(os.Stdout) //nolint:errcheck
 		for _, f := range failures {
-			fmt.Fprintf(os.Stdout, "FAIL: %s\n", f)
+			fmt.Fprintf(os.Stdout, "FAIL: %s\n", f) //nolint:errcheck
 		}
 		return fmt.Errorf("%d assertion(s) failed", len(failures))
 	}
 
-	fmt.Fprintln(os.Stdout, "\nAll assertions passed.")
+	fmt.Fprintln(os.Stdout, "\nAll assertions passed.") //nolint:errcheck
 	return nil
 }
 
 // prometheusMetric represents a single metric line from Prometheus text format.
 type prometheusMetric struct {
-	name   string
 	labels map[string]string
+	name   string
 	value  float64
 }
 

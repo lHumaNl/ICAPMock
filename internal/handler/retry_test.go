@@ -1,4 +1,5 @@
-// Package handler_test provides tests for the ICAP handler retry middleware.
+// Copyright 2026 ICAP Mock
+
 package handler_test
 
 import (
@@ -458,8 +459,8 @@ func TestIsRetryable_NetworkTimeout(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{
@@ -509,8 +510,8 @@ func TestIsRetryable_SyscallErrors(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{
@@ -565,8 +566,8 @@ func TestIsRetryable_ContextErrors(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{
@@ -601,8 +602,8 @@ func TestIsRetryable_StringErrors(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{
@@ -897,9 +898,9 @@ func TestRetryMiddleware_ContextCancellation(t *testing.T) {
 		t.Errorf("Handle() error = %v, want %v", err, context.Canceled)
 	}
 
-	// Should only make 1 call before being cancelled
+	// Should only make 1 call before being canceled
 	if atomic.LoadInt32(&callCount) != 1 {
-		t.Errorf("callCount = %d, want 1 (cancelled after first attempt)", callCount)
+		t.Errorf("callCount = %d, want 1 (canceled after first attempt)", callCount)
 	}
 }
 

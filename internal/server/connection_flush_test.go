@@ -1,9 +1,10 @@
-// Package server provides tests for connection Close() flush behavior.
-// These tests verify that Close() flushes data before closing.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -42,7 +43,7 @@ func TestCloseFlushesWriter(t *testing.T) {
 			if n > 0 {
 				received.Write(buf[:n])
 			}
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return
 			}
 			if err != nil {

@@ -1,4 +1,5 @@
-// Package server provides ICAP server implementation.
+// Copyright 2026 ICAP Mock
+
 package server
 
 import (
@@ -8,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/icap-mock/icap-mock/internal/config"
 )
 
 // ============================================================================
@@ -306,7 +308,7 @@ func TestShutdownTimeout_NoConnections(t *testing.T) {
 	assert.False(t, srv.IsRunning())
 }
 
-// TestShutdownTimeout_ContextCancelled tests shutdown with cancelled context.
+// TestShutdownTimeout_ContextCancelled tests shutdown with canceled context.
 func TestShutdownTimeout_ContextCancelled(t *testing.T) {
 	cfg := &config.ServerConfig{
 		Host:            "127.0.0.1",
@@ -342,13 +344,13 @@ func TestShutdownTimeout_ContextCancelled(t *testing.T) {
 	stopCtx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	// Stop should complete even with cancelled context
+	// Stop should complete even with canceled context
 	start := time.Now()
 	err = srv.Stop(stopCtx)
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
-	assert.Less(t, elapsed, 2*time.Second, "Stop should complete quickly with cancelled context")
+	assert.Less(t, elapsed, 2*time.Second, "Stop should complete quickly with canceled context")
 	assert.False(t, srv.IsRunning())
 }
 

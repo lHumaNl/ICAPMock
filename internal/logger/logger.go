@@ -1,67 +1,5 @@
-// Package logger provides structured logging for the ICAP Mock Server.
-//
-// This package implements a flexible logging system using Go's standard library
-// slog package (Go 1.21+). It supports multiple output formats (JSON and text),
-// configurable log levels, file output with rotation, and specialized helpers
-// for ICAP request and error logging.
-//
-// # Log Levels
-//
-// The logger supports four log levels, in order of severity:
-//   - DEBUG: Detailed request processing, parsing information
-//   - INFO: Request handling, server start/stop events
-//   - WARN: Non-critical errors, fallback scenarios
-//   - ERROR: Processing errors, connection issues
-//
-// # Output Formats
-//
-// Two output formats are supported:
-//   - JSON: Machine-readable format suitable for log aggregation systems
-//   - Text: Human-readable format suitable for development
-//
-// # File Rotation
-//
-// When outputting to a file, logs are automatically rotated using lumberjack.
-// Rotation is configured via LoggingConfig fields:
-//   - MaxSize: Maximum file size in MB before rotation
-//   - MaxBackups: Maximum number of old log files to retain
-//   - MaxAge: Maximum number of days to retain old log files
-//
-// # Usage
-//
-// Basic usage:
-//
-//	cfg := config.LoggingConfig{
-//	    Level:      "info",
-//	    Format:     "json",
-//	    Output:     "stdout",
-//	    MaxSize:    100,
-//	    MaxBackups: 5,
-//	    MaxAge:     30,
-//	}
-//
-//	logger, err := logger.New(cfg)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer logger.Close()
-//
-//	logger.Info("server started", "port", 1344)
-//
-// # ICAP Request Logging
-//
-// Use LogRequest to log ICAP requests with standardized fields:
-//
-//	logger.LogRequest(req, resp, duration, "scenario-name")
-//
-// # Error Logging
-//
-// Use LogError to log errors with additional context:
-//
-//	logger.LogError(err, map[string]interface{}{
-//	    "service": "icap-server",
-//	    "port":    1344,
-//	})
+// Copyright 2026 ICAP Mock
+
 package logger
 
 import (
@@ -88,11 +26,11 @@ var defaultLogger atomic.Value // stores *Logger
 // It provides structured logging with support for JSON and text formats,
 // configurable log levels, and specialized helpers for ICAP request logging.
 type Logger struct {
+	closer io.Closer
 	*slog.Logger
+	levelVar *slog.LevelVar
 	cfg      config.LoggingConfig
 	cfgMu    sync.RWMutex
-	closer   io.Closer
-	levelVar *slog.LevelVar
 }
 
 // Option is a functional option for configuring the logger.
@@ -225,7 +163,7 @@ func Default() *Logger {
 	if v == nil {
 		return nil
 	}
-	return v.(*Logger)
+	return v.(*Logger) //nolint:errcheck
 }
 
 // Close closes the logger and releases any resources.

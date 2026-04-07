@@ -1,14 +1,10 @@
-// Package ratelimit provides tests for key-based sharded rate limiting.
-//
-// These tests ensure the key-based sharded token bucket limiter:
-//   - Works correctly with different key types (global, per-client, per-method)
-//   - Is thread-safe under high concurrency
-//   - Provides O(1) lookup performance
-//   - Maintains rate limits accurately
+// Copyright 2026 ICAP Mock
+
 package ratelimit
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -215,7 +211,7 @@ func TestKeyBasedShardedTokenBucketLimiter_WaitWithCancel(t *testing.T) {
 	if err == nil {
 		t.Fatal("Wait should return error due to context timeout")
 	}
-	if err != context.DeadlineExceeded {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Wait should return DeadlineExceeded, got: %v", err)
 	}
 }

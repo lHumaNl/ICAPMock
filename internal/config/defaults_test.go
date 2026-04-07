@@ -1,5 +1,5 @@
-// Package config_test contains tests for configuration defaults.
-// These tests verify that new default values are correctly set.
+// Copyright 2026 ICAP Mock
+
 package config_test
 
 import (

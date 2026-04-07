@@ -1,4 +1,5 @@
-// Package handler_test provides tests for the RESPMOD handler.
+// Copyright 2026 ICAP Mock
+
 package handler_test
 
 import (
@@ -7,20 +8,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/processor"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // mockProcessorRespmod implements processor.Processor for testing.
 type mockProcessorRespmod struct {
-	name    string
-	resp    *icap.Response
 	err     error
-	called  bool
+	resp    *icap.Response
 	reqRecv *icap.Request
+	name    string
+	called  bool
 }
 
 func (m *mockProcessorRespmod) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
@@ -225,8 +227,8 @@ func TestRespmodHandlerContextCancellation(t *testing.T) {
 		}
 	})
 
-	// P0 FIX: Test that response is not sent when context is cancelled after processing
-	t.Run("does not send response when context cancelled after processing", func(t *testing.T) {
+	// P0 FIX: Test that response is not sent when context is canceled after processing
+	t.Run("does not send response when context canceled after processing", func(t *testing.T) {
 		mockProc := processor.ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 			// Processor takes time and creates response
 			time.Sleep(50 * time.Millisecond)
@@ -250,12 +252,12 @@ func TestRespmodHandlerContextCancellation(t *testing.T) {
 
 		// Should return context error
 		if err == nil {
-			t.Error("Handle() should return error when context is cancelled")
+			t.Error("Handle() should return error when context is canceled")
 		}
 
-		// Response should be nil because context was cancelled after processing
+		// Response should be nil because context was canceled after processing
 		if resp != nil {
-			t.Errorf("Handle() should return nil response when context cancelled, got %+v", resp)
+			t.Errorf("Handle() should return nil response when context canceled, got %+v", resp)
 		}
 	})
 }

@@ -1,3 +1,5 @@
+// Copyright 2026 ICAP Mock
+
 package integration
 
 import (
@@ -8,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 func TestMetricsClient_Success(t *testing.T) {
