@@ -641,7 +641,10 @@ func TestStorageRotation(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Write 12 requests (should cause 2 rotations: 0->1 at request 5, 1->2 at request 10)
+	// Write requests in batches, flushing between rotation boundaries so the
+	// rotation handler processes each signal before the next one arrives.
+	// The rotation handler drains queued signals, so sending them all at once
+	// can collapse multiple rotations into one.
 	for i := 0; i < 12; i++ {
 		req := &icap.Request{
 			Method: icap.MethodREQMOD,
@@ -654,31 +657,32 @@ func TestStorageRotation(t *testing.T) {
 		if err := store.SaveRequest(context.Background(), sr); err != nil {
 			t.Fatalf("SaveRequest() error = %v", err)
 		}
+
+		// After each rotation boundary, flush and give the handler time to rotate.
+		if (i+1)%5 == 0 {
+			if err := store.Flush(context.Background()); err != nil {
+				t.Fatalf("Flush() error = %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 
-	// Flush to ensure all async writes complete
+	// Final flush for remaining requests
 	if err := store.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush() error = %v", err)
 	}
+	time.Sleep(100 * time.Millisecond)
 
-	// Wait for rotation handler to process all pending signals.
-	// Flush only guarantees the channel is drained, but the async rotation
-	// handler may still be creating new batch files.
-	var batchFiles int
-	for attempt := 0; attempt < 20; attempt++ {
-		time.Sleep(50 * time.Millisecond)
-		files, err := os.ReadDir(tmpDir)
-		if err != nil {
-			t.Fatalf("ReadDir() error = %v", err)
-		}
-		batchFiles = 0
-		for _, f := range files {
-			if strings.HasSuffix(f.Name(), ".jsonl") {
-				batchFiles++
-			}
-		}
-		if batchFiles >= 3 {
-			break
+	// Check that multiple batch files were created
+	files, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+
+	batchFiles := 0
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".jsonl") {
+			batchFiles++
 		}
 	}
 
