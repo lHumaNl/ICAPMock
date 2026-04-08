@@ -170,7 +170,7 @@ func TestCircuitBreakerRaceRecordResult(t *testing.T) {
 func TestCircuitBreakerRaceMixedOperations(t *testing.T) {
 	config := DefaultConfig()
 	config.FailureThreshold = 1000
-	config.RollingWindow = 200 * time.Millisecond
+	config.RollingWindow = 10 * time.Second // long window so buckets don't expire during the test
 	logger := slog.Default()
 	metrics := newMockMetricsRecorder()
 

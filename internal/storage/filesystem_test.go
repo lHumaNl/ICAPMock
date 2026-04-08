@@ -660,18 +660,25 @@ func TestStorageRotation(t *testing.T) {
 	if err := store.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush() error = %v", err)
 	}
-	time.Sleep(100 * time.Millisecond) // allow async writer to finish
 
-	// Check that multiple batch files were created
-	files, err := os.ReadDir(tmpDir)
-	if err != nil {
-		t.Fatalf("ReadDir() error = %v", err)
-	}
-
-	batchFiles := 0
-	for _, f := range files {
-		if strings.HasSuffix(f.Name(), ".jsonl") {
-			batchFiles++
+	// Wait for rotation handler to process all pending signals.
+	// Flush only guarantees the channel is drained, but the async rotation
+	// handler may still be creating new batch files.
+	var batchFiles int
+	for attempt := 0; attempt < 20; attempt++ {
+		time.Sleep(50 * time.Millisecond)
+		files, err := os.ReadDir(tmpDir)
+		if err != nil {
+			t.Fatalf("ReadDir() error = %v", err)
+		}
+		batchFiles = 0
+		for _, f := range files {
+			if strings.HasSuffix(f.Name(), ".jsonl") {
+				batchFiles++
+			}
+		}
+		if batchFiles >= 3 {
+			break
 		}
 	}
 
