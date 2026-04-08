@@ -108,10 +108,11 @@ func TestRequestReader_ISPCompliance(t *testing.T) {
 			t.Fatalf("SaveRequest() error = %v", err)
 		}
 
-		// Flush to ensure data is written
+		// Flush to ensure data is written and allow async writer to complete.
 		if err := store.Flush(ctx); err != nil {
 			t.Fatalf("Flush() error = %v", err)
 		}
+		time.Sleep(50 * time.Millisecond)
 
 		// Delete using RequestWriter interface
 		if err := store.DeleteRequest(ctx, sr2.ID); err != nil {

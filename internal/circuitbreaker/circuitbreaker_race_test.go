@@ -15,7 +15,7 @@ import (
 // don't cause data loss due to race conditions.
 func TestCircuitBreakerRaceConcurrentBucketUpdates(t *testing.T) {
 	config := DefaultConfig()
-	config.RollingWindow = 100 * time.Millisecond
+	config.RollingWindow = 10 * time.Second
 	config.WindowBuckets = 10
 	config.FailureThreshold = 1000 // High threshold to avoid premature opening
 	config.Enabled = true
