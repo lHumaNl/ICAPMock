@@ -171,6 +171,10 @@ linters:
           - goconst
           - gocyclo
           - gosec
+          - govet
+          - noctx
+          - nilnil
+          - staticcheck
         path: _test\.go
       - linters:
           - lll

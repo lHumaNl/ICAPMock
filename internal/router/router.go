@@ -148,7 +148,7 @@ func (r *Router) Routes() []Route {
 	var routes []Route
 
 	r.routes.Range(func(key, value interface{}) bool {
-		path := key.(string)               //nolint:errcheck
+		path := key.(string)         //nolint:errcheck
 		h := value.(handler.Handler) //nolint:errcheck
 		routes = append(routes, Route{
 			Path:    path,

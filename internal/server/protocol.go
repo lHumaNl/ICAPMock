@@ -409,4 +409,3 @@ func isValidICAPMethod(method string) bool {
 func isValidICAPVersion(version string) bool {
 	return version == "ICAP/1.0"
 }
-

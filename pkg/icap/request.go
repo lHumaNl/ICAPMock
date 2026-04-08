@@ -556,7 +556,6 @@ func (r *Request) parseHTTPRequestStreaming(reader *bufio.Reader) error {
 	return nil
 }
 
-
 // parseHTTPResponseStreaming parses the embedded HTTP response directly from the stream.
 // This method provides TRUE O(1) MEMORY USAGE by parsing headers from the stream
 // and passing the remaining chunked body directly to BodyReader without buffering.

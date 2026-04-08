@@ -121,4 +121,3 @@ func (m *HeaderModel) renderStatus() string {
 func (m *HeaderModel) GetHeight() int {
 	return 1
 }
-

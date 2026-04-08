@@ -63,21 +63,21 @@ var (
 //
 // P0 FIX: Rotation is now non-blocking - separate goroutine handles rotation.
 type FileStorage struct {
-	ctx              context.Context
-	currentFile      *os.File
-	diskMonitor      *DiskMonitor
-	rotationSignal   chan struct{}
-	requestCh        chan *StoredRequest
-	logger           *slog.Logger
-	cancel           context.CancelFunc
-	metrics          *prometheusmetrics.Collector
-	config           config.StorageConfig
-	wg               sync.WaitGroup
-	fileCounter      int64
-	requestCount     int64
-	mu               sync.RWMutex
-	rotationMu       sync.Mutex
-	closed           atomic.Bool
+	ctx            context.Context
+	currentFile    *os.File
+	diskMonitor    *DiskMonitor
+	rotationSignal chan struct{}
+	requestCh      chan *StoredRequest
+	logger         *slog.Logger
+	cancel         context.CancelFunc
+	metrics        *prometheusmetrics.Collector
+	config         config.StorageConfig
+	wg             sync.WaitGroup
+	fileCounter    int64
+	requestCount   int64
+	mu             sync.RWMutex
+	rotationMu     sync.Mutex
+	closed         atomic.Bool
 }
 
 // NewFileStorage creates a new file-based storage instance.
@@ -483,8 +483,7 @@ func (fs *FileStorage) ListRequests(_ context.Context, filter RequestFilter) ([]
 	}
 
 	// Build glob patterns for both old and new formats
-	var patterns []string
-	patterns = []string{
+	var patterns []string = []string{
 		filepath.Join(fs.config.RequestsDir, "*.json"),
 		filepath.Join(fs.config.RequestsDir, "*.jsonl"),
 	}

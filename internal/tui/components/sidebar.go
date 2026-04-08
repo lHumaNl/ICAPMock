@@ -12,10 +12,10 @@ import (
 
 // SidebarModel represents a sidebar menu component.
 type SidebarModel struct {
-	list          list.Model
-	width         int
-	height        int
-	mu            sync.RWMutex
+	list   list.Model
+	width  int
+	height int
+	mu     sync.RWMutex
 }
 
 // NewSidebarModel creates a new sidebar menu.

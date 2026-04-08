@@ -202,4 +202,3 @@ func (m *PerClientMiddleware) extractClientIP(req *icap.Request) string {
 
 	return clientIPUnknown
 }
-

@@ -803,7 +803,6 @@ type RateLimitConfig struct {
 	Enabled           bool    `yaml:"enabled" json:"enabled"`
 }
 
-
 // PerMethodRateLimitConfig contains per-method rate limiting configuration.
 // Per-method rate limiting allows different rate limits for REQMOD, RESPMOD, and OPTIONS.
 type PerMethodRateLimitConfig struct {

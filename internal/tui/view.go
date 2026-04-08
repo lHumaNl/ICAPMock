@@ -299,4 +299,3 @@ func (m *Model) renderHelpOverlay(baseView string) string {
 
 	return positioned
 }
-
