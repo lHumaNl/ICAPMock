@@ -96,9 +96,9 @@ func TestRequestReader_ISPCompliance(t *testing.T) {
 	})
 
 	t.Run("DeleteRequest", func(t *testing.T) {
-		// Create another request to delete
+		// Create another request to delete (use distinct timestamp to avoid ID collision).
 		sr2 := &StoredRequest{
-			ID:             GenerateRequestID(time.Now()),
+			ID:             GenerateRequestID(time.Now().Add(time.Second)),
 			Timestamp:      time.Now(),
 			Method:         "RESPMOD",
 			URI:            "icap://localhost/respmod",

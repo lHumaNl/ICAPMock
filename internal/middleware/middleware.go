@@ -130,8 +130,9 @@ type StorageMiddleware struct {
 	circuitBreaker *circuitbreaker.CircuitBreaker
 	metrics        *metrics.Collector
 	wg             sync.WaitGroup
-	maxQueueSize   int
 	rejectedCount  int64
+	maxQueueSize   int
+	closeOnce      sync.Once
 	stopped        atomic.Bool
 }
 
@@ -187,39 +188,58 @@ func (m *StorageMiddleware) Wrap(next handler.Handler) handler.Handler {
 		processingTime := time.Since(start)
 		sr := storage.FromICAPRequest(req, status, processingTime)
 
-		if m.stopped.Load() {
+		m.trySendJob(ctx, req, sr)
+
+		return resp, err
+	}), next.Method())
+}
+
+// trySendJob attempts to enqueue a storage job, safely handling the case where
+// the jobs channel may be closed concurrently by Shutdown.
+func (m *StorageMiddleware) trySendJob(ctx context.Context, req *icap.Request, sr *storage.StoredRequest) {
+	if m.stopped.Load() {
+		m.logger.Warn("storage middleware stopped, dropping request",
+			"request_id", util.RequestIDFromContext(ctx),
+			"method", req.Method,
+			"uri", req.URI,
+		)
+		return
+	}
+
+	// Recover from send-on-closed-channel panic that can occur if Shutdown
+	// closes the channel between the stopped check above and the send below.
+	defer func() {
+		if r := recover(); r != nil {
 			m.logger.Warn("storage middleware stopped, dropping request",
 				"request_id", util.RequestIDFromContext(ctx),
 				"method", req.Method,
 				"uri", req.URI,
 			)
-		} else {
-			select {
-			case m.jobs <- &storageJob{ctx: ctx, req: sr}:
-				if m.metrics != nil {
-					m.metrics.SetStorageQueueLength(len(m.jobs))
-				}
-			default:
-				rejected := atomic.AddInt64(&m.rejectedCount, 1)
-				currentQueueSize := len(m.jobs)
-
-				m.logger.Warn("storage queue full, dropping request",
-					"request_id", util.RequestIDFromContext(ctx),
-					"method", req.Method,
-					"uri", req.URI,
-					"rejected_count", rejected,
-					"queue_size", currentQueueSize,
-					"max_queue_size", m.maxQueueSize,
-				)
-
-				if m.metrics != nil {
-					m.metrics.RecordStorageBackpressureRejected(currentQueueSize, m.maxQueueSize)
-				}
-			}
 		}
+	}()
 
-		return resp, err
-	}), next.Method())
+	select {
+	case m.jobs <- &storageJob{ctx: ctx, req: sr}:
+		if m.metrics != nil {
+			m.metrics.SetStorageQueueLength(len(m.jobs))
+		}
+	default:
+		rejected := atomic.AddInt64(&m.rejectedCount, 1)
+		currentQueueSize := len(m.jobs)
+
+		m.logger.Warn("storage queue full, dropping request",
+			"request_id", util.RequestIDFromContext(ctx),
+			"method", req.Method,
+			"uri", req.URI,
+			"rejected_count", rejected,
+			"queue_size", currentQueueSize,
+			"max_queue_size", m.maxQueueSize,
+		)
+
+		if m.metrics != nil {
+			m.metrics.RecordStorageBackpressureRejected(currentQueueSize, m.maxQueueSize)
+		}
+	}
 }
 
 // Shutdown gracefully stops all workers and waits for them to complete.
@@ -228,7 +248,7 @@ func (m *StorageMiddleware) Shutdown(ctx context.Context) error {
 	m.stopped.Store(true)
 	// Cancel worker context and close the jobs channel so workers drain and exit.
 	m.cancel()
-	close(m.jobs)
+	m.closeOnce.Do(func() { close(m.jobs) })
 
 	done := make(chan struct{})
 	go func() {

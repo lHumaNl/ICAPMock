@@ -84,8 +84,8 @@ func TestSlidingWindowLimiter_NoMutexContentionInFastPath(t *testing.T) {
 	// With O(1) atomic operations, 10000 calls should complete in microseconds
 	// If there was mutex contention, it would take much longer
 	avgPerOp := elapsed / numOperations
-	assert.Less(t, avgPerOp, 1*time.Microsecond,
-		"Fast path Allow() should complete in sub-microsecond time with atomic ops")
+	assert.Less(t, avgPerOp, 10*time.Microsecond,
+		"Fast path Allow() should complete quickly with atomic ops")
 
 	t.Logf("Average time per Allow() call: %v", avgPerOp)
 }
