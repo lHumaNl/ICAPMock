@@ -179,7 +179,7 @@ func (c *RouteCache) Put(method, path string, h handler.Handler) {
 	if node, exists := c.cache[key]; exists {
 		node.entry.Handler = h
 		node.entry.Timestamp = now
-		node.entry.AccessCount++
+		atomic.AddInt64(&node.entry.AccessCount, 1)
 		c.moveToFront(node)
 		return
 	}
