@@ -210,8 +210,8 @@ jobs:
           # Wait for the server to start, then check health
           sleep 5
           docker logs icap-ci
-          docker exec icap-ci wget --no-verbose --tries=3 --retry-connrefused \
-            --spider http://localhost:8080/health || {
+          docker exec icap-ci wget -qO- --tries=3 --retry-connrefused \
+            http://localhost:8080/health || {
             echo "--- Container logs after failure ---"
             docker logs icap-ci
             docker stop icap-ci && docker rm icap-ci
