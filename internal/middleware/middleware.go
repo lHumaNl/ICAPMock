@@ -130,10 +130,10 @@ type StorageMiddleware struct {
 	circuitBreaker *circuitbreaker.CircuitBreaker
 	metrics        *metrics.Collector
 	wg             sync.WaitGroup
+	jobsMu         sync.Mutex // protects send-on-jobs and close(jobs) from racing
 	rejectedCount  int64
 	maxQueueSize   int
-	closeOnce      sync.Once
-	stopped        atomic.Bool
+	stopped        bool // protected by jobsMu
 }
 
 // StorageMiddlewareWithPool returns middleware that saves requests to storage
@@ -194,10 +194,13 @@ func (m *StorageMiddleware) Wrap(next handler.Handler) handler.Handler {
 	}), next.Method())
 }
 
-// trySendJob attempts to enqueue a storage job, safely handling the case where
-// the jobs channel may be closed concurrently by Shutdown.
+// trySendJob attempts to enqueue a storage job.
+// jobsMu serializes sends and the channel close in Shutdown, eliminating the
+// send-on-closed-channel race.
 func (m *StorageMiddleware) trySendJob(ctx context.Context, req *icap.Request, sr *storage.StoredRequest) {
-	if m.stopped.Load() {
+	m.jobsMu.Lock()
+	if m.stopped {
+		m.jobsMu.Unlock()
 		m.logger.Warn("storage middleware stopped, dropping request",
 			"request_id", util.RequestIDFromContext(ctx),
 			"method", req.Method,
@@ -206,24 +209,14 @@ func (m *StorageMiddleware) trySendJob(ctx context.Context, req *icap.Request, s
 		return
 	}
 
-	// Recover from send-on-closed-channel panic that can occur if Shutdown
-	// closes the channel between the stopped check above and the send below.
-	defer func() {
-		if r := recover(); r != nil {
-			m.logger.Warn("storage middleware stopped, dropping request",
-				"request_id", util.RequestIDFromContext(ctx),
-				"method", req.Method,
-				"uri", req.URI,
-			)
-		}
-	}()
-
 	select {
 	case m.jobs <- &storageJob{ctx: ctx, req: sr}:
+		m.jobsMu.Unlock()
 		if m.metrics != nil {
 			m.metrics.SetStorageQueueLength(len(m.jobs))
 		}
 	default:
+		m.jobsMu.Unlock()
 		rejected := atomic.AddInt64(&m.rejectedCount, 1)
 		currentQueueSize := len(m.jobs)
 
@@ -244,11 +237,13 @@ func (m *StorageMiddleware) trySendJob(ctx context.Context, req *icap.Request, s
 
 // Shutdown gracefully stops all workers and waits for them to complete.
 func (m *StorageMiddleware) Shutdown(ctx context.Context) error {
-	// Mark as stopped so no new sends to the jobs channel occur.
-	m.stopped.Store(true)
-	// Cancel worker context and close the jobs channel so workers drain and exit.
+	// Mark as stopped and close the jobs channel under the same lock that
+	// protects sends, so no goroutine can race a send against close.
+	m.jobsMu.Lock()
+	m.stopped = true
+	close(m.jobs)
+	m.jobsMu.Unlock()
 	m.cancel()
-	m.closeOnce.Do(func() { close(m.jobs) })
 
 	done := make(chan struct{})
 	go func() {

@@ -660,6 +660,7 @@ func TestStorageRotation(t *testing.T) {
 	if err := store.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush() error = %v", err)
 	}
+	time.Sleep(100 * time.Millisecond) // allow async writer to finish
 
 	// Check that multiple batch files were created
 	files, err := os.ReadDir(tmpDir)
