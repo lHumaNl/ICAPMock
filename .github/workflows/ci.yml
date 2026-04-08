@@ -207,9 +207,15 @@ jobs:
           docker run -d --name icap-ci \
             -p 1344:1344 -p 8080:8080 -p 9090:9090 \
             icap-mock:ci
-          # The image ships wget; wait briefly for the server to start
+          # Wait for the server to start, then check health
           sleep 5
+          docker logs icap-ci
           docker exec icap-ci wget --no-verbose --tries=3 --retry-connrefused \
-            --spider http://localhost:8080/health
+            --spider http://localhost:8080/health || {
+            echo "--- Container logs after failure ---"
+            docker logs icap-ci
+            docker stop icap-ci && docker rm icap-ci
+            exit 1
+          }
           docker stop icap-ci
           docker rm icap-ci
