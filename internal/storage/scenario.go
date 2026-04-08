@@ -263,7 +263,7 @@ func (r *scenarioRegistry) Load(path string) error {
 
 // detectV2Format checks if the YAML data uses v2 format (scenarios is a mapping).
 // Returns true for v2, false for v1, and the ordered scenario names for v2 files.
-func detectV2Format(data []byte) (bool, []string, error) {
+func detectV2Format(data []byte) (isV2 bool, names []string, err error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return false, nil, err
@@ -365,17 +365,18 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error {
 
 	// Compile header patterns with re: prefix
 	for key, value := range s.Match.Headers {
-		if strings.HasPrefix(value, "re:") {
-			pattern := strings.TrimPrefix(value, "re:")
-			re, err := regexp.Compile(pattern)
-			if err != nil {
-				return NewScenarioRegexError("", s.Name, "match.headers."+key, value, err)
-			}
-			if s.compiledHeaders == nil {
-				s.compiledHeaders = make(map[string]*regexp.Regexp)
-			}
-			s.compiledHeaders[key] = re
+		if !strings.HasPrefix(value, "re:") {
+			continue
 		}
+		pattern := strings.TrimPrefix(value, "re:")
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return NewScenarioRegexError("", s.Name, "match.headers."+key, value, err)
+		}
+		if s.compiledHeaders == nil {
+			s.compiledHeaders = make(map[string]*regexp.Regexp)
+		}
+		s.compiledHeaders[key] = re
 	}
 
 	// Validate and compile CIDR ranges

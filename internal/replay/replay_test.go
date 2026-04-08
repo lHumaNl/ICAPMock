@@ -140,7 +140,7 @@ func TestReplayerFilter(t *testing.T) {
 	for _, req := range requests {
 		data, _ := json.Marshal(req)
 		path := filepath.Join(tmpDir, req.ID+".json")
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -302,7 +302,7 @@ func TestLoadRequestFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		path := filepath.Join(tmpDir, req.ID+".json")
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -652,7 +652,7 @@ func createTestRequests(t *testing.T, dir string, count int) {
 		}
 
 		path := filepath.Join(dir, req.ID+".json")
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -37,7 +37,7 @@ type TLSCertificateMonitor struct {
 //   - metrics: Metrics collector for updating certificate expiry metrics.
 //
 // Returns the configured monitor or nil if TLS is not enabled.
-func NewTLSCertificateMonitor(cfg *config.TLSConfig, logger *slog.Logger, metrics *metrics.Collector) *TLSCertificateMonitor {
+func NewTLSCertificateMonitor(cfg *config.TLSConfig, logger *slog.Logger, mc *metrics.Collector) *TLSCertificateMonitor {
 	if cfg == nil || !cfg.Enabled || cfg.CertFile == "" {
 		return nil
 	}
@@ -45,7 +45,7 @@ func NewTLSCertificateMonitor(cfg *config.TLSConfig, logger *slog.Logger, metric
 	return &TLSCertificateMonitor{
 		config:        cfg,
 		logger:        logger,
-		metrics:       metrics,
+		metrics:       mc,
 		stopChan:      make(chan struct{}),
 		checkInterval: cfg.CertCheckInterval,
 		warningDays:   cfg.ExpiryWarningDays,
@@ -120,19 +120,20 @@ func (m *TLSCertificateMonitor) checkCertificate() {
 
 	// Log warnings based on expiry thresholds
 	criticalDays := 7
-	if days < float64(criticalDays) {
+	switch {
+	case days < float64(criticalDays):
 		m.logger.Error("TLS certificate expiring soon",
 			"cert_file", m.certFile,
 			"days_to_expiry", days,
 			"critical_threshold", criticalDays,
 		)
-	} else if days < float64(m.warningDays) {
+	case days < float64(m.warningDays):
 		m.logger.Warn("TLS certificate approaching expiry",
 			"cert_file", m.certFile,
 			"days_to_expiry", days,
 			"warning_threshold", m.warningDays,
 		)
-	} else {
+	default:
 		m.logger.Debug("TLS certificate check",
 			"cert_file", m.certFile,
 			"days_to_expiry", days,

@@ -43,14 +43,14 @@ func NewPerMethodMiddleware(
 	perMethodLimiter *KeyBasedShardedTokenBucketLimiter,
 	perClientLimiter *PerClientRateLimiter,
 	globalLimiter Limiter,
-	metrics *metrics.Collector,
+	mc *metrics.Collector,
 	config *PerMethodRateLimitConfig,
 ) *PerMethodMiddleware {
 	return &PerMethodMiddleware{
 		perMethodLimiter: perMethodLimiter,
 		perClientLimiter: perClientLimiter,
 		globalLimiter:    globalLimiter,
-		metrics:          metrics,
+		metrics:          mc,
 		config:           config,
 	}
 }

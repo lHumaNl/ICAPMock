@@ -22,7 +22,7 @@ logging:
   level: "info"
 `
 		yamlFile := filepath.Join(tempDir, "config.yaml")
-		err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+		err := os.WriteFile(yamlFile, []byte(yamlContent), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create test YAML file: %v", err)
 		}
@@ -48,7 +48,7 @@ logging:
   }
 }`
 		jsonFile := filepath.Join(tempDir, "config.json")
-		err := os.WriteFile(jsonFile, []byte(jsonContent), 0644)
+		err := os.WriteFile(jsonFile, []byte(jsonContent), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create test JSON file: %v", err)
 		}
@@ -68,7 +68,7 @@ logging:
   host: "0.0.0.0"
 `
 		ymlFile := filepath.Join(tempDir, "config.yml")
-		err := os.WriteFile(ymlFile, []byte(yamlContent), 0644)
+		err := os.WriteFile(ymlFile, []byte(yamlContent), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create test YML file: %v", err)
 		}
@@ -112,7 +112,7 @@ logging:
 	t.Run("returns error for invalid file extension", func(t *testing.T) {
 		tempDir := t.TempDir()
 		txtFile := filepath.Join(tempDir, "config.txt")
-		err := os.WriteFile(txtFile, []byte("some content"), 0644)
+		err := os.WriteFile(txtFile, []byte("some content"), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
@@ -131,7 +131,7 @@ logging:
 	t.Run("returns error for empty configuration file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		emptyFile := filepath.Join(tempDir, "empty.yaml")
-		err := os.WriteFile(emptyFile, []byte(""), 0644)
+		err := os.WriteFile(emptyFile, []byte(""), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create empty test file: %v", err)
 		}
@@ -150,7 +150,7 @@ logging:
 	t.Run("returns error for whitespace-only file", func(t *testing.T) {
 		tempDir := t.TempDir()
 		whitespaceFile := filepath.Join(tempDir, "whitespace.yaml")
-		err := os.WriteFile(whitespaceFile, []byte("   \n\t\n   "), 0644)
+		err := os.WriteFile(whitespaceFile, []byte("   \n\t\n   "), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create whitespace test file: %v", err)
 		}
@@ -175,7 +175,7 @@ logging:
 			largeContent[i] = 'a'
 		}
 
-		err := os.WriteFile(largeFile, largeContent, 0644)
+		err := os.WriteFile(largeFile, largeContent, 0o644)
 		if err != nil {
 			t.Fatalf("failed to create large test file: %v", err)
 		}
@@ -217,7 +217,7 @@ logging:
   unicode: "Test unicode: 你好世界 🚀"
 `
 		specialFile := filepath.Join(tempDir, "special.yaml")
-		err := os.WriteFile(specialFile, []byte(specialContent), 0644)
+		err := os.WriteFile(specialFile, []byte(specialContent), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create special test file: %v", err)
 		}
@@ -237,7 +237,7 @@ logging:
   host: "0.0.0.0"
 `
 		yamlFile := filepath.Join(tempDir, "config.yaml")
-		err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+		err := os.WriteFile(yamlFile, []byte(yamlContent), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
@@ -258,7 +258,7 @@ logging:
   port: 1344
 `
 		yamlFile := filepath.Join(tempDir, "config.yaml")
-		err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+		err := os.WriteFile(yamlFile, []byte(yamlContent), 0o644)
 		if err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
@@ -292,19 +292,19 @@ func TestConfigClient_LoadConfigFile_PermissionDenied(t *testing.T) {
   host: "0.0.0.0"
 `
 	yamlFile := filepath.Join(tempDir, "config.yaml")
-	err := os.WriteFile(yamlFile, []byte(yamlContent), 0644)
+	err := os.WriteFile(yamlFile, []byte(yamlContent), 0o644)
 	if err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	err = os.Chmod(yamlFile, 0000)
+	err = os.Chmod(yamlFile, 0o000)
 	if err != nil {
 		t.Fatalf("failed to change file permissions: %v", err)
 	}
 
 	_, err = client.LoadConfigFile(ctx, yamlFile)
 
-	os.Chmod(yamlFile, 0644)
+	os.Chmod(yamlFile, 0o644)
 
 	if err == nil {
 		t.Skip("File permissions test not applicable on this platform (may not restrict file reading)")
@@ -328,7 +328,7 @@ invalid_yaml: [
   unclosed array
 `
 	invalidFile := filepath.Join(tempDir, "invalid.yaml")
-	err := os.WriteFile(invalidFile, []byte(invalidYAML), 0644)
+	err := os.WriteFile(invalidFile, []byte(invalidYAML), 0o644)
 	if err != nil {
 		t.Fatalf("failed to create invalid YAML file: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestConfigClient_LoadConfigFile_InvalidJSON(t *testing.T) {
     unclosed array
 }`
 	invalidFile := filepath.Join(tempDir, "invalid.json")
-	err := os.WriteFile(invalidFile, []byte(invalidJSON), 0644)
+	err := os.WriteFile(invalidFile, []byte(invalidJSON), 0o644)
 	if err != nil {
 		t.Fatalf("failed to create invalid JSON file: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestConfigClient_LoadConfigFile_InvalidJSON(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || indexOf(s, substr) >= 0))
+	return len(s) >= len(substr) && (s == substr || s != "" && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || indexOf(s, substr) >= 0))
 }
 
 func indexOf(s, substr string) int {

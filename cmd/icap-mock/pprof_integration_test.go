@@ -178,7 +178,7 @@ func TestPprofEndpointsEnabledWhenConfigEnabled(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			req, err := http.NewRequestWithContext(ctx, "GET", server.URL+tt.endpoint, nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", server.URL+tt.endpoint, http.NoBody)
 			if err != nil {
 				t.Fatalf("Failed to create request: %v", err)
 			}
@@ -199,7 +199,7 @@ func TestPprofEndpointsEnabledWhenConfigEnabled(t *testing.T) {
 			body := string(buf[:n])
 
 			if tt.contains != "" && !strings.Contains(body, tt.contains) {
-				t.Errorf("GET %s: body should contain %q, got: %s", tt.endpoint, tt.contains, body[:min(200, len(body))])
+				t.Errorf("GET %s: body should contain %q, got: %s", tt.endpoint, tt.contains, body[:minVal(200, len(body))])
 			}
 		})
 	}
@@ -220,7 +220,7 @@ func TestPprofProfileEndpointTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL+"/debug/pprof/profile?seconds=1", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL+"/debug/pprof/profile?seconds=1", http.NoBody)
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -316,16 +316,6 @@ func TestPprofConfigCanBeEnabledViaCLI(t *testing.T) {
 	}
 }
 
-// Flag is a minimal interface for testing.
-type Flag struct {
-	Name  string
-	Value string
-}
-
-func visit(_ func(*Flag)) {
-	// Mock implementation
-}
-
 // TestMetricsEndpointAlwaysAvailable verifies metrics endpoint works regardless of pprof.
 func TestMetricsEndpointAlwaysAvailable(t *testing.T) {
 	t.Parallel()
@@ -407,7 +397,7 @@ func TestPprofMultipleEndpointsConcurrent(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
-				req, err := http.NewRequestWithContext(ctx, "GET", server.URL+ep, nil)
+				req, err := http.NewRequestWithContext(ctx, "GET", server.URL+ep, http.NoBody)
 				if err != nil {
 					errCh <- fmt.Errorf("create request %s: %w", ep, err)
 					return
@@ -439,7 +429,7 @@ func TestPprofMultipleEndpointsConcurrent(t *testing.T) {
 }
 
 // Helper function.
-func min(a, b int) int {
+func minVal(a, b int) int {
 	if a < b {
 		return a
 	}

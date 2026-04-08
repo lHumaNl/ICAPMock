@@ -300,7 +300,7 @@ func extractPathPrefix(pattern string) string {
 
 	// Если паттерн начинается с ^
 	var prefix string
-	if len(pattern) > 0 && pattern[0] == '^' {
+	if pattern != "" && pattern[0] == '^' {
 		prefix = pattern[1:]
 	} else {
 		prefix = pattern

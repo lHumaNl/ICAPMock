@@ -142,7 +142,7 @@ func (c *GenerateCommand) Run(ctx context.Context) error {
 
 	// Write output
 	if c.output != "" {
-		if err := os.WriteFile(c.output, data, 0644); err != nil { //nolint:gosec // wider permissions acceptable
+		if err := os.WriteFile(c.output, data, 0o644); err != nil { //nolint:gosec // wider permissions acceptable
 			return fmt.Errorf("writing %s: %w", c.output, err)
 		}
 		fmt.Fprintf(os.Stderr, "Generated %d scenarios -> %s\n", len(scenarios), c.output)

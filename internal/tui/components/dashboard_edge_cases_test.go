@@ -200,9 +200,9 @@ func TestMetricsGraphModel_findMinMax_AllZeros(t *testing.T) {
 
 	values := []float64{0, 0, 0, 0, 0}
 
-	min, max := model.findMinMax(values)
-	assert.Equal(t, 0.0, min)
-	assert.Equal(t, 0.0, max)
+	minVal, maxVal := model.findMinMax(values)
+	assert.Equal(t, 0.0, minVal)
+	assert.Equal(t, 0.0, maxVal)
 }
 
 func TestMetricsGraphModel_findMinMax_AllSame(t *testing.T) {
@@ -210,9 +210,9 @@ func TestMetricsGraphModel_findMinMax_AllSame(t *testing.T) {
 
 	values := []float64{50, 50, 50, 50, 50}
 
-	min, max := model.findMinMax(values)
-	assert.Equal(t, 50.0, min)
-	assert.Equal(t, 50.0, max)
+	minVal, maxVal := model.findMinMax(values)
+	assert.Equal(t, 50.0, minVal)
+	assert.Equal(t, 50.0, maxVal)
 }
 
 func TestLogPreviewModel_AddEntry_MaxLines_Race(t *testing.T) {

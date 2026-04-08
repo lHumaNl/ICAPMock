@@ -42,7 +42,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -166,7 +166,7 @@ scenarios:
     response:
       icap_status: 204
 `
-			if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+			if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 				t.Fatalf("WriteFile() error = %v", err)
 			}
 
@@ -223,7 +223,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -309,7 +309,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -348,7 +348,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -401,7 +401,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -476,7 +476,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -650,7 +650,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		b.Fatalf("WriteFile() error = %v", err)
 	}
 

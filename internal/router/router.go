@@ -149,10 +149,10 @@ func (r *Router) Routes() []Route {
 
 	r.routes.Range(func(key, value interface{}) bool {
 		path := key.(string)               //nolint:errcheck
-		handler := value.(handler.Handler) //nolint:errcheck
+		h := value.(handler.Handler) //nolint:errcheck
 		routes = append(routes, Route{
 			Path:    path,
-			Handler: handler,
+			Handler: h,
 		})
 		return true
 	})

@@ -497,7 +497,7 @@ func TestHandler(t *testing.T) {
 	}
 
 	// Create a test request
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -522,7 +522,7 @@ func TestHandlerWithRegistry(t *testing.T) {
 		t.Fatal("HandlerWithRegistry() returned nil")
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

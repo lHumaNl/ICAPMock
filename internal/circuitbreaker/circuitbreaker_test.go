@@ -34,14 +34,14 @@ func newMockMetricsRecorder() *mockMetricsRecorder {
 }
 
 // SetCircuitBreakerState records the current circuit breaker state.
-func (m *mockMetricsRecorder) SetCircuitBreakerState(component string, state string) {
+func (m *mockMetricsRecorder) SetCircuitBreakerState(component, state string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.states[component] = state
 }
 
 // RecordCircuitBreakerTransition records a state transition.
-func (m *mockMetricsRecorder) RecordCircuitBreakerTransition(component string, fromState string, toState string) {
+func (m *mockMetricsRecorder) RecordCircuitBreakerTransition(component, fromState, toState string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.transitions = append(m.transitions, transition{

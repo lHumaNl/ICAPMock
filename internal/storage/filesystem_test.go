@@ -103,7 +103,7 @@ func TestFileStorage_GetRequest(t *testing.T) {
 	// Write directly to a file with the expected name
 	filename := filepath.Join(tmpDir, "2024-01-15_001.json")
 	data, _ := serializeStoredRequest(sr)
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, data, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -190,7 +190,7 @@ func TestFileStorage_ListRequests(t *testing.T) {
 	for i, sr := range requests {
 		filename := filepath.Join(tmpDir, fmt.Sprintf("2024-01-15_%03d.json", i+1))
 		data, _ := serializeStoredRequest(sr)
-		if err := os.WriteFile(filename, data, 0644); err != nil {
+		if err := os.WriteFile(filename, data, 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 	}
@@ -267,7 +267,7 @@ func TestFileStorage_DeleteRequest(t *testing.T) {
 
 	filename := filepath.Join(tmpDir, "2024-01-15_001.json")
 	data, _ := serializeStoredRequest(sr)
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, data, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -841,7 +841,7 @@ func TestStorageBackwardCompatibility(t *testing.T) {
 
 	filename := filepath.Join(tmpDir, "2024-01-15_001.json")
 	data, _ := serializeStoredRequest(sr)
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, data, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 

@@ -372,16 +372,6 @@ func (c *RouteCache) buildKey(method, path string) string {
 	return method + ":" + path
 }
 
-// recordHit increments the cache hit counter.
-func (c *RouteCache) recordHit() {
-	c.metrics.hits.Add(1)
-}
-
-// recordMiss increments the cache miss counter.
-func (c *RouteCache) recordMiss() {
-	c.metrics.misses.Add(1)
-}
-
 // LookupHandler performs a cache-aware handler lookup.
 // It checks the cache first, and on miss, performs the route lookup
 // and caches the result.
@@ -398,21 +388,21 @@ func (c *RouteCache) LookupHandler(routes map[string]handler.Handler, req *icap.
 	path := extractPath(req.URI)
 
 	// Check cache first
-	handler, hit := c.Get(req.Method, path)
+	h, hit := c.Get(req.Method, path)
 	if hit {
-		return handler, true
+		return h, true
 	}
 
 	// Cache miss: perform route lookup
-	handler, exists := routes[path]
+	h, exists := routes[path]
 	if !exists {
 		return nil, false
 	}
 
 	// Cache the result for future lookups
-	c.Put(req.Method, path, handler)
+	c.Put(req.Method, path, h)
 
-	return handler, false
+	return h, false
 }
 
 // LookupHandlerFunc performs a cache-aware handler lookup using a function.
@@ -430,19 +420,19 @@ func (c *RouteCache) LookupHandlerFunc(lookupFn func(path string) (handler.Handl
 	path := extractPath(req.URI)
 
 	// Check cache first
-	handler, hit := c.Get(req.Method, path)
+	h, hit := c.Get(req.Method, path)
 	if hit {
-		return handler, true
+		return h, true
 	}
 
 	// Cache miss: call lookup function
-	handler, exists := lookupFn(path)
+	h, exists := lookupFn(path)
 	if !exists {
 		return nil, false
 	}
 
 	// Cache the result for future lookups
-	c.Put(req.Method, path, handler)
+	c.Put(req.Method, path, h)
 
-	return handler, false
+	return h, false
 }

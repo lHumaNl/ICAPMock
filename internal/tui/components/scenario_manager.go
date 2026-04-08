@@ -235,9 +235,8 @@ func (m *ScenarioManagerModel) updateList(msg tea.Msg) tea.Cmd {
 func (m *ScenarioManagerModel) updateEdit(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
 		case keyCtrlS:
 			// Save scenario
 			return m.saveScenario()
@@ -259,9 +258,8 @@ func (m *ScenarioManagerModel) updateEdit(msg tea.Msg) tea.Cmd {
 func (m *ScenarioManagerModel) updateCreate(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
 		case keyCtrlS:
 			// Create scenario
 			return m.createScenario()
@@ -401,22 +399,23 @@ response:
 //
 //nolint:unparam
 func (m *ScenarioManagerModel) cycleInputs() tea.Cmd {
-	if m.nameInput.Focused() {
+	switch {
+	case m.nameInput.Focused():
 		m.nameInput.Blur()
 		m.priorityInput.Focus()
-	} else if m.priorityInput.Focused() {
+	case m.priorityInput.Focused():
 		m.priorityInput.Blur()
 		m.methodInput.Focus()
-	} else if m.methodInput.Focused() {
+	case m.methodInput.Focused():
 		m.methodInput.Blur()
 		m.pathInput.Focus()
-	} else if m.pathInput.Focused() {
+	case m.pathInput.Focused():
 		m.pathInput.Blur()
 		m.bodyPatternInput.Focus()
-	} else if m.bodyPatternInput.Focused() {
+	case m.bodyPatternInput.Focused():
 		m.bodyPatternInput.Blur()
 		m.yamlEditor.Focus()
-	} else if m.yamlEditor.Focused() {
+	case m.yamlEditor.Focused():
 		m.yamlEditor.Blur()
 		m.nameInput.Focus()
 	}

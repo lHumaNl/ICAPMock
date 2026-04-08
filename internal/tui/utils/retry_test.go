@@ -226,7 +226,7 @@ func TestDoWithRetryHTTP_Success(t *testing.T) {
 	ctx := context.Background()
 	config := DefaultRetryConfig()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil) //nolint:gocritic // httpNoBody: nil needed for retry compatibility
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestDoWithRetryHTTP_RetryOn5xx(t *testing.T) {
 		Jitter:       0,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil) //nolint:gocritic // httpNoBody: nil needed for retry compatibility
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestDoWithRetryHTTP_NoRetryOn4xx(t *testing.T) {
 	ctx := context.Background()
 	config := DefaultRetryConfig()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil) //nolint:gocritic // httpNoBody: nil needed for retry compatibility
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestDoWithRetryHTTP_NoRetryOn503(t *testing.T) {
 	ctx := context.Background()
 	config := DefaultRetryConfig()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil) //nolint:gocritic // httpNoBody: nil needed for retry compatibility
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestDoWithRetryHTTP_RetryOnConnectionError(t *testing.T) {
 		Jitter:       0,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", server.URL, nil) //nolint:gocritic // httpNoBody: nil needed for retry compatibility
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}

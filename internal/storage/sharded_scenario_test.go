@@ -46,7 +46,7 @@ scenarios:
       icap_status: 200
       delay: "500ms"
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -95,7 +95,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -182,7 +182,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -346,7 +346,7 @@ scenarios:
     response:
       icap_status: 204
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -364,7 +364,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -438,7 +438,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -559,7 +559,7 @@ func BenchmarkShardedScenarioRegistry_Match(b *testing.B) {
       icap_status: 200
 `
 	}
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		b.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -607,7 +607,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		b.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -653,7 +653,7 @@ func BenchmarkShardedScenarioRegistry_Concurrent(b *testing.B) {
       icap_status: 200
 `
 	}
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		b.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -756,7 +756,7 @@ func createScenarioFile(b *testing.B, path string, count int) {
       icap_status: 200
 `
 	}
-	if err := os.WriteFile(path, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
 		b.Fatalf("WriteFile() error = %v", err)
 	}
 }
@@ -820,7 +820,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -870,7 +870,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -913,7 +913,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -923,7 +923,7 @@ scenarios:
 	}
 
 	var wg sync.WaitGroup
-	errors := make(chan error, 10)
+	errs := make(chan error, 10)
 
 	// Concurrent reads
 	for i := 0; i < 5; i++ {
@@ -936,7 +936,7 @@ scenarios:
 			}
 			_, err := registry.Match(req)
 			if err != nil {
-				errors <- err
+				errs <- err
 			}
 		}()
 	}
@@ -952,15 +952,15 @@ scenarios:
 				Response: ResponseTemplate{ICAPStatus: 204},
 			}
 			if err := registry.Add(scenario); err != nil {
-				errors <- err
+				errs <- err
 			}
 		}(i)
 	}
 
 	wg.Wait()
-	close(errors)
+	close(errs)
 
-	for err := range errors {
+	for err := range errs {
 		if err != nil {
 			t.Errorf("Concurrent operation error: %v", err)
 		}
@@ -986,7 +986,7 @@ func TestShardedScenarioRegistry_RaceConditionFallbackMatch(t *testing.T) {
       icap_status: 200
 `
 	}
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -1065,7 +1065,7 @@ func TestShardedScenarioRegistry_SortEfficiency(t *testing.T) {
       icap_status: 200
 `
 	}
-	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 

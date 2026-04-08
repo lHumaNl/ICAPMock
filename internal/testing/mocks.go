@@ -485,7 +485,7 @@ func (m *MockStorage) IsClosed() bool {
 // Usage:
 //
 //	fs := NewMockFileSystem(10 * 1024 * 1024 * 1024) // 10GB
-//	fs.WriteFile("/test.txt", []byte("hello"), 0644)
+//	fs.WriteFile("/test.txt", []byte("hello"), 0o644)
 //
 //	used := fs.GetUsedSpace()
 //	require.Equal(t, int64(5), used)

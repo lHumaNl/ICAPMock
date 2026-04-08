@@ -56,30 +56,6 @@ func buildTestRequest(method, uri string) *icap.Request {
 	}
 }
 
-// runConcurrent executes a function concurrently in n goroutines.
-func runConcurrent(t *testing.T, n int, fn func(goroutineID int)) {
-	t.Helper()
-
-	var wg sync.WaitGroup
-	wg.Add(n)
-
-	for i := 0; i < n; i++ {
-		go func(goroutineID int) {
-			defer wg.Done()
-
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("Goroutine %d panicked: %v", goroutineID, r)
-				}
-			}()
-
-			fn(goroutineID)
-		}(i)
-	}
-
-	wg.Wait()
-}
-
 // runConcurrentWithResults executes a function concurrently and collects results.
 func runConcurrentWithResults(t *testing.T, n, iterations int, fn func(goroutineID, iteration int) error) []concurrentResult {
 	t.Helper()

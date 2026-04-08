@@ -1191,7 +1191,7 @@ func TestStreamingBodyConcurrent(t *testing.T) {
 	const bodySizePerRequest = 10240 // 10KB per request
 
 	var wg sync.WaitGroup
-	errors := make(chan error, numGoroutines)
+	errs := make(chan error, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
@@ -1216,12 +1216,12 @@ func TestStreamingBodyConcurrent(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(input.String()))
 			req, err := icap.ParseRequest(r)
 			if err != nil {
-				errors <- fmt.Errorf("goroutine %d: ParseRequest error: %w", id, err)
+				errs <- fmt.Errorf("goroutine %d: ParseRequest error: %w", id, err)
 				return
 			}
 
 			if req.HTTPRequest == nil {
-				errors <- fmt.Errorf("goroutine %d: HTTPRequest is nil", id)
+				errs <- fmt.Errorf("goroutine %d: HTTPRequest is nil", id)
 				return
 			}
 
@@ -1231,7 +1231,7 @@ func TestStreamingBodyConcurrent(t *testing.T) {
 				_, err := io.ReadFull(req.HTTPRequest.BodyReader, buf)
 				// We don't need to read all, just verify streaming works
 				if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-					errors <- fmt.Errorf("goroutine %d: Read error: %w", id, err)
+					errs <- fmt.Errorf("goroutine %d: Read error: %w", id, err)
 					return
 				}
 			}
@@ -1239,9 +1239,9 @@ func TestStreamingBodyConcurrent(t *testing.T) {
 	}
 
 	wg.Wait()
-	close(errors)
+	close(errs)
 
-	for err := range errors {
+	for err := range errs {
 		t.Error(err)
 	}
 }

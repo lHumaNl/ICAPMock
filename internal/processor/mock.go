@@ -113,11 +113,12 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 
 	// Apply delay
 	var delay time.Duration
-	if selectedDelay != nil {
+	switch {
+	case selectedDelay != nil:
 		delay = selectedDelay.Duration()
-	} else if selectedResponse.DelayRange != nil {
+	case selectedResponse.DelayRange != nil:
 		delay = selectedResponse.DelayRange.Duration()
-	} else if selectedResponse.Delay > 0 {
+	case selectedResponse.Delay > 0:
 		delay = selectedResponse.Delay
 	}
 	if delay > 0 {

@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/icap-mock/icap-mock/internal/tui/components"
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 // View renders the UI.
@@ -240,8 +239,7 @@ func (m *Model) renderHelpOverlay(baseView string) string {
 	groups := m.FullHelp()
 
 	lines := make([]string, 0, 2+len(groups)*2+1)
-	lines = append(lines, HelpKeyStyle.Render("Keyboard Shortcuts"))
-	lines = append(lines, "")
+	lines = append(lines, HelpKeyStyle.Render("Keyboard Shortcuts"), "")
 
 	for _, group := range groups {
 		var groupLines []string
@@ -302,38 +300,3 @@ func (m *Model) renderHelpOverlay(baseView string) string {
 	return positioned
 }
 
-// renderLogEntries renders log entries.
-func (m *Model) renderLogEntries(entries []*state.LogEntry) string {
-	if len(entries) == 0 {
-		return SubtitleStyle.Render("No logs available")
-	}
-
-	var rendered []string
-	for _, entry := range entries {
-		style := m.getLogLevelStyle(entry.Level)
-		rendered = append(rendered,
-			style.Render(
-				"["+entry.Timestamp.Format("15:04:05")+"] "+
-					entry.Level+": "+
-					entry.Message,
-			),
-		)
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, rendered...)
-}
-
-// getLogLevelStyle returns style for a log level.
-func (m *Model) getLogLevelStyle(level string) lipgloss.Style {
-	return GetLogLevelStyle(level)
-}
-
-// formatFloat formats a float64 with 2 decimal places.
-func formatFloat(f float64) string {
-	return fmt.Sprintf("%.2f", f)
-}
-
-// formatInt formats an int64 as a string.
-func formatInt(i int64) string {
-	return fmt.Sprintf("%d", i)
-}

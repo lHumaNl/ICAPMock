@@ -61,17 +61,6 @@ func buildComplexScenario(i int) *Scenario {
 	}
 }
 
-// populateRegistry adds n scenarios to reg and compiles their patterns.
-// The registry's internal validateAndCompile is called via Add().
-func populateRegistry(b *testing.B, reg ScenarioRegistry, scenarios []*Scenario) {
-	b.Helper()
-	for _, s := range scenarios {
-		if err := reg.Add(s); err != nil {
-			b.Fatalf("Add(%s) error: %v", s.Name, err)
-		}
-	}
-}
-
 // BenchmarkScenarioMatch_Simple benchmarks Match() against a registry with 10
 // scenarios that each have only a path-pattern rule.  The request is designed to
 // fall through all 10 and match the default scenario.

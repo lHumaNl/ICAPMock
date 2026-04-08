@@ -150,7 +150,7 @@ func NewAdaptiveTimeoutTracker(cfg AdaptiveTimeoutConfig) *AdaptiveTimeoutTracke
 //   - duration: The time taken to process the request
 //
 // This method is safe for concurrent use.
-func (t *AdaptiveTimeoutTracker) RecordDuration(method string, path string, duration time.Duration) {
+func (t *AdaptiveTimeoutTracker) RecordDuration(method, path string, duration time.Duration) {
 	key := endpointKey{method: method, path: path}
 
 	// Get or create endpoint stats (short map-level lock)
@@ -207,7 +207,7 @@ func (t *AdaptiveTimeoutTracker) RecordDuration(method string, path string, dura
 //   - time.Duration: The calculated timeout for this endpoint
 //
 // This method is safe for concurrent use.
-func (t *AdaptiveTimeoutTracker) GetTimeout(method string, path string) time.Duration {
+func (t *AdaptiveTimeoutTracker) GetTimeout(method, path string) time.Duration {
 	key := endpointKey{method: method, path: path}
 
 	t.mu.RLock()
@@ -224,7 +224,7 @@ func (t *AdaptiveTimeoutTracker) GetTimeout(method string, path string) time.Dur
 
 // adjustTimeout calculates and updates the timeout based on P95 latency.
 // This method must be called with the lock held.
-func (t *AdaptiveTimeoutTracker) adjustTimeout(key endpointKey, method string, path string, stats *endpointStats) {
+func (t *AdaptiveTimeoutTracker) adjustTimeout(key endpointKey, method, path string, stats *endpointStats) {
 	// Calculate P95 latency
 	p95 := t.calculateP95(stats)
 
@@ -299,12 +299,13 @@ func (t *AdaptiveTimeoutTracker) quickselect(arr []time.Duration, left, right, k
 	pivotIndex := t.partition(arr, left, right)
 
 	// Check if pivot is the k-th element
-	if k == pivotIndex {
+	switch {
+	case k == pivotIndex:
 		return arr[k]
-	} else if k < pivotIndex {
+	case k < pivotIndex:
 		// k-th element is in the left partition
 		return t.quickselect(arr, left, pivotIndex-1, k)
-	} else {
+	default:
 		// k-th element is in the right partition
 		return t.quickselect(arr, pivotIndex+1, right, k)
 	}

@@ -160,7 +160,7 @@ func parseICAPURL(url string) (host, service string, err error) { //nolint:unpar
 
 	// Add default port if not specified
 	if !strings.Contains(host, ":") {
-		host = host + ":1344"
+		host += ":1344"
 	}
 
 	return host, service, nil

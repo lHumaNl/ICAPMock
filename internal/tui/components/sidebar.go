@@ -13,7 +13,6 @@ import (
 // SidebarModel represents a sidebar menu component.
 type SidebarModel struct {
 	list          list.Model
-	currentScreen string
 	width         int
 	height        int
 	mu            sync.RWMutex

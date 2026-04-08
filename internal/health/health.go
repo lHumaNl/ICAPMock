@@ -294,20 +294,22 @@ func (s *HealthServer) handleReady(w http.ResponseWriter, r *http.Request) {
 	checks := make(map[string]interface{})
 
 	// Check ICAP server status
-	if status.ICAPError != "" {
+	switch {
+	case status.ICAPError != "":
 		checks["icap_server"] = fmt.Sprintf("error: %s", status.ICAPError)
-	} else if status.ICAPReady {
+	case status.ICAPReady:
 		checks["icap_server"] = "ok"
-	} else {
+	default:
 		checks["icap_server"] = "starting"
 	}
 
 	// Check storage status
-	if status.StorageError != "" {
+	switch {
+	case status.StorageError != "":
 		checks["storage"] = fmt.Sprintf("error: %s", status.StorageError)
-	} else if status.StorageReady {
+	case status.StorageReady:
 		checks["storage"] = "ok"
-	} else {
+	default:
 		checks["storage"] = "starting"
 	}
 

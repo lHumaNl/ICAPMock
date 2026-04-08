@@ -64,7 +64,6 @@ type Model struct {
 	scenarioManager *components.ScenarioManagerModel
 	replayPanel     *components.ReplayPanelModel
 	scenarioClient  *server.ScenarioClient
-	shutdownCancel  context.CancelFunc
 	logsState       *state.LogsState
 	serviceControls *components.ServiceControlsModel
 	configClient    *server.ConfigClient

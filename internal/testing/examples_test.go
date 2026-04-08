@@ -293,7 +293,7 @@ func TestExampleMockStorage(t *testing.T) {
 func TestExampleMockFileSystem(t *testing.T) {
 	mock := NewMockFileSystem(10 * 1024 * 1024 * 1024)
 
-	err := mock.WriteFile("/test.txt", []byte("hello"), 0644)
+	err := mock.WriteFile("/test.txt", []byte("hello"), 0o644)
 	require.NoError(t, err)
 
 	data, err := mock.ReadFile("/test.txt")

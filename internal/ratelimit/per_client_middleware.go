@@ -37,12 +37,12 @@ type PerClientMiddleware struct {
 func NewPerClientMiddleware(
 	perClientLimiter *PerClientRateLimiter,
 	globalLimiter Limiter,
-	metrics *metrics.Collector,
+	mc *metrics.Collector,
 ) *PerClientMiddleware {
 	return &PerClientMiddleware{
 		perClientLimiter: perClientLimiter,
 		globalLimiter:    globalLimiter,
-		metrics:          metrics,
+		metrics:          mc,
 	}
 }
 
@@ -203,20 +203,3 @@ func (m *PerClientMiddleware) extractClientIP(req *icap.Request) string {
 	return clientIPUnknown
 }
 
-// simpleReservation implements Reservation interface for simple cases.
-type simpleReservation struct {
-	ok    bool
-	delay time.Duration
-}
-
-func (r *simpleReservation) OK() bool {
-	return r.ok
-}
-
-func (r *simpleReservation) Delay() time.Duration {
-	return r.delay
-}
-
-func (r *simpleReservation) Cancel() {
-	// Nothing to cancel
-}

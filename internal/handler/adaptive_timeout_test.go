@@ -905,11 +905,12 @@ func quickselectDirect(arr []time.Duration, left, right, k int) time.Duration {
 
 	pivotIndex := partitionDirect(arr, left, right)
 
-	if k == pivotIndex {
+	switch {
+	case k == pivotIndex:
 		return arr[k]
-	} else if k < pivotIndex {
+	case k < pivotIndex:
 		return quickselectDirect(arr, left, pivotIndex-1, k)
-	} else {
+	default:
 		return quickselectDirect(arr, pivotIndex+1, right, k)
 	}
 }

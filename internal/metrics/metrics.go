@@ -1008,7 +1008,7 @@ func (c *Collector) RecordRequestCancellation(method string) {
 // Reason should be "deadline_exceeded" or "canceled".
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordRequestContextCancellation(method string, reason string) {
+func (c *Collector) RecordRequestContextCancellation(method, reason string) {
 	c.requestContextCancellationsByReason.WithLabelValues(method, reason).Inc()
 }
 
@@ -1016,7 +1016,7 @@ func (c *Collector) RecordRequestContextCancellation(method string, reason strin
 // due to the storage queue being full.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordStorageBackpressureRejected(queueSize int, maxQueueSize int) {
+func (c *Collector) RecordStorageBackpressureRejected(queueSize, maxQueueSize int) {
 	c.storageBackpressureRejected.WithLabelValues(
 		string(rune(queueSize)),    //nolint:gosec // safe range
 		string(rune(maxQueueSize)), //nolint:gosec // safe range
@@ -1042,7 +1042,7 @@ func (c *Collector) SetStorageQueueLength(length int) {
 // due to the script pool queue being full.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordScriptPoolRejected(queueSize float64, maxQueueSize float64) {
+func (c *Collector) RecordScriptPoolRejected(queueSize, maxQueueSize float64) {
 	c.scriptPoolRejected.WithLabelValues(
 		fmt.Sprintf("%.0f", queueSize),
 		fmt.Sprintf("%.0f", maxQueueSize),
@@ -1067,7 +1067,7 @@ func (c *Collector) SetScriptPoolWorkers(workers float64) {
 // State values: "closed" = 0, "half-open" = 0.5, "open" = 1.
 //
 // This method is safe for concurrent use.
-func (c *Collector) SetCircuitBreakerState(component string, state string) {
+func (c *Collector) SetCircuitBreakerState(component, state string) {
 	value := 0.0
 	switch state {
 	case "half-open":
@@ -1081,7 +1081,7 @@ func (c *Collector) SetCircuitBreakerState(component string, state string) {
 // RecordCircuitBreakerTransition increments the counter for circuit breaker state transitions.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordCircuitBreakerTransition(component string, fromState string, toState string) {
+func (c *Collector) RecordCircuitBreakerTransition(component, fromState, toState string) {
 	c.circuitBreakerTransitions.WithLabelValues(component, fromState, toState).Inc()
 }
 
@@ -1105,7 +1105,7 @@ func (c *Collector) SetTLSCertificateExpiryDays(certFile string, days float64) {
 // The timeout is in milliseconds.
 //
 // This method is safe for concurrent use.
-func (c *Collector) SetAdaptiveTimeout(endpoint string, method string, timeoutMs float64) {
+func (c *Collector) SetAdaptiveTimeout(endpoint, method string, timeoutMs float64) {
 	c.adaptiveTimeoutCurrent.WithLabelValues(endpoint, method).Set(timeoutMs)
 }
 

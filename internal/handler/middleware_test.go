@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 
 	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/handler"
@@ -144,7 +143,7 @@ func (m *mockStorage) getSaveCount() int64 {
 
 // testStorageMiddleware creates a StorageMiddlewareWithPool for testing and returns
 // its Wrap method as a handler.Middleware, plus a cleanup function.
-func testStorageMiddleware(t *testing.T, store storage.Storage) (handler.Middleware, func()) {
+func testStorageMiddleware(t *testing.T, store storage.Storage) (mw handler.Middleware, cleanup func()) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := middleware.DefaultStorageMiddlewareConfig()
@@ -165,8 +164,8 @@ func TestRateLimiterMiddleware_Allow(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := middleware(baseHandler)
+	mw := middleware.RateLimiterMiddleware(limiter)
+	wrappedHandler := mw(baseHandler)
 
 	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	if err != nil {
@@ -194,8 +193,8 @@ func TestRateLimiterMiddleware_Deny(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := middleware(baseHandler)
+	mw := middleware.RateLimiterMiddleware(limiter)
+	wrappedHandler := mw(baseHandler)
 
 	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	if err != nil {
@@ -471,8 +470,8 @@ func TestRateLimiterMiddleware_Concurrent(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := middleware(baseHandler)
+	mw := middleware.RateLimiterMiddleware(limiter)
+	wrappedHandler := mw(baseHandler)
 
 	const numRequests = 100
 	var wg sync.WaitGroup
@@ -616,8 +615,8 @@ func TestPanicRecoveryMiddleware_RecoversPanic(t *testing.T) {
 		panic("test panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -655,8 +654,8 @@ func TestPanicRecoveryMiddleware_PropagatesNormalError(t *testing.T) {
 		return nil, expectedErr
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(errHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(errHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -688,8 +687,8 @@ func TestPanicRecoveryMiddleware_AllowsNormalRequest(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(baseHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1140,14 +1139,14 @@ func TestNewStorageMiddlewareWithPool(t *testing.T) {
 			QueueSize: 100,
 		}
 
-		middleware, err := middleware.NewStorageMiddlewareWithPool(store, logger, cfg)
+		mw, err := middleware.NewStorageMiddlewareWithPool(store, logger, cfg)
 		if err != nil {
 			t.Fatalf("NewStorageMiddlewareWithPool() error = %v", err)
 		}
-		if middleware == nil {
+		if mw == nil {
 			t.Fatal("NewStorageMiddlewareWithPool() returned nil")
 		}
-		defer middleware.Shutdown(context.Background())
+		defer mw.Shutdown(context.Background())
 	})
 
 	t.Run("nil store", func(t *testing.T) {
@@ -1168,14 +1167,14 @@ func TestNewStorageMiddlewareWithPool(t *testing.T) {
 			QueueSize: 0, // Should default to 1000
 		}
 
-		middleware, err := middleware.NewStorageMiddlewareWithPool(store, logger, cfg)
+		mw, err := middleware.NewStorageMiddlewareWithPool(store, logger, cfg)
 		if err != nil {
 			t.Fatalf("NewStorageMiddlewareWithPool() error = %v", err)
 		}
-		if middleware == nil {
+		if mw == nil {
 			t.Fatal("NewStorageMiddlewareWithPool() returned nil")
 		}
-		defer middleware.Shutdown(context.Background())
+		defer mw.Shutdown(context.Background())
 	})
 }
 
@@ -1207,8 +1206,8 @@ func TestPanicRecoveryMiddleware_WithStackTrace(t *testing.T) {
 		panic("detailed panic message with stack trace")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1282,8 +1281,8 @@ func TestPanicRecoveryMiddleware_DifferentPanicTypes(t *testing.T) {
 				panic(tt.panicVal)
 			}, "REQMOD")
 
-			middleware := middleware.PanicRecoveryMiddleware(logger)
-			wrappedHandler := middleware(panicHandler)
+			mw := middleware.PanicRecoveryMiddleware(logger)
+			wrappedHandler := mw(panicHandler)
 
 			req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1311,8 +1310,8 @@ func TestPanicRecoveryMiddleware_ConcurrentPanics(t *testing.T) {
 		panic("concurrent panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	const numRequests = 50
 	var wg sync.WaitGroup
@@ -1350,8 +1349,8 @@ func TestPanicRecoveryMiddleware_ConnectionHeader(t *testing.T) {
 		panic("test panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1377,8 +1376,8 @@ func TestPanicRecoveryMiddleware_LogsRequestDetails(t *testing.T) {
 		panic("test panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/custom-path")
 	req.SetHeader("X-Custom", "value")
@@ -1455,8 +1454,8 @@ func TestPanicRecoveryMiddleware_ServerContinuesAfterPanic(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(flakyHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(flakyHandler)
 
 	// First request: trigger a panic
 	panicReq, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/panic")
@@ -1525,8 +1524,8 @@ func TestPanicRecoveryMiddleware_NoServerCrash(t *testing.T) {
 		panic("server crash test panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1652,8 +1651,8 @@ func TestPanicRecoveryMiddleware_ConcurrentServerStability(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	const numGoroutines = 20
 	const requestsPerGoroutine = 10
@@ -1722,8 +1721,8 @@ func TestPanicRecoveryMiddleware_ResponseBody(t *testing.T) {
 		panic("response body test panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -1761,8 +1760,8 @@ func BenchmarkPanicRecoveryMiddleware_NoPanic(b *testing.B) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(baseHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1780,8 +1779,8 @@ func BenchmarkPanicRecoveryMiddleware_WithPanic(b *testing.B) {
 		panic("benchmark panic")
 	}, "REQMOD")
 
-	middleware := middleware.PanicRecoveryMiddleware(logger)
-	wrappedHandler := middleware(panicHandler)
+	mw := middleware.PanicRecoveryMiddleware(logger)
+	wrappedHandler := mw(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1799,8 +1798,8 @@ func BenchmarkRateLimiterMiddleware_Allow(b *testing.B) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := middleware(baseHandler)
+	mw := middleware.RateLimiterMiddleware(limiter)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1823,7 +1822,7 @@ func BenchmarkChainMiddleware(b *testing.B) {
 	wrapped := middleware.ChainMiddleware(baseHandler,
 		middleware.PanicRecoveryMiddleware(logger),
 		middleware.RateLimiterMiddleware(limiter),
-		middleware.PanicRecoveryMiddleware(logger), // Second layer for safety
+		middleware.PanicRecoveryMiddleware(logger), //nolint:gocritic // dupOption: intentional second layer for safety
 	)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
@@ -2690,80 +2689,3 @@ func (s *configurableSlowMockStorage) SaveRequest(ctx context.Context, req *stor
 	return s.mockStorage.SaveRequest(ctx, req)
 }
 
-// getGaugeValue retrieves the current value of a gauge metric.
-func getGaugeValue(t *testing.T, reg prometheus.Gatherer, metricName string, labelPairs ...string) float64 {
-	t.Helper()
-	mfs, err := reg.Gather()
-	if err != nil {
-		t.Fatalf("Failed to gather metrics: %v", err)
-	}
-
-	for _, mf := range mfs {
-		if mf.GetName() == metricName {
-			if len(mf.GetMetric()) == 0 {
-				return 0
-			}
-			// Find the metric with matching labels
-			for _, m := range mf.GetMetric() {
-				if labelsMatch(m, labelPairs...) {
-					return m.GetGauge().GetValue()
-				}
-			}
-			// No labels specified, return first value
-			if len(labelPairs) == 0 {
-				return mf.GetMetric()[0].GetGauge().GetValue()
-			}
-		}
-	}
-	return 0
-}
-
-// getCounterValue retrieves the current value of a counter metric.
-func getCounterValue(t *testing.T, reg prometheus.Gatherer, metricName string, labelPairs ...string) float64 {
-	t.Helper()
-	mfs, err := reg.Gather()
-	if err != nil {
-		t.Fatalf("Failed to gather metrics: %v", err)
-	}
-
-	for _, mf := range mfs {
-		if mf.GetName() == metricName {
-			if len(mf.GetMetric()) == 0 {
-				return 0
-			}
-			// Find the metric with matching labels
-			for _, m := range mf.GetMetric() {
-				if labelsMatch(m, labelPairs...) {
-					return m.GetCounter().GetValue()
-				}
-			}
-			// No labels specified, return first value
-			if len(labelPairs) == 0 {
-				return mf.GetMetric()[0].GetCounter().GetValue()
-			}
-		}
-	}
-	return 0
-}
-
-// labelsMatch checks if a metric's labels match the provided label pairs.
-func labelsMatch(metric *dto.Metric, labelPairs ...string) bool {
-	if len(labelPairs)%2 != 0 {
-		return false
-	}
-
-	labels := make(map[string]string)
-	for _, label := range metric.GetLabel() {
-		labels[label.GetName()] = label.GetValue()
-	}
-
-	for i := 0; i < len(labelPairs); i += 2 {
-		key := labelPairs[i]
-		value := labelPairs[i+1]
-		if labels[key] != value {
-			return false
-		}
-	}
-
-	return true
-}

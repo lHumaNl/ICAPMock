@@ -93,13 +93,6 @@ func (rl *RateLimiter) Acquire(ctx context.Context) error {
 	return nil
 }
 
-// refill refills tokens based on elapsed time.
-func (rl *RateLimiter) refill() {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	rl.refillLocked()
-}
-
 // refillLocked refills tokens (must be called with mutex held).
 func (rl *RateLimiter) refillLocked() {
 	now := time.Now()
@@ -113,6 +106,15 @@ func (rl *RateLimiter) refillLocked() {
 		}
 		rl.lastRefill = now
 	}
+}
+
+// ServerClient provides HTTP client for server integration.
+type ServerClient struct {
+	httpClient     *http.Client
+	rateLimiter    *RateLimiter
+	circuitBreaker *utils.CircuitBreaker
+	baseURL        string
+	retryConfig    utils.RetryConfig
 }
 
 // doRequestWithRetry executes an HTTP request with exponential backoff retry.
@@ -136,15 +138,6 @@ func (c *ServerClient) doRequestWithRetry(ctx context.Context, req *http.Request
 	}
 
 	return resp, nil
-}
-
-// ServerClient provides HTTP client for server integration.
-type ServerClient struct {
-	httpClient     *http.Client
-	rateLimiter    *RateLimiter
-	circuitBreaker *utils.CircuitBreaker
-	baseURL        string
-	retryConfig    utils.RetryConfig
 }
 
 // NewServerClient creates a new server client with connection pooling.
@@ -310,7 +303,7 @@ func parseSimpleMetric(line string) float64 {
 }
 
 // parseHistogramMetric parses a histogram metric with quantile.
-func parseHistogramMetric(line string) (float64, string) {
+func parseHistogramMetric(line string) (value float64, quantile string) {
 	// Format: metric_name{method="REQMOD",quantile="0.5"} 0.05
 	parts := strings.Fields(line)
 	if len(parts) < 2 {

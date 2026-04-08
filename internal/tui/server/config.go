@@ -120,7 +120,7 @@ func (c *ConfigClient) doRequestWithRetry(ctx context.Context, req *http.Request
 }
 
 // GetConfig retrieves the current server configuration.
-func (c *ConfigClient) GetConfig(ctx context.Context) (string, string, error) {
+func (c *ConfigClient) GetConfig(ctx context.Context) (content, format string, err error) {
 	url := fmt.Sprintf("%s/api/config", c.baseURL)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
@@ -233,7 +233,7 @@ func (c *ConfigClient) SaveConfig(ctx context.Context, content, filePath string)
 }
 
 // ValidateConfig validates the configuration without saving.
-func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (bool, string, error) {
+func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (valid bool, message string, err error) {
 	if err := validateConfigInput(content, ""); err != nil {
 		return false, err.Error(), fmt.Errorf("config validation failed: %w", err)
 	}
@@ -336,7 +336,7 @@ func (c *ConfigClient) LoadConfigFile(_ context.Context, filePath string) (strin
 }
 
 // ValidateConfigYAML validates YAML configuration locally (client-side).
-func (c *ConfigClient) ValidateConfigYAML(content string) (bool, string, error) {
+func (c *ConfigClient) ValidateConfigYAML(content string) (valid bool, message string, err error) {
 	// Validate input
 	if strings.TrimSpace(content) == "" {
 		return false, "YAML content cannot be empty", nil
@@ -347,8 +347,7 @@ func (c *ConfigClient) ValidateConfigYAML(content string) (bool, string, error) 
 	}
 
 	var cfg config.Config
-	err := yaml.Unmarshal([]byte(content), &cfg)
-	if err != nil {
+	if err = yaml.Unmarshal([]byte(content), &cfg); err != nil {
 		return false, fmt.Sprintf("YAML parsing error: %v", err), nil
 	}
 
@@ -362,7 +361,7 @@ func (c *ConfigClient) ValidateConfigYAML(content string) (bool, string, error) 
 }
 
 // ValidateConfigJSON validates JSON configuration locally (client-side).
-func (c *ConfigClient) ValidateConfigJSON(content string) (bool, string, error) {
+func (c *ConfigClient) ValidateConfigJSON(content string) (valid bool, message string, err error) {
 	// Validate input
 	if strings.TrimSpace(content) == "" {
 		return false, "JSON content cannot be empty", nil
@@ -373,8 +372,7 @@ func (c *ConfigClient) ValidateConfigJSON(content string) (bool, string, error) 
 	}
 
 	var cfg config.Config
-	err := json.Unmarshal([]byte(content), &cfg)
-	if err != nil {
+	if err = json.Unmarshal([]byte(content), &cfg); err != nil {
 		return false, fmt.Sprintf("JSON parsing error: %v", err), nil
 	}
 

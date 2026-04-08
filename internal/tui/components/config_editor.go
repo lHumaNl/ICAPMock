@@ -67,10 +67,9 @@ func (m *ConfigEditorModel) Update(msg tea.Msg) (*ConfigEditorModel, tea.Cmd) {
 	var cmd tea.Cmd
 	cmds := make([]tea.Cmd, 0, 1)
 
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		// Handle special keys
-		switch msg.String() {
+		switch keyMsg.String() {
 		case keyCtrlS:
 			// Save is handled by parent
 			return m, nil
@@ -84,7 +83,8 @@ func (m *ConfigEditorModel) Update(msg tea.Msg) (*ConfigEditorModel, tea.Cmd) {
 			return m, nil
 		case "ctrl+r":
 			// Reload from file
-			return m, m.Reload()
+			reloadCmd := m.Reload()
+			return m, reloadCmd
 		case "ctrl+f":
 			// Format content
 			m.formatContent()
@@ -93,6 +93,7 @@ func (m *ConfigEditorModel) Update(msg tea.Msg) (*ConfigEditorModel, tea.Cmd) {
 			// Return to previous screen - handled by parent
 			return m, nil
 		}
+		_ = keyMsg
 	}
 
 	// Update textarea and check for modifications

@@ -291,7 +291,7 @@ func (l *Logger) LogRequest(req *icap.Request, resp *icap.Response, duration tim
 //	  "port": 1344,
 //	  "attempts": 3
 //	}
-func (l *Logger) LogError(err error, context map[string]interface{}) {
+func (l *Logger) LogError(err error, ctx map[string]interface{}) {
 	if err == nil {
 		return
 	}
@@ -301,7 +301,7 @@ func (l *Logger) LogError(err error, context map[string]interface{}) {
 	}
 
 	// Add context fields
-	for k, v := range context {
+	for k, v := range ctx {
 		args = append(args, k, v)
 	}
 

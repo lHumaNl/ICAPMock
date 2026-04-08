@@ -242,7 +242,7 @@ func TestHealthServer_HealthEndpoint(t *testing.T) {
 	}
 
 	// Create test request
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	server.handleHealth(rec, req)
@@ -291,7 +291,7 @@ func TestHealthServer_ReadyEndpoint_Ready(t *testing.T) {
 	server.Checker().SetScenariosCount(15)
 
 	// Create test request
-	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ready", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	server.handleReady(rec, req)
@@ -340,7 +340,7 @@ func TestHealthServer_ReadyEndpoint_NotReady(t *testing.T) {
 	// Don't mark as ready - test default state
 
 	// Create test request
-	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ready", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	server.handleReady(rec, req)
@@ -389,7 +389,7 @@ func TestHealthServer_ReadyEndpoint_WithErrors(t *testing.T) {
 	server.Checker().SetStorageError("disk full")
 
 	// Create test request
-	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ready", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	server.handleReady(rec, req)
@@ -619,7 +619,7 @@ func TestHealthServer_MethodNotAllowed(t *testing.T) {
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
 
 	for _, method := range methods {
-		req := httptest.NewRequest(method, "/health", nil)
+		req := httptest.NewRequest(method, "/health", http.NoBody)
 		rec := httptest.NewRecorder()
 
 		server.handleHealth(rec, req)

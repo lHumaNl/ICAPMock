@@ -111,14 +111,14 @@ func TestDelayConfig_Duration_Static(t *testing.T) {
 }
 
 func TestDelayConfig_Duration_Range(t *testing.T) {
-	min := 100 * time.Millisecond
-	max := 500 * time.Millisecond
-	dc := DelayConfig{Min: min, Max: max, IsRange: true}
+	minDelay := 100 * time.Millisecond
+	maxDelay := 500 * time.Millisecond
+	dc := DelayConfig{Min: minDelay, Max: maxDelay, IsRange: true}
 
 	for i := 0; i < 100; i++ {
 		got := dc.Duration()
-		if got < min || got > max {
-			t.Errorf("Duration %v out of range [%v, %v]", got, min, max)
+		if got < minDelay || got > maxDelay {
+			t.Errorf("Duration %v out of range [%v, %v]", got, minDelay, maxDelay)
 		}
 	}
 }

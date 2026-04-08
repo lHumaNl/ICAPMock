@@ -50,16 +50,16 @@ func TestRouteCache_Get_Hit(t *testing.T) {
 
 	cache.Put(icap.MethodREQMOD, "/test", h)
 
-	handler, hit := cache.Get(icap.MethodREQMOD, "/test")
+	hdlr, hit := cache.Get(icap.MethodREQMOD, "/test")
 	if !hit {
 		t.Error("Expected cache hit, got miss")
 	}
 
-	if handler == nil {
+	if hdlr == nil {
 		t.Fatal("Expected non-nil handler on cache hit")
 	}
 
-	if handler != h {
+	if hdlr != h {
 		t.Error("Returned handler does not match cached handler")
 	}
 }
@@ -68,12 +68,12 @@ func TestRouteCache_Get_Hit(t *testing.T) {
 func TestRouteCache_Get_Miss(t *testing.T) {
 	cache := NewRouteCache(100, 0)
 
-	handler, hit := cache.Get(icap.MethodREQMOD, "/nonexistent")
+	hdlr, hit := cache.Get(icap.MethodREQMOD, "/nonexistent")
 	if hit {
 		t.Error("Expected cache miss, got hit")
 	}
 
-	if handler != nil {
+	if hdlr != nil {
 		t.Error("Expected nil handler on cache miss")
 	}
 
@@ -92,12 +92,12 @@ func TestRouteCache_Get_Expired(t *testing.T) {
 	// Wait for TTL to expire
 	time.Sleep(20 * time.Millisecond)
 
-	handler, hit := cache.Get(icap.MethodREQMOD, "/test")
+	hdlr, hit := cache.Get(icap.MethodREQMOD, "/test")
 	if hit {
 		t.Error("Expected cache miss for expired entry")
 	}
 
-	if handler != nil {
+	if hdlr != nil {
 		t.Error("Expected nil handler for expired entry")
 	}
 }
@@ -113,8 +113,8 @@ func TestRouteCache_Put(t *testing.T) {
 		t.Errorf("cache size = %d, want 1", cache.Size())
 	}
 
-	handler, hit := cache.Get(icap.MethodREQMOD, "/test")
-	if !hit || handler == nil {
+	hdlr, hit := cache.Get(icap.MethodREQMOD, "/test")
+	if !hit || hdlr == nil {
 		t.Error("Cache did not store handler correctly")
 	}
 }
@@ -147,8 +147,8 @@ func TestRouteCache_Put_Update(t *testing.T) {
 		t.Errorf("cache size = %d, want 1 (update should not increase size)", cache.Size())
 	}
 
-	handler, _ := cache.Get(icap.MethodREQMOD, "/test")
-	if handler != h2 {
+	hdlr, _ := cache.Get(icap.MethodREQMOD, "/test")
+	if hdlr != h2 {
 		t.Error("Cache did not update handler correctly")
 	}
 }
@@ -428,31 +428,31 @@ func TestRouteCache_LookupHandler(t *testing.T) {
 
 	// Test first lookup (cache miss)
 	req1, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost:1344/reqmod")
-	handler, hit := cache.LookupHandler(routes, req1)
+	hdlr, hit := cache.LookupHandler(routes, req1)
 	if hit {
 		t.Error("Expected cache miss on first lookup")
 	}
-	if handler != h1 {
+	if hdlr != h1 {
 		t.Error("Handler mismatch on first lookup")
 	}
 
 	// Test second lookup (cache hit)
 	req2, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost:1344/reqmod")
-	handler, hit = cache.LookupHandler(routes, req2)
+	hdlr, hit = cache.LookupHandler(routes, req2)
 	if !hit {
 		t.Error("Expected cache hit on second lookup")
 	}
-	if handler != h1 {
+	if hdlr != h1 {
 		t.Error("Handler mismatch on cache hit")
 	}
 
-	// Test unknown path (cache miss, no handler)
+	// Test unknown path (cache miss, no hdlr)
 	req3, _ := icap.NewRequest(icap.MethodOPTIONS, "icap://localhost:1344/unknown")
-	handler, hit = cache.LookupHandler(routes, req3)
+	hdlr, hit = cache.LookupHandler(routes, req3)
 	if hit {
 		t.Error("Expected cache miss for unknown path")
 	}
-	if handler != nil {
+	if hdlr != nil {
 		t.Error("Expected nil handler for unknown path")
 	}
 }
@@ -602,7 +602,7 @@ func TestRouter_CacheInvalidatedOnRouteUpdate(t *testing.T) {
 		t.Fatalf("Serve() error = %v", err)
 	}
 	if resp.StatusCode != 204 {
-		t.Errorf("StatusCode = %d, want 204 (new handler)", resp.StatusCode)
+		t.Errorf("StatusCode = %d, want 204 (new hdlr)", resp.StatusCode)
 	}
 }
 

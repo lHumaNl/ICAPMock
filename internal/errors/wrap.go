@@ -54,7 +54,7 @@ func Wrap(err error, code int, message string, icapStatus int) *Error {
 //	if err := processRequest(reqID); err != nil {
 //	    return errors.Wrapf(err, 1001, 400, "request %s validation failed", reqID)
 //	}
-func Wrapf(err error, code int, icapStatus int, format string, args ...interface{}) *Error {
+func Wrapf(err error, code, icapStatus int, format string, args ...interface{}) *Error {
 	if err == nil {
 		return nil
 	}

@@ -42,7 +42,7 @@ func TestBufferedWriter_BuffersSmallWrites(t *testing.T) {
 	// Write multiple small chunks
 	chunks := []string{"ICAP/1.0 ", "200 ", "OK\r\n", "Host: ", "localhost\r\n", "\r\n"}
 	for _, chunk := range chunks {
-		n, err := bw.Write([]byte(chunk))
+		n, err := bw.WriteString(chunk)
 		if err != nil {
 			t.Fatalf("Write(%q) error: %v", chunk, err)
 		}
@@ -103,7 +103,7 @@ func TestBufferedWriter_LargeWriteBypassesBuffer(t *testing.T) {
 	defer bw.close()
 
 	// First, buffer some small data
-	bw.Write([]byte("small"))
+	bw.WriteString("small")
 
 	// Write a large chunk (>8KB, buffer size)
 	largeData := make([]byte, 10*1024) // 10KB
@@ -149,7 +149,7 @@ func TestBufferedWriter_FlushOnClose(t *testing.T) {
 
 	// Write some data but don't flush
 	testData := "test data to be flushed on close"
-	bw.Write([]byte(testData))
+	bw.WriteString(testData)
 
 	// close() should flush the data
 	bw.close()
@@ -405,15 +405,15 @@ func TestBufferedWriter_MultipleFlushes(t *testing.T) {
 	defer bw.close()
 
 	// First batch
-	bw.Write([]byte("batch1-"))
+	bw.WriteString("batch1-")
 	bw.Flush()
 
 	// Second batch
-	bw.Write([]byte("batch2-"))
+	bw.WriteString("batch2-")
 	bw.Flush()
 
 	// Third batch
-	bw.Write([]byte("batch3"))
+	bw.WriteString("batch3")
 	bw.Flush()
 
 	// Should have 3 write calls (one per flush)
@@ -468,7 +468,7 @@ func TestBufferedWriter_BufferFillAndFlush(t *testing.T) {
 	}
 
 	// Write one more byte to trigger flush
-	bw.Write([]byte("X"))
+	bw.WriteString("X")
 
 	// Should have written the buffered data
 	if writeCalls < 1 {

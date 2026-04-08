@@ -34,7 +34,6 @@ type DiskMonitor struct {
 	path          string
 	cfg           config.DiskMonitorConfig
 	wg            sync.WaitGroup
-	mu            sync.RWMutex
 	checkMu       sync.Mutex
 	isRunning     atomic.Bool
 }

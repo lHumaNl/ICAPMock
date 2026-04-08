@@ -86,20 +86,17 @@ func (m *HealthMonitorModel) renderContent() string {
 	var sections []string
 
 	// Title
-	sections = append(sections, TitleStyle.Render("Health Monitor"))
-	sections = append(sections, "")
+	sections = append(sections, TitleStyle.Render("Health Monitor"), "")
 
 	// Current health status
 	if len(m.healthChecks) > 0 {
 		latest := m.healthChecks[len(m.healthChecks)-1]
-		sections = append(sections, m.renderCurrentHealth(latest))
-		sections = append(sections, "")
+		sections = append(sections, m.renderCurrentHealth(latest), "")
 	}
 
 	// Alerts
 	if len(m.alerts) > 0 {
-		sections = append(sections, m.renderAlerts())
-		sections = append(sections, "")
+		sections = append(sections, m.renderAlerts(), "")
 	}
 
 	// Health check history
@@ -130,18 +127,17 @@ func (m *HealthMonitorModel) renderCurrentHealth(result state.HealthCheckResult)
 
 	// Storage status
 	storageStyle := m.getComponentStyle(result.StorageStatus)
-	lines = append(lines, SubtitleStyle.Render(fmt.Sprintf("Storage: %s", storageStyle.Render(result.StorageStatus))))
-
-	// Scenarios loaded
-	lines = append(lines, SubtitleStyle.Render(fmt.Sprintf("Scenarios Loaded: %d", result.Scenarios)))
-
-	// Last check time
-	lines = append(lines, SubtitleStyle.Render(fmt.Sprintf("Last Check: %s", result.Timestamp.Format("15:04:05"))))
+	lines = append(lines,
+		SubtitleStyle.Render(fmt.Sprintf("Storage: %s", storageStyle.Render(result.StorageStatus))),
+		// Scenarios loaded
+		SubtitleStyle.Render(fmt.Sprintf("Scenarios Loaded: %d", result.Scenarios)),
+		// Last check time
+		SubtitleStyle.Render(fmt.Sprintf("Last Check: %s", result.Timestamp.Format("15:04:05"))),
+	)
 
 	// Error if present
 	if result.Error != "" {
-		lines = append(lines, "")
-		lines = append(lines, SubtitleStyle.Render(fmt.Sprintf("Error: %s", result.Error)))
+		lines = append(lines, "", SubtitleStyle.Render(fmt.Sprintf("Error: %s", result.Error)))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)

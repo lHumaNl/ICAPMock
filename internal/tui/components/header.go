@@ -122,12 +122,3 @@ func (m *HeaderModel) GetHeight() int {
 	return 1
 }
 
-// Header styles.
-var (
-	headerBackgroundStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("236")).
-				Padding(0, 1)
-
-	borderBottomStyle = lipgloss.NewStyle().
-				Border(lipgloss.Border{Left: " ", Right: " ", Top: " ", Bottom: "─"})
-)

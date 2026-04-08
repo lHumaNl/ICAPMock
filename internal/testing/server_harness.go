@@ -24,19 +24,6 @@ import (
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
-// getFreePort returns a free TCP port that can be used for testing.
-// This is a non-testing version that doesn't require *testing.T.
-func getFreePort() int {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(fmt.Sprintf("Failed to get free port: %v", err))
-	}
-	defer l.Close() //nolint:errcheck
-
-	addr := l.Addr().(*net.TCPAddr) //nolint:errcheck
-	return addr.Port
-}
-
 // ServerHarness provides a test harness for running an ICAP server in tests.
 // It handles server lifecycle (start/stop), configuration, and provides
 // utilities for sending requests to the server.
@@ -439,8 +426,8 @@ func NewMemoryServerHarness(t testing.TB) *MemoryServerHarness {
 //	harness.SetHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 //	    return icap.NewResponse(200), nil
 //	})
-func (h *MemoryServerHarness) SetHandler(handler handler.HandlerFunc) {
-	h.handler = handler
+func (h *MemoryServerHarness) SetHandler(hf handler.HandlerFunc) {
+	h.handler = hf
 }
 
 // Handle processes a request through the handler.

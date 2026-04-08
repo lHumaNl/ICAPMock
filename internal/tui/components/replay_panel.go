@@ -536,8 +536,7 @@ func (m *ReplayPanelModel) renderResultsView() string {
 	var requestList string
 	if len(m.replayResults.RequestResults) > 0 {
 		var lines []string
-		lines = append(lines, TitleStyle.Render("Request Results"))
-		lines = append(lines, "")
+		lines = append(lines, TitleStyle.Render("Request Results"), "")
 
 		for i, result := range m.replayResults.RequestResults {
 			statusStyle := lipgloss.NewStyle()

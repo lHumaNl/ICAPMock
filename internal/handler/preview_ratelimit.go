@@ -86,7 +86,7 @@ type clientTracker struct {
 //	)
 func NewPreviewRateLimiter(
 	config PreviewRateLimiterConfig,
-	metrics *metrics.Collector,
+	mc *metrics.Collector,
 	logger *slog.Logger,
 ) *PreviewRateLimiter {
 	if config.WindowSeconds <= 0 {
@@ -108,7 +108,7 @@ func NewPreviewRateLimiter(
 	limiter := &PreviewRateLimiter{
 		config:  config,
 		clients: make(map[string]*clientTracker),
-		metrics: metrics,
+		metrics: mc,
 		logger:  logger,
 		ctx:     ctx,
 		cancel:  cancel,
@@ -220,14 +220,6 @@ func (l *PreviewRateLimiter) extractClientID(req *icap.Request) string {
 	return "unknown"
 }
 
-// getOrCreateTracker gets an existing client tracker or creates a new one.
-// Handles LRU eviction if MaxClients limit is reached.
-func (l *PreviewRateLimiter) getOrCreateTracker(clientID string) *clientTracker {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.getOrCreateTrackerLocked(clientID)
-}
-
 // getOrCreateTrackerLocked is like getOrCreateTracker but assumes the lock is already held.
 func (l *PreviewRateLimiter) getOrCreateTrackerLocked(clientID string) *clientTracker {
 	// Check if tracker exists
@@ -277,13 +269,6 @@ func (l *PreviewRateLimiter) evictOldestClient() {
 			)
 		}
 	}
-}
-
-// cleanupExpiredRequests removes requests older than the sliding window.
-func (l *PreviewRateLimiter) cleanupExpiredRequests(tracker *clientTracker, windowStart time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.cleanupExpiredRequestsLocked(tracker, windowStart)
 }
 
 // cleanupExpiredRequestsLocked is like cleanupExpiredRequests but assumes the lock is already held.

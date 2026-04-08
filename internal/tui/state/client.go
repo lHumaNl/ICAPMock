@@ -281,7 +281,7 @@ func (c *MetricsClient) parseMetrics(body string) (*MetricsSnapshot, error) {
 	return snapshot, nil
 }
 
-func parseCounterMetric(line string) (float64, string) {
+func parseCounterMetric(line string) (value float64, labels string) {
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
 		return 0, ""
@@ -305,7 +305,7 @@ func parseCounterMetric(line string) (float64, string) {
 	return value, ""
 }
 
-func parseHistogramMetric(line string) (float64, string) {
+func parseHistogramMetric(line string) (value float64, quantile string) {
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
 		return 0, ""

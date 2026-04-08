@@ -22,7 +22,7 @@ func TestNewScenarioWatcher(t *testing.T) {
 		scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
 		// Create the file
-		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 		registry := NewScenarioRegistry()
 		config := HotReloadConfig{
@@ -63,7 +63,7 @@ scenarios:
     response:
       icap_status: 204
 `
-		require.NoError(t, os.WriteFile(scenarioFile, []byte(yamlContent), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte(yamlContent), 0o644))
 
 		registry := NewScenarioRegistry()
 		require.NoError(t, registry.Load(scenarioFile))
@@ -114,7 +114,7 @@ scenarios:
     response:
       icap_status: 204
 `
-		require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0o644))
 
 		registry := NewScenarioRegistry()
 		require.NoError(t, registry.Load(scenarioFile))
@@ -151,7 +151,7 @@ scenarios:
     response:
       icap_status: 200
 `
-		require.NoError(t, os.WriteFile(scenarioFile, []byte(updatedContent), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte(updatedContent), 0o644))
 
 		// Wait for reload to complete
 		time.Sleep(200 * time.Millisecond)
@@ -181,7 +181,7 @@ scenarios:
     response:
       icap_status: 204
 `
-		require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0o644))
 
 		registry := NewScenarioRegistry()
 		require.NoError(t, registry.Load(scenarioFile))
@@ -208,7 +208,7 @@ scenarios:
     response:
       icap_status: 200
 `
-		require.NoError(t, os.WriteFile(newFile, []byte(newContent), 0644))
+		require.NoError(t, os.WriteFile(newFile, []byte(newContent), 0o644))
 
 		// Wait for reload to complete
 		time.Sleep(200 * time.Millisecond)
@@ -226,7 +226,7 @@ func TestScenarioWatcher_Debounce(t *testing.T) {
 		scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
 		// Create initial file
-		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 		registry := NewScenarioRegistry()
 		require.NoError(t, registry.Load(scenarioFile))
@@ -255,7 +255,7 @@ func TestScenarioWatcher_Debounce(t *testing.T) {
 
 		// Rapidly write to the file multiple times
 		for i := 0; i < 5; i++ {
-			require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+			require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 			time.Sleep(10 * time.Millisecond)
 		}
 
@@ -301,7 +301,7 @@ scenarios:
     response:
       icap_status: 204
 `
-	require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -324,7 +324,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	require.NoError(t, os.WriteFile(scenarioFile, []byte(updatedContent), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte(updatedContent), 0o644))
 
 	// Trigger manual reload
 	require.NoError(t, watcher.TriggerReload())
@@ -346,7 +346,7 @@ func TestScenarioWatcher_Stats(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -375,7 +375,7 @@ func TestScenarioWatcher_GetWatchedPath(t *testing.T) {
 		tmpDir := t.TempDir()
 		scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 		registry := NewScenarioRegistry()
 		config := HotReloadConfig{
@@ -395,7 +395,7 @@ func TestScenarioWatcher_GetWatchedPath(t *testing.T) {
 		tmpDir := t.TempDir()
 		scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 		registry := NewScenarioRegistry()
 		config := HotReloadConfig{
@@ -418,7 +418,7 @@ func TestScenarioWatcher_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -447,7 +447,7 @@ func TestScenarioWatcher_WithCustomLogger(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -462,7 +462,7 @@ func TestScenarioWatcher_WithCustomLogger(t *testing.T) {
 	watcher, err := NewScenarioWatcher(registry, scenarioFile, config, WithWatcherLogger(logger))
 	require.NoError(t, err)
 	require.NotNil(t, watcher)
-	defer watcher.Stop()
+	watcher.Stop()
 }
 
 // TestHotReloadConfig_SetDefaults tests the SetDefaults method.
@@ -480,7 +480,7 @@ func TestScenarioWatcher_ConcurrentAccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -522,7 +522,7 @@ func TestScenarioWatcher_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644)
+			_ = os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644)
 			time.Sleep(10 * time.Millisecond)
 		}()
 	}
@@ -536,7 +536,7 @@ func TestScenarioWatcher_IsRelevantEvent(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -614,7 +614,7 @@ func TestScenarioWatcher_MultipleStops(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -641,7 +641,7 @@ func TestScenarioWatcher_ErrorHandling(t *testing.T) {
 		scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
 		// Create valid initial file
-		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 		registry := NewScenarioRegistry()
 		require.NoError(t, registry.Load(scenarioFile))
@@ -659,7 +659,7 @@ func TestScenarioWatcher_ErrorHandling(t *testing.T) {
 		require.NoError(t, watcher.Start())
 
 		// Write invalid YAML
-		require.NoError(t, os.WriteFile(scenarioFile, []byte("invalid: yaml: content: ["), 0644))
+		require.NoError(t, os.WriteFile(scenarioFile, []byte("invalid: yaml: content: ["), 0o644))
 
 		// Wait for reload attempt
 		time.Sleep(200 * time.Millisecond)
@@ -690,7 +690,7 @@ scenarios:
       headers:
         X-Version: "1"
 `
-	require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte(initialContent), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -723,7 +723,7 @@ scenarios:
       headers:
         X-Version: "2"
 `
-	require.NoError(t, os.WriteFile(scenarioFile, []byte(updatedContent), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte(updatedContent), 0o644))
 
 	// Wait for hot-reload
 	time.Sleep(300 * time.Millisecond)
@@ -749,7 +749,7 @@ func TestScenarioWatcher_PendingReloads(t *testing.T) {
 	tmpDir := t.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(t, registry.Load(scenarioFile))
@@ -767,7 +767,7 @@ func TestScenarioWatcher_PendingReloads(t *testing.T) {
 	require.NoError(t, watcher.Start())
 
 	// Trigger a file change
-	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(t, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	// Immediately check - should have pending reload
 	time.Sleep(50 * time.Millisecond)
@@ -794,7 +794,7 @@ scenarios:
     response:
       icap_status: 200
 `
-	require.NoError(b, os.WriteFile(scenarioFile, []byte(yamlContent), 0644))
+	require.NoError(b, os.WriteFile(scenarioFile, []byte(yamlContent), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(b, registry.Load(scenarioFile))
@@ -819,7 +819,7 @@ func BenchmarkScenarioWatcher_Stats(b *testing.B) {
 	tmpDir := b.TempDir()
 	scenarioFile := filepath.Join(tmpDir, "scenarios.yaml")
 
-	require.NoError(b, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0644))
+	require.NoError(b, os.WriteFile(scenarioFile, []byte("scenarios: []"), 0o644))
 
 	registry := NewScenarioRegistry()
 	require.NoError(b, registry.Load(scenarioFile))

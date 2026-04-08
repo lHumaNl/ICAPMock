@@ -35,12 +35,12 @@ type Factory struct {
 func NewFactory(
 	cfg config.CircuitBreakerGlobalConfig,
 	logger *slog.Logger,
-	metrics *metrics.Collector,
+	mc *metrics.Collector,
 ) *Factory {
 	return &Factory{
 		config:  cfg,
 		logger:  logger,
-		metrics: metrics,
+		metrics: mc,
 	}
 }
 

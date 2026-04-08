@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -182,10 +181,10 @@ type StaticScriptValidator struct {
 }
 
 // NewStaticScriptValidator creates a new static script validator.
-func NewStaticScriptValidator(blockedFunctions []string, logger *logger.Logger) *StaticScriptValidator {
+func NewStaticScriptValidator(blockedFunctions []string, log *logger.Logger) *StaticScriptValidator {
 	v := &StaticScriptValidator{
 		maxScriptLength: 100000, // 100KB max script length
-		logger:          logger,
+		logger:          log,
 	}
 
 	// Compile blocked function patterns
@@ -346,16 +345,6 @@ func (p *ScriptProcessor) CreateInstrumentedConsole(vm *goja.Runtime, monitor *S
 
 	// Set the console object
 	return vm.Set("console", consoleObj)
-}
-
-// containsBlockedPatterns checks if a script contains blocked patterns.
-func (p *ScriptProcessor) containsBlockedPatterns(script string) bool {
-	for _, funcName := range p.security.BlockedFunctions {
-		if strings.Contains(script, funcName) {
-			return true
-		}
-	}
-	return false
 }
 
 // validateScript performs comprehensive validation before execution.

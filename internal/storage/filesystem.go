@@ -71,16 +71,13 @@ type FileStorage struct {
 	logger           *slog.Logger
 	cancel           context.CancelFunc
 	metrics          *prometheusmetrics.Collector
-	date             string
 	config           config.StorageConfig
 	wg               sync.WaitGroup
 	fileCounter      int64
 	requestCount     int64
-	counter          int64
 	mu               sync.RWMutex
 	rotationMu       sync.Mutex
 	closed           atomic.Bool
-	pendingRotations atomic.Int32
 }
 
 // NewFileStorage creates a new file-based storage instance.
@@ -95,7 +92,7 @@ func NewFileStorage(cfg config.StorageConfig, metrics *prometheusmetrics.Collect
 	}
 
 	// Ensure the directory exists
-	if err := os.MkdirAll(cfg.RequestsDir, 0755); err != nil { //nolint:gosec // path is validated
+	if err := os.MkdirAll(cfg.RequestsDir, 0o755); err != nil { //nolint:gosec // path is validated
 		return nil, fmt.Errorf("creating storage directory: %w", err)
 	}
 
@@ -266,14 +263,12 @@ func (fs *FileStorage) rotationHandler() {
 					fs.metrics.RecordStorageRotation("failure")
 					fs.metrics.DecStorageRotationActive()
 				}
-			} else {
+			} else if fs.metrics != nil {
 				// Record rotation success in metrics
-				if fs.metrics != nil {
-					duration := time.Since(startTime)
-					fs.metrics.RecordStorageRotationDuration(duration)
-					fs.metrics.RecordStorageRotation("success")
-					fs.metrics.DecStorageRotationActive()
-				}
+				duration := time.Since(startTime)
+				fs.metrics.RecordStorageRotationDuration(duration)
+				fs.metrics.RecordStorageRotation("success")
+				fs.metrics.DecStorageRotationActive()
 			}
 		}
 	}
@@ -349,7 +344,7 @@ func (fs *FileStorage) initBatchFile() error {
 		fmt.Sprintf("%s_batch_%06d.jsonl", dateStr, fs.fileCounter),
 	)
 
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // path is validated
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644) //nolint:gosec // path is validated
 	if err != nil {
 		return fmt.Errorf("creating batch file: %w", err)
 	}
@@ -392,7 +387,7 @@ func (fs *FileStorage) rotateFile() error {
 		fmt.Sprintf("%s_batch_%06d.jsonl", dateStr, fs.fileCounter),
 	)
 
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // path is validated
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644) //nolint:gosec // path is validated
 	if err != nil {
 		return fmt.Errorf("creating new batch file: %w", err)
 	}
@@ -400,25 +395,6 @@ func (fs *FileStorage) rotateFile() error {
 	fs.currentFile = f
 	fs.requestCount = 0
 	return nil
-}
-
-// generateFilename generates a unique filename for a request.
-// Format: YYYY-MM-DD_NNN.json.
-func (fs *FileStorage) generateFilename(t time.Time) string {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	dateStr := t.Format("2006-01-02")
-	if fs.date != dateStr {
-		fs.date = dateStr
-		fs.counter = 0
-	}
-
-	fs.counter++
-	return filepath.Join(
-		fs.config.RequestsDir,
-		fmt.Sprintf("%s_%03d.json", dateStr, fs.counter),
-	)
 }
 
 // GetRequest retrieves a previously stored request by its ID.
@@ -508,17 +484,9 @@ func (fs *FileStorage) ListRequests(_ context.Context, filter RequestFilter) ([]
 
 	// Build glob patterns for both old and new formats
 	var patterns []string
-	if !filter.Start.IsZero() || !filter.End.IsZero() {
-		// List all files and filter by date
-		patterns = []string{
-			filepath.Join(fs.config.RequestsDir, "*.json"),
-			filepath.Join(fs.config.RequestsDir, "*.jsonl"),
-		}
-	} else {
-		patterns = []string{
-			filepath.Join(fs.config.RequestsDir, "*.json"),
-			filepath.Join(fs.config.RequestsDir, "*.jsonl"),
-		}
+	patterns = []string{
+		filepath.Join(fs.config.RequestsDir, "*.json"),
+		filepath.Join(fs.config.RequestsDir, "*.jsonl"),
 	}
 
 	var results []*StoredRequest

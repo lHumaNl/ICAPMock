@@ -79,7 +79,7 @@ replay:
 	// Create temp file
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "config.yaml")
-	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
 
@@ -268,7 +268,7 @@ func TestLoader_LoadJSON(t *testing.T) {
 	// Create temp file
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "config.json")
-	if err := os.WriteFile(tmpFile, []byte(jsonContent), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(jsonContent), 0o644); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
 
@@ -325,7 +325,7 @@ server:
 
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "invalid.yaml")
-	if err := os.WriteFile(tmpFile, []byte(invalidYAML), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(invalidYAML), 0o644); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
 
@@ -353,7 +353,7 @@ func TestLoader_LoadFromEnv(t *testing.T) {
 	// Set env vars
 	for k, v := range envVars {
 		os.Setenv(k, v)
-		defer os.Unsetenv(k)
+		defer os.Unsetenv(k) //nolint:gocritic // deferInLoop: intentional cleanup
 	}
 
 	loader := NewLoader()
@@ -404,7 +404,7 @@ logging:
 `
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "config.yaml")
-	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
 
@@ -585,7 +585,7 @@ storage:
 `
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "production.yaml")
-	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
@@ -622,7 +622,7 @@ logging:
 `
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "development.yaml")
-	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 

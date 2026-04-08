@@ -239,30 +239,30 @@ func TestMetricsGraphModel_findMinMax(t *testing.T) {
 	model := NewMetricsGraphModel()
 
 	values := []float64{10.0, 25.0, 50.0, 5.0, 100.0}
-	min, max := model.findMinMax(values)
+	minVal, maxVal := model.findMinMax(values)
 
-	assert.Equal(t, 5.0, min)
-	assert.Equal(t, 100.0, max)
+	assert.Equal(t, 5.0, minVal)
+	assert.Equal(t, 100.0, maxVal)
 }
 
 func TestMetricsGraphModel_findMinMax_Empty(t *testing.T) {
 	model := NewMetricsGraphModel()
 
 	values := []float64{}
-	min, max := model.findMinMax(values)
+	minVal, maxVal := model.findMinMax(values)
 
-	assert.Equal(t, 0.0, min)
-	assert.Equal(t, 0.0, max)
+	assert.Equal(t, 0.0, minVal)
+	assert.Equal(t, 0.0, maxVal)
 }
 
 func TestMetricsGraphModel_findMinMax_Single(t *testing.T) {
 	model := NewMetricsGraphModel()
 
 	values := []float64{42.0}
-	min, max := model.findMinMax(values)
+	minVal, maxVal := model.findMinMax(values)
 
-	assert.Equal(t, 42.0, min)
-	assert.Equal(t, 42.0, max)
+	assert.Equal(t, 42.0, minVal)
+	assert.Equal(t, 42.0, maxVal)
 }
 
 func TestMetricsGraphModel_currentValue(t *testing.T) {

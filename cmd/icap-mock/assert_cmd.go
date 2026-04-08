@@ -202,13 +202,14 @@ func splitLabels(s string) []string {
 	inQuote := false
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
-		if ch == '"' {
+		switch {
+		case ch == '"':
 			inQuote = !inQuote
 			current.WriteByte(ch)
-		} else if ch == ',' && !inQuote {
+		case ch == ',' && !inQuote:
 			result = append(result, strings.TrimSpace(current.String()))
 			current.Reset()
-		} else {
+		default:
 			current.WriteByte(ch)
 		}
 	}

@@ -85,8 +85,7 @@ func (m *DashboardModel) Init() tea.Cmd {
 func (m *DashboardModel) Update(msg tea.Msg) (*DashboardModel, tea.Cmd) {
 	cmds := make([]tea.Cmd, 0, 4)
 
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
+	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
@@ -303,8 +302,7 @@ func (m *MetricsGraphModel) Init() tea.Cmd {
 
 // Update handles messages and updates metrics graph model.
 func (m *MetricsGraphModel) Update(msg tea.Msg) (*MetricsGraphModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
+	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = msg.Width - 4 // Account for borders
 		if m.width < 20 {
 			m.width = 20
@@ -376,10 +374,10 @@ func (m *MetricsGraphModel) createGraph(values []float64, title string, color li
 		return SubtitleStyle.Render("No data available")
 	}
 
-	// Find min and max for scaling
-	min, max := m.findMinMax(values)
-	if max == min {
-		max = min + 1.0
+	// Find minVal and maxVal for scaling
+	minVal, maxVal := m.findMinMax(values)
+	if maxVal == minVal {
+		maxVal = minVal + 1.0
 	}
 
 	// Create chart
@@ -396,37 +394,37 @@ func (m *MetricsGraphModel) createGraph(values []float64, title string, color li
 	lines := make([]string, 0, 3)
 	lines = append(lines, fmt.Sprintf("%s: %s", title, colorValue(m.currentValue(values), color)))
 
-	chartLine := m.generateChartLine(values, min, max, graphWidth, color)
-	lines = append(lines, chartLine)
-
-	// Add scale
-	lines = append(lines, fmt.Sprintf("%s%s",
-		SubtitleStyle.Render("0"),
-		SubtitleStyle.Render(fmt.Sprintf(" %.2f", max)),
-	))
+	chartLine := m.generateChartLine(values, minVal, maxVal, graphWidth, color)
+	lines = append(lines, chartLine,
+		// Add scale
+		fmt.Sprintf("%s%s",
+			SubtitleStyle.Render("0"),
+			SubtitleStyle.Render(fmt.Sprintf(" %.2f", maxVal)),
+		),
+	)
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 // findMinMax finds minimum and maximum values.
-func (m *MetricsGraphModel) findMinMax(values []float64) (float64, float64) {
+func (m *MetricsGraphModel) findMinMax(values []float64) (minVal, maxVal float64) {
 	if len(values) == 0 {
 		return 0, 0
 	}
 
-	min := values[0]
-	max := values[0]
+	minVal = values[0]
+	maxVal = values[0]
 
 	for _, v := range values[1:] {
-		if v < min {
-			min = v
+		if v < minVal {
+			minVal = v
 		}
-		if v > max {
-			max = v
+		if v > maxVal {
+			maxVal = v
 		}
 	}
 
-	return min, max
+	return minVal, maxVal
 }
 
 // currentValue returns the most recent value.
@@ -438,7 +436,7 @@ func (m *MetricsGraphModel) currentValue(values []float64) float64 {
 }
 
 // generateChartLine generates a single line of ASCII chart.
-func (m *MetricsGraphModel) generateChartLine(values []float64, min, max float64, _ int, color lipgloss.AdaptiveColor) string {
+func (m *MetricsGraphModel) generateChartLine(values []float64, minVal, maxVal float64, _ int, color lipgloss.AdaptiveColor) string {
 	if len(values) == 0 {
 		return ""
 	}
@@ -455,27 +453,28 @@ func (m *MetricsGraphModel) generateChartLine(values []float64, min, max float64
 
 	// Map each value to a character
 	var chars []string
-	step := (max - min) / 8.0
+	step := (maxVal - minVal) / 8.0
 
 	for _, v := range values {
 		var char string
-		if max == min {
+		switch {
+		case maxVal == minVal:
 			char = mid
-		} else if v < min+step {
+		case v < minVal+step:
 			char = low
-		} else if v < min+2.0*step {
+		case v < minVal+2.0*step:
 			char = midLow
-		} else if v < min+3.0*step {
+		case v < minVal+3.0*step:
 			char = mid
-		} else if v < min+4.0*step {
+		case v < minVal+4.0*step:
 			char = midHigh
-		} else if v < min+5.0*step {
+		case v < minVal+5.0*step:
 			char = highMid
-		} else if v < min+6.0*step {
+		case v < minVal+6.0*step:
 			char = high
-		} else if v < min+7.0*step {
+		case v < minVal+7.0*step:
 			char = veryHigh
-		} else {
+		default:
 			char = maxChar
 		}
 		chars = append(chars, char)
@@ -558,7 +557,7 @@ func (m *LogPreviewModel) View() string {
 
 // truncate truncates a string to max length.
 func truncate(s string, maxLen int) string {
-	if maxLen < 0 || len(s) == 0 {
+	if maxLen < 0 || s == "" {
 		return ""
 	}
 	if maxLen == 0 {

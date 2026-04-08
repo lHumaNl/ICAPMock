@@ -57,9 +57,9 @@ func TestNewRouter(t *testing.T) {
 // TestRouter_Handle tests registering a handler.
 func TestRouter_Handle(t *testing.T) {
 	r := NewRouter()
-	handler := &mockHandler{method: icap.MethodREQMOD}
+	hdlr := &mockHandler{method: icap.MethodREQMOD}
 
-	err := r.Handle("/reqmod", handler)
+	err := r.Handle("/reqmod", hdlr)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
@@ -77,9 +77,9 @@ func TestRouter_Handle(t *testing.T) {
 // TestRouter_Handle_EmptyPath tests that empty path returns error.
 func TestRouter_Handle_EmptyPath(t *testing.T) {
 	r := NewRouter()
-	handler := &mockHandler{method: icap.MethodREQMOD}
+	hdlr := &mockHandler{method: icap.MethodREQMOD}
 
-	err := r.Handle("", handler)
+	err := r.Handle("", hdlr)
 	if err == nil {
 		t.Error("Handle() with empty path should return error")
 	}
@@ -178,9 +178,9 @@ func TestRouter_HandleFunc_NilFunc(t *testing.T) {
 // TestRouter_Serve tests serving requests.
 func TestRouter_Serve(t *testing.T) {
 	r := NewRouter()
-	handler := &mockHandler{method: icap.MethodREQMOD}
+	hdlr := &mockHandler{method: icap.MethodREQMOD}
 
-	err := r.Handle("/reqmod", handler)
+	err := r.Handle("/reqmod", hdlr)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRouter_Serve(t *testing.T) {
 		t.Fatalf("Serve() error = %v", err)
 	}
 
-	if !handler.called.Load() {
+	if !hdlr.called.Load() {
 		t.Error("Handler was not called")
 	}
 
@@ -199,7 +199,7 @@ func TestRouter_Serve(t *testing.T) {
 		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, icap.StatusOK)
 	}
 
-	if handler.lastReq.Load() != req {
+	if hdlr.lastReq.Load() != req {
 		t.Error("Handler did not receive the request")
 	}
 }
@@ -207,9 +207,9 @@ func TestRouter_Serve(t *testing.T) {
 // TestRouter_Serve_NotFound tests 404 for unknown paths.
 func TestRouter_Serve_NotFound(t *testing.T) {
 	r := NewRouter()
-	handler := &mockHandler{method: icap.MethodREQMOD}
+	hdlr := &mockHandler{method: icap.MethodREQMOD}
 
-	err := r.Handle("/reqmod", handler)
+	err := r.Handle("/reqmod", hdlr)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
@@ -224,7 +224,7 @@ func TestRouter_Serve_NotFound(t *testing.T) {
 		t.Errorf("StatusCode = %d, want %d (404)", resp.StatusCode, icap.StatusNotFound)
 	}
 
-	if handler.called.Load() {
+	if hdlr.called.Load() {
 		t.Error("Handler should not be called for unknown path")
 	}
 }
@@ -235,12 +235,12 @@ func TestRouter_Serve_CustomHandlerResponse(t *testing.T) {
 	customResp := icap.NewResponse(icap.StatusNoContentNeeded)
 	customResp.SetHeader("X-Custom", "value")
 
-	handler := &mockHandler{
+	hdlr := &mockHandler{
 		method: icap.MethodREQMOD,
 		resp:   customResp,
 	}
 
-	err := r.Handle("/reqmod", handler)
+	err := r.Handle("/reqmod", hdlr)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
@@ -377,9 +377,9 @@ func TestRouter_ConcurrentAccess(_ *testing.T) {
 // TestRouter_Serve_InvalidURI tests handling of invalid URIs.
 func TestRouter_Serve_InvalidURI(t *testing.T) {
 	r := NewRouter()
-	handler := &mockHandler{method: icap.MethodREQMOD}
+	hdlr := &mockHandler{method: icap.MethodREQMOD}
 
-	err := r.Handle("/reqmod", handler)
+	err := r.Handle("/reqmod", hdlr)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
@@ -438,9 +438,9 @@ func TestRouter_Serve_ExtractPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := NewRouter()
-			handler := &mockHandler{method: icap.MethodREQMOD}
+			hdlr := &mockHandler{method: icap.MethodREQMOD}
 
-			err := r.Handle(tt.wantPath, handler)
+			err := r.Handle(tt.wantPath, hdlr)
 			if err != nil {
 				t.Fatalf("Handle() error = %v", err)
 			}
@@ -451,7 +451,7 @@ func TestRouter_Serve_ExtractPath(t *testing.T) {
 				t.Fatalf("Serve() error = %v", err)
 			}
 
-			if !handler.called.Load() {
+			if !hdlr.called.Load() {
 				t.Errorf("Handler not called for URI %s (expected path %s)", tt.uri, tt.wantPath)
 			}
 
@@ -489,7 +489,7 @@ func TestHandlerFunc(t *testing.T) {
 		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, icap.StatusOK)
 	}
 
-	// Test Method method (should return empty for generic handler)
+	// Test Method method (should return empty for generic hdlr)
 	if h.Method() != "" {
 		t.Errorf("Handler.Method() = %q, want empty", h.Method())
 	}
@@ -529,12 +529,12 @@ func TestRouter_Serve_ContextCancellation(t *testing.T) {
 func TestRouter_Serve_Error(t *testing.T) {
 	r := NewRouter()
 
-	handler := &mockHandler{
+	hdlr := &mockHandler{
 		method: icap.MethodREQMOD,
 		err:    context.DeadlineExceeded,
 	}
 
-	err := r.Handle("/reqmod", handler)
+	err := r.Handle("/reqmod", hdlr)
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}

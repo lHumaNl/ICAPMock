@@ -474,9 +474,10 @@ func (p *ScriptProcessor) parseScriptResult(val goja.Value) (*icap.Response, err
 // buildResponseFromMap builds an ICAP response from a map.
 func (p *ScriptProcessor) buildResponseFromMap(result map[string]interface{}) (*icap.Response, error) {
 	status := icap.StatusOK
-	if s, ok := result["status"].(int64); ok {
+	switch s := result["status"].(type) {
+	case int64:
 		status = int(s)
-	} else if s, ok := result["status"].(float64); ok {
+	case float64:
 		status = int(s)
 	}
 

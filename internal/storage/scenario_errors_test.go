@@ -353,7 +353,7 @@ func TestScenarioRegistry_Load_DetailedError(t *testing.T) {
 		tmpDir := t.TempDir()
 		scenarioFile := filepath.Join(tmpDir, "invalid.yaml")
 
-		if err := os.WriteFile(scenarioFile, []byte("invalid: yaml: content: ["), 0644); err != nil {
+		if err := os.WriteFile(scenarioFile, []byte("invalid: yaml: content: ["), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 
@@ -390,7 +390,7 @@ scenarios:
     response:
       icap_status: 204
 `
-		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 
@@ -432,7 +432,7 @@ scenarios:
     response:
       icap_status: 204
 `
-		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 
@@ -473,7 +473,7 @@ scenarios:
       icap_status: 200
       body_file: "/nonexistent/body.txt"
 `
-		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 
@@ -535,7 +535,7 @@ scenarios:
     response:
       icap_status: 204
 `
-		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0644); err != nil {
+		if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o644); err != nil {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 

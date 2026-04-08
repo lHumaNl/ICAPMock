@@ -127,9 +127,8 @@ func (m *MenuModel) Update(msg tea.Msg) (*MenuModel, tea.Cmd) {
 	m.list, cmd = m.list.Update(msg)
 
 	// Check for selection
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
 		case keyEnter:
 			if m.visible && m.onSelect != nil {
 				selected := m.list.SelectedItem()

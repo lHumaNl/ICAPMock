@@ -28,11 +28,11 @@ func TestCalculateBackoffWithJitter_JitterNone(t *testing.T) {
 
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	// Without jitter, backoff should be deterministic
-	backoff1 := calculateBackoffWithJitter(initial, multiplier, max, 0, handler.JitterNone, 0.25)
-	backoff2 := calculateBackoffWithJitter(initial, multiplier, max, 0, handler.JitterNone, 0.25)
+	backoff1 := calculateBackoffWithJitter(initial, multiplier, maxBackoff, 0, handler.JitterNone, 0.25)
+	backoff2 := calculateBackoffWithJitter(initial, multiplier, maxBackoff, 0, handler.JitterNone, 0.25)
 
 	if backoff1 != backoff2 {
 		t.Errorf("With JitterNone, backoff should be deterministic: %v != %v", backoff1, backoff2)
@@ -48,7 +48,7 @@ func TestCalculateBackoffWithJitter_JitterNone(t *testing.T) {
 	}
 
 	for attempt, expected := range expectedBackoffs {
-		backoff := calculateBackoffWithJitter(initial, multiplier, max, attempt, handler.JitterNone, 0.25)
+		backoff := calculateBackoffWithJitter(initial, multiplier, maxBackoff, attempt, handler.JitterNone, 0.25)
 		if backoff != expected {
 			t.Errorf("Attempt %d: backoff = %v, want %v", attempt, backoff, expected)
 		}
@@ -61,19 +61,19 @@ func TestCalculateBackoffWithJitter_JitterFull(t *testing.T) {
 
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	// With JitterFull, backoff should vary between 0 and the calculated backoff
 	backoffs := make([]time.Duration, 100)
 	for i := 0; i < 100; i++ {
-		backoffs[i] = calculateBackoffWithJitter(initial, multiplier, max, 2, handler.JitterFull, 0)
+		backoffs[i] = calculateBackoffWithJitter(initial, multiplier, maxBackoff, 2, handler.JitterFull, 0)
 	}
 
-	// Find min and max
-	var min, maxDuration time.Duration
+	// Find minVal and maxVal
+	var minDuration, maxDuration time.Duration
 	for i, b := range backoffs {
-		if i == 0 || b < min {
-			min = b
+		if i == 0 || b < minDuration {
+			minDuration = b
 		}
 		if b > maxDuration {
 			maxDuration = b
@@ -81,7 +81,7 @@ func TestCalculateBackoffWithJitter_JitterFull(t *testing.T) {
 	}
 
 	// Backoffs should vary
-	if min == maxDuration {
+	if minDuration == maxDuration {
 		t.Error("With JitterFull, backoffs should vary")
 	}
 
@@ -92,8 +92,8 @@ func TestCalculateBackoffWithJitter_JitterFull(t *testing.T) {
 	}
 
 	// Min should be close to 0 (with jitter, some values should be small)
-	if min > expectedMax/10 {
-		t.Errorf("Min backoff %v should be significantly less than max %v", min, maxDuration)
+	if minDuration > expectedMax/10 {
+		t.Errorf("Min backoff %v should be significantly less than max %v", minDuration, maxDuration)
 	}
 }
 
@@ -103,22 +103,22 @@ func TestCalculateBackoffWithJitter_JitterEqual(t *testing.T) {
 
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 	jitterPercent := 0.25 // 25% jitter
 
 	// With JitterEqual and 25% jitter, backoff should vary between ±12.5% of the calculated backoff
 	backoffs := make([]time.Duration, 1000)
 	for i := 0; i < 1000; i++ {
-		backoffs[i] = calculateBackoffWithJitter(initial, multiplier, max, 2, handler.JitterEqual, jitterPercent)
+		backoffs[i] = calculateBackoffWithJitter(initial, multiplier, maxBackoff, 2, handler.JitterEqual, jitterPercent)
 	}
 
 	// Calculate statistics
 	var sum time.Duration
-	var min, maxDuration time.Duration
+	var minDuration, maxDuration time.Duration
 	for i, b := range backoffs {
 		sum += b
-		if i == 0 || b < min {
-			min = b
+		if i == 0 || b < minDuration {
+			minDuration = b
 		}
 		if b > maxDuration {
 			maxDuration = b
@@ -139,8 +139,8 @@ func TestCalculateBackoffWithJitter_JitterEqual(t *testing.T) {
 	expectedMin := time.Duration(float64(expectedMean) * (1 - jitterPercent))
 	expectedMax := time.Duration(float64(expectedMean) * (1 + jitterPercent))
 
-	if min < expectedMin || maxDuration > expectedMax {
-		t.Errorf("Backoffs should be within [%v, %v], got [%v, %v]", expectedMin, expectedMax, min, maxDuration)
+	if minDuration < expectedMin || maxDuration > expectedMax {
+		t.Errorf("Backoffs should be within [%v, %v], got [%v, %v]", expectedMin, expectedMax, minDuration, maxDuration)
 	}
 }
 
@@ -150,13 +150,13 @@ func TestCalculateBackoffWithJitter_Distribution(t *testing.T) {
 
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	// Generate many backoff values
 	numSamples := 10000
 	backoffs := make([]time.Duration, numSamples)
 	for i := 0; i < numSamples; i++ {
-		backoffs[i] = calculateBackoffWithJitter(initial, multiplier, max, 1, handler.JitterEqual, 0.25)
+		backoffs[i] = calculateBackoffWithJitter(initial, multiplier, maxBackoff, 1, handler.JitterEqual, 0.25)
 	}
 
 	// Divide into buckets to check distribution
@@ -212,13 +212,13 @@ func TestCalculateBackoffWithJitter_InvalidJitterPercent(t *testing.T) {
 
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	// Negative jitter percent should be clamped to default (0.25)
-	backoff1 := calculateBackoffWithJitter(initial, multiplier, max, 1, handler.JitterEqual, -0.1)
+	backoff1 := calculateBackoffWithJitter(initial, multiplier, maxBackoff, 1, handler.JitterEqual, -0.1)
 
 	// Jitter percent > 1.0 should be clamped to default (0.25)
-	backoff2 := calculateBackoffWithJitter(initial, multiplier, max, 1, handler.JitterEqual, 1.5)
+	backoff2 := calculateBackoffWithJitter(initial, multiplier, maxBackoff, 1, handler.JitterEqual, 1.5)
 
 	// Both should be valid (within expected range for default 25% jitter)
 	baseBackoff := 200 * time.Millisecond
@@ -255,8 +255,8 @@ func TestRetryMiddleware_JitterPreventsThunderingHerd(t *testing.T) {
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -307,11 +307,11 @@ func TestRetryMiddleware_JitterPreventsThunderingHerd(t *testing.T) {
 func BenchmarkCalculateBackoffWithoutJitter(b *testing.B) {
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		calculateBackoffWithJitter(initial, multiplier, max, i%10, handler.JitterNone, 0)
+		calculateBackoffWithJitter(initial, multiplier, maxBackoff, i%10, handler.JitterNone, 0)
 	}
 }
 
@@ -319,11 +319,11 @@ func BenchmarkCalculateBackoffWithoutJitter(b *testing.B) {
 func BenchmarkCalculateBackoffWithJitterEqual(b *testing.B) {
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		calculateBackoffWithJitter(initial, multiplier, max, i%10, handler.JitterEqual, 0.25)
+		calculateBackoffWithJitter(initial, multiplier, maxBackoff, i%10, handler.JitterEqual, 0.25)
 	}
 }
 
@@ -331,11 +331,11 @@ func BenchmarkCalculateBackoffWithJitterEqual(b *testing.B) {
 func BenchmarkCalculateBackoffWithJitterFull(b *testing.B) {
 	initial := 100 * time.Millisecond
 	multiplier := 2.0
-	max := 1 * time.Second
+	maxBackoff := 1 * time.Second
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		calculateBackoffWithJitter(initial, multiplier, max, i%10, handler.JitterFull, 0)
+		calculateBackoffWithJitter(initial, multiplier, maxBackoff, i%10, handler.JitterFull, 0)
 	}
 }
 
@@ -352,8 +352,8 @@ func BenchmarkRetryMiddleware_WithoutJitter(b *testing.B) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	ctx := context.Background()
@@ -378,8 +378,8 @@ func BenchmarkRetryMiddleware_WithJitter(b *testing.B) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	ctx := context.Background()
@@ -401,7 +401,7 @@ func abs(f float64) float64 {
 // calculateBackoffWithJitter is a helper function to test the private function.
 //
 //nolint:unparam
-func calculateBackoffWithJitter(initial time.Duration, multiplier float64, max time.Duration, attempt int, strategy handler.JitterStrategy, jitterPercent float64) time.Duration {
+func calculateBackoffWithJitter(initial time.Duration, multiplier float64, maxBackoff time.Duration, attempt int, strategy handler.JitterStrategy, jitterPercent float64) time.Duration {
 	// This is a test helper that mirrors the implementation in retry.go
 	// We use reflection or package-level access if needed
 
@@ -410,8 +410,8 @@ func calculateBackoffWithJitter(initial time.Duration, multiplier float64, max t
 	backoff := time.Duration(float64(initial) * pow(multiplier, attempt))
 
 	// Cap at max backoff
-	if backoff > max {
-		backoff = max
+	if backoff > maxBackoff {
+		backoff = maxBackoff
 	}
 
 	// Apply jitter based on strategy
@@ -675,8 +675,8 @@ func TestRetryMiddleware_SuccessOnFirstAttempt(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -712,8 +712,8 @@ func TestRetryMiddleware_RetryOnTransientError(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	start := time.Now()
@@ -753,8 +753,8 @@ func TestRetryMiddleware_NoRetryOnNonTransientError(t *testing.T) {
 		return nil, expectedErr
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -787,8 +787,8 @@ func TestRetryMiddleware_MaxRetriesEnforced(t *testing.T) {
 		return nil, retryableErr
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -827,8 +827,8 @@ func TestRetryMiddleware_ExponentialBackoffTiming(t *testing.T) {
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	start := time.Now()
@@ -882,8 +882,8 @@ func TestRetryMiddleware_ContextCancellation(t *testing.T) {
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -922,8 +922,8 @@ func TestRetryMiddleware_ContextDeadlineExceeded(t *testing.T) {
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -967,8 +967,8 @@ func TestRetryMiddleware_ConcurrentRequests(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	const numRequests = 20 // Reduced for more stable testing
 	var wg sync.WaitGroup
@@ -995,9 +995,9 @@ func TestRetryMiddleware_ConcurrentRequests(t *testing.T) {
 
 	// Most requests should succeed (allow some failures due to test logic)
 	successes := atomic.LoadInt64(&successCount)
-	errors := atomic.LoadInt64(&errorCount)
+	errs := atomic.LoadInt64(&errorCount)
 	if successes == 0 {
-		t.Errorf("No requests succeeded. Successes: %d, Errors: %d", successes, errors)
+		t.Errorf("No requests succeeded. Successes: %d, Errors: %d", successes, errs)
 	}
 }
 
@@ -1016,8 +1016,8 @@ func TestRetryMiddleware_ZeroMaxRetries(t *testing.T) {
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -1051,8 +1051,8 @@ func TestRetryMiddleware_NegativeMaxRetries(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -1091,8 +1091,8 @@ func TestRetryMiddleware_MaxBackoffCap(t *testing.T) {
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	_, _ = wrappedHandler.Handle(context.Background(), req)
@@ -1197,8 +1197,8 @@ func TestRetryMiddleware_NilLogger(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -1226,8 +1226,8 @@ func TestRetryMiddleware_NilResponse(t *testing.T) {
 		return nil, nil // Nil response, no error
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	resp, err := wrappedHandler.Handle(context.Background(), req)
@@ -1255,8 +1255,8 @@ func BenchmarkRetryMiddleware_NoRetry(b *testing.B) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	ctx := context.Background()
@@ -1287,8 +1287,8 @@ func BenchmarkRetryMiddleware_WithRetry(b *testing.B) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	middleware := handler.RetryMiddleware(cfg)
-	wrappedHandler := middleware(baseHandler)
+	mw := handler.RetryMiddleware(cfg)
+	wrappedHandler := mw(baseHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 	ctx := context.Background()

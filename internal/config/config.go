@@ -592,6 +592,37 @@ func (c *MockConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// PerClientRateLimitConfig contains per-client rate limiting configuration.
+// Per-client rate limiting protects against DoS attacks by limiting requests
+// from individual IP addresses independently.
+type PerClientRateLimitConfig struct {
+	// Enabled enables per-client rate limiting.
+	// When enabled, each client IP has its own rate limit bucket.
+	// Default: false
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// RequestsPerSecond is the maximum requests per second per client.
+	// Each client IP has an independent bucket with this rate.
+	// Default: 100
+	RequestsPerSecond int `yaml:"requests_per_second" json:"requests_per_second"`
+
+	// Burst is the maximum burst capacity per client.
+	// Allows temporary traffic bursts from each client.
+	// Default: 200 (2x requests_per_second)
+	Burst int `yaml:"burst" json:"burst"`
+
+	// MaxClients is the maximum number of clients tracked in the cache.
+	// When this limit is reached, the least recently used client is evicted.
+	// This protects against memory exhaustion from tracking too many IPs.
+	// Default: 10000
+	MaxClients int `yaml:"max_clients" json:"max_clients"`
+
+	// TTL is the time-to-live for inactive client entries.
+	// Clients not accessed within this period are candidates for eviction.
+	// Default: 5m (5 minutes)
+	TTL time.Duration `yaml:"ttl" json:"ttl"`
+}
+
 // UnmarshalJSON implements custom JSON unmarshaling for PerClientRateLimitConfig.
 // It handles time.Duration fields which can be strings like "5m".
 func (c *PerClientRateLimitConfig) UnmarshalJSON(data []byte) error {
@@ -617,6 +648,31 @@ func (c *PerClientRateLimitConfig) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
+}
+
+// CircuitBreakerConfig contains circuit breaker configuration for storage operations.
+// The circuit breaker has three states: Closed (normal), Open (failing fast),
+// and Half-Open (testing recovery).
+type CircuitBreakerConfig struct {
+	// Enabled enables the circuit breaker for storage operations.
+	// When disabled, storage failures are logged but don't affect request flow.
+	// Default: true
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// MaxFailures is the number of consecutive failures before opening the circuit.
+	// Once this threshold is reached, the circuit opens and storage is skipped.
+	// Default: 5
+	MaxFailures int `yaml:"max_failures" json:"max_failures"`
+
+	// ResetTimeout is the duration to wait before transitioning from Open to Half-Open.
+	// In Half-Open state, a single request is allowed through to test recovery.
+	// Default: 30s
+	ResetTimeout time.Duration `yaml:"reset_timeout" json:"reset_timeout"`
+
+	// SuccessThreshold is the number of consecutive successes in Half-Open state
+	// required to close the circuit and resume normal operation.
+	// Default: 3
+	SuccessThreshold int `yaml:"success_threshold" json:"success_threshold"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for CircuitBreakerConfig.
@@ -690,31 +746,6 @@ type StorageConfig struct {
 	Enabled        bool                 `yaml:"enabled" json:"enabled"`
 }
 
-// CircuitBreakerConfig contains circuit breaker configuration for storage operations.
-// The circuit breaker has three states: Closed (normal), Open (failing fast),
-// and Half-Open (testing recovery).
-type CircuitBreakerConfig struct {
-	// Enabled enables the circuit breaker for storage operations.
-	// When disabled, storage failures are logged but don't affect request flow.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// MaxFailures is the number of consecutive failures before opening the circuit.
-	// Once this threshold is reached, the circuit opens and storage is skipped.
-	// Default: 5
-	MaxFailures int `yaml:"max_failures" json:"max_failures"`
-
-	// ResetTimeout is the duration to wait before transitioning from Open to Half-Open.
-	// In Half-Open state, a single request is allowed through to test recovery.
-	// Default: 30s
-	ResetTimeout time.Duration `yaml:"reset_timeout" json:"reset_timeout"`
-
-	// SuccessThreshold is the number of consecutive successes in Half-Open state
-	// required to close the circuit and resume normal operation.
-	// Default: 3
-	SuccessThreshold int `yaml:"success_threshold" json:"success_threshold"`
-}
-
 // DiskMonitorConfig contains disk space monitoring configuration for storage operations.
 // The disk monitor prevents crashes when disk is full by checking available space
 // before writes and rejecting requests at error threshold.
@@ -772,36 +803,6 @@ type RateLimitConfig struct {
 	Enabled           bool    `yaml:"enabled" json:"enabled"`
 }
 
-// PerClientRateLimitConfig contains per-client rate limiting configuration.
-// Per-client rate limiting protects against DoS attacks by limiting requests
-// from individual IP addresses independently.
-type PerClientRateLimitConfig struct {
-	// Enabled enables per-client rate limiting.
-	// When enabled, each client IP has its own rate limit bucket.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// RequestsPerSecond is the maximum requests per second per client.
-	// Each client IP has an independent bucket with this rate.
-	// Default: 100
-	RequestsPerSecond int `yaml:"requests_per_second" json:"requests_per_second"`
-
-	// Burst is the maximum burst capacity per client.
-	// Allows temporary traffic bursts from each client.
-	// Default: 200 (2x requests_per_second)
-	Burst int `yaml:"burst" json:"burst"`
-
-	// MaxClients is the maximum number of clients tracked in the cache.
-	// When this limit is reached, the least recently used client is evicted.
-	// This protects against memory exhaustion from tracking too many IPs.
-	// Default: 10000
-	MaxClients int `yaml:"max_clients" json:"max_clients"`
-
-	// TTL is the time-to-live for inactive client entries.
-	// Clients not accessed within this period are candidates for eviction.
-	// Default: 5m (5 minutes)
-	TTL time.Duration `yaml:"ttl" json:"ttl"`
-}
 
 // PerMethodRateLimitConfig contains per-method rate limiting configuration.
 // Per-method rate limiting allows different rate limits for REQMOD, RESPMOD, and OPTIONS.

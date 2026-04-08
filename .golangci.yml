@@ -169,7 +169,6 @@ linters:
           - errcheck
           - funlen
           - goconst
-          - gocritic
           - gocyclo
           - gosec
         path: _test\.go

@@ -261,7 +261,7 @@ func (c *ReplayClient) GetReplayStatus(ctx context.Context, replayID string) (*R
 }
 
 // ExportReport exports a replay report.
-func (c *ReplayClient) ExportReport(ctx context.Context, replayID string, format string) ([]byte, error) {
+func (c *ReplayClient) ExportReport(ctx context.Context, replayID, format string) ([]byte, error) {
 	url := fmt.Sprintf("%s/replay/%s/export?format=%s", c.baseURL, replayID, format)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {

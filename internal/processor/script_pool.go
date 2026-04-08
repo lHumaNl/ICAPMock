@@ -30,7 +30,6 @@ type scriptJobResult struct {
 
 // WorkerHealth tracks the health status of a worker.
 type WorkerHealth struct {
-	lastError       error
 	workerID        int
 	jobsProcessed   int64
 	panicsRecovered int64
@@ -54,7 +53,7 @@ func (h *WorkerHealth) RecordPanicRecovered() {
 }
 
 // GetStats returns the current worker statistics.
-func (h *WorkerHealth) GetStats() (int64, int64, int64) {
+func (h *WorkerHealth) GetStats() (jobsProcessed, panicsRecovered, lastPanicTime int64) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.jobsProcessed, h.panicsRecovered, h.lastPanicTime

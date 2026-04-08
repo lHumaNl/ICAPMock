@@ -525,7 +525,7 @@ func TestConcurrentBytesPool(_ *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				buf := p.Get()
-				buf.Write([]byte("test data"))
+				buf.WriteString("test data")
 				p.Put(buf)
 			}
 		}()
@@ -708,7 +708,7 @@ func BenchmarkBytesPoolParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			buf := p.Get()
-			buf.Write([]byte("test"))
+			buf.WriteString("test")
 			p.Put(buf)
 		}
 	})
@@ -803,7 +803,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 
 			// Simulate building response body
 			respBuf := BytesBufferPool.Get()
-			respBuf.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+			respBuf.WriteString("HTTP/1.1 200 OK\r\n\r\n")
 
 			// Return everything to pools
 			BufferPool.Put(reqBuf)
@@ -830,7 +830,7 @@ func BenchmarkMixedWorkloadNoPool(b *testing.B) {
 
 			// Build response body
 			respBuf := bytes.NewBuffer(make([]byte, 0, SizeSmall))
-			respBuf.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+			respBuf.WriteString("HTTP/1.1 200 OK\r\n\r\n")
 
 			// Let GC clean up
 			_ = reqBuf

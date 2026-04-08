@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -384,23 +383,6 @@ func TestFileStorage_PanicRecovery_RotationPanic(t *testing.T) {
 	}
 }
 
-// mockPanicConn is a mock connection that panics on Write.
-type mockPanicConn struct {
-	net.Conn
-	panicOnWrite bool
-}
-
-func (m *mockPanicConn) Write(b []byte) (n int, err error) {
-	if m.panicOnWrite {
-		panic("mock panic in Write")
-	}
-	return len(b), nil
-}
-
-func (m *mockPanicConn) Close() error {
-	return nil
-}
-
 // TestFileStorage_PanicRecovery_DeferExecution verifies defer runs even on panic.
 func TestFileStorage_PanicRecovery_DeferExecution(t *testing.T) {
 	t.Parallel()
@@ -554,7 +536,7 @@ func TestFileStorage_PanicRecovery_FileSystemErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 	readonlyDir := filepath.Join(tmpDir, "readonly")
 
-	if err := os.Mkdir(readonlyDir, 0555); err != nil {
+	if err := os.Mkdir(readonlyDir, 0o555); err != nil {
 		t.Fatalf("Failed to create read-only dir: %v", err)
 	}
 

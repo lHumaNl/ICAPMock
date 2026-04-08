@@ -491,58 +491,6 @@ func (r *Request) parseEncapsulatedMessage(reader *bufio.Reader) error {
 	return nil
 }
 
-// parseHTTPRequest parses the embedded HTTP request.
-// Deprecated: Use parseHTTPRequestStreaming for O(1) memory usage.
-func (r *Request) parseHTTPRequest() error {
-	if len(r.Body) == 0 {
-		return nil
-	}
-
-	reader := bufio.NewReader(bytes.NewReader(r.Body))
-
-	// Read request line
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	line = strings.TrimSuffix(line, "\r\n")
-	parts := strings.Split(line, " ")
-	if len(parts) < 3 {
-		return errors.New("invalid HTTP request line")
-	}
-
-	// Get header map from pool
-	hdrPtr := pool.HeaderMapPool.Get()
-	r.HTTPRequest = &HTTPMessage{
-		Method: parts[0],
-		URI:    parts[1],
-		Proto:  parts[2],
-		Header: Header(*hdrPtr),
-	}
-
-	// Read HTTP headers
-	tp := textproto.NewReader(reader)
-	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	for k, v := range headerMap {
-		r.HTTPRequest.Header[k] = v
-	}
-
-	// If there's a body, set up the reader for lazy loading
-	if r.Encapsulated.HasReqBody() {
-		bodyStart := r.Encapsulated.ReqBody
-		if bodyStart > 0 && bodyStart < len(r.Body) {
-			// Set up streaming reader - body is NOT loaded into Body field
-			r.HTTPRequest.BodyReader = NewChunkedReader(bytes.NewReader(r.Body[bodyStart:]))
-		}
-	}
-
-	return nil
-}
-
 // parseHTTPRequestStreaming parses the embedded HTTP request directly from the stream.
 // This method provides TRUE O(1) MEMORY USAGE by:
 // 1. Parsing HTTP headers from the stream (small, constant size)
@@ -608,63 +556,6 @@ func (r *Request) parseHTTPRequestStreaming(reader *bufio.Reader) error {
 	return nil
 }
 
-// parseHTTPResponse parses the embedded HTTP response.
-// Deprecated: Use parseHTTPResponseStreaming for O(1) memory usage.
-func (r *Request) parseHTTPResponse() error {
-	if len(r.Body) == 0 {
-		return nil
-	}
-
-	// Calculate offset for response headers
-	offset := r.Encapsulated.ResHdr
-	if offset < 0 || offset >= len(r.Body) {
-		return nil
-	}
-
-	reader := bufio.NewReader(bytes.NewReader(r.Body[offset:]))
-
-	// Read status line
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	line = strings.TrimSuffix(line, "\r\n")
-	parts := strings.SplitN(line, " ", 3)
-	if len(parts) < 3 {
-		return errors.New("invalid HTTP response line")
-	}
-
-	// Get header map from pool
-	hdrPtr := pool.HeaderMapPool.Get()
-	r.HTTPResponse = &HTTPMessage{
-		Proto:      parts[0],
-		Status:     parts[1],
-		StatusText: parts[2],
-		Header:     Header(*hdrPtr),
-	}
-
-	// Read HTTP headers
-	tp := textproto.NewReader(reader)
-	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	for k, v := range headerMap {
-		r.HTTPResponse.Header[k] = v
-	}
-
-	// If there's a body, set up the reader for lazy loading
-	if r.Encapsulated.HasResBody() {
-		bodyStart := r.Encapsulated.ResBody
-		if bodyStart > 0 && bodyStart < len(r.Body) {
-			// Set up streaming reader - body is NOT loaded into Body field
-			r.HTTPResponse.BodyReader = NewChunkedReader(bytes.NewReader(r.Body[bodyStart:]))
-		}
-	}
-
-	return nil
-}
 
 // parseHTTPResponseStreaming parses the embedded HTTP response directly from the stream.
 // This method provides TRUE O(1) MEMORY USAGE by parsing headers from the stream

@@ -397,7 +397,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 		// Create processor chain
 		proc, procCleanup := createProcessorChain(cfg, registry, log)
-		defer procCleanup(context.Background())
+		defer procCleanup(context.Background()) //nolint:gocritic // deferInLoop: cleanup is per-server, intentional
 
 		// Create router and register handlers
 		rtr := router.NewRouter()
@@ -405,7 +405,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		if err != nil {
 			return fmt.Errorf("registering handlers for %s: %w", entry.name, err)
 		}
-		defer func() {
+		defer func() { //nolint:gocritic // deferInLoop: cleanup is per-server, intentional
 			if previewRL != nil {
 				previewRL.Shutdown()
 			}
@@ -583,7 +583,7 @@ func createProcessorChain(
 	cfg *config.Config,
 	registry storage.ScenarioRegistry,
 	log *logger.Logger,
-) (processor.Processor, func(context.Context)) {
+) (proc processor.Processor, cleanup func(context.Context)) {
 	// Create processors in order: mock -> plugins -> chaos (if enabled) -> echo
 	var processors []processor.Processor
 	var cleanups []func(context.Context)
@@ -743,7 +743,7 @@ func startMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Log
 	)
 
 	// Create HTTP handler for metrics
-	handler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 	})
 
@@ -752,7 +752,7 @@ func startMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Log
 	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
 		// Update goroutine count before serving metrics
 		collector.SetGoroutines(runtime.NumGoroutine())
-		handler.ServeHTTP(w, r)
+		metricsHandler.ServeHTTP(w, r)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Metrics.Host, cfg.Metrics.Port)

@@ -449,7 +449,8 @@ func (m *Model) changeScreen(screen Screen) (tea.Model, tea.Cmd) {
 
 	// Load replay requests when switching to replay screen
 	if screen == ScreenReplay {
-		return m, m.loadReplayRequestsCmd()
+		cmd := m.loadReplayRequestsCmd()
+		return m, cmd
 	}
 
 	return m, nil

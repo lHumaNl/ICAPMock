@@ -12,17 +12,6 @@ import (
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
-// benchHandler is a minimal handler.Handler implementation used in benchmarks.
-type benchHandler struct {
-	method string
-}
-
-func (h *benchHandler) Handle(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-	return icap.NewResponse(icap.StatusOK), nil
-}
-
-func (h *benchHandler) Method() string { return h.method }
-
 // newBenchHandler creates a benchHandler that satisfies handler.Handler.
 func newBenchHandler(method string) handler.Handler {
 	return handler.WrapHandler(

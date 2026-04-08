@@ -24,7 +24,7 @@ func TestValidateMode_ValidConfig(t *testing.T) {
 	// Create a temp scenarios directory
 	tmpDir := t.TempDir()
 	scenariosDir := filepath.Join(tmpDir, "scenarios")
-	if err := os.Mkdir(scenariosDir, 0755); err != nil {
+	if err := os.Mkdir(scenariosDir, 0o755); err != nil {
 		t.Fatalf("Failed to create scenarios dir: %v", err)
 	}
 
@@ -37,7 +37,7 @@ triggers:
 responses:
   - status: 200
 `
-	if err := os.WriteFile(scenarioFile, []byte(scenarioContent), 0644); err != nil {
+	if err := os.WriteFile(scenarioFile, []byte(scenarioContent), 0o644); err != nil {
 		t.Fatalf("Failed to write scenario file: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestValidateMode_EmptyScenariosDir(t *testing.T) {
 	// Create an empty scenarios directory
 	tmpDir := t.TempDir()
 	scenariosDir := filepath.Join(tmpDir, "empty-scenarios")
-	if err := os.Mkdir(scenariosDir, 0755); err != nil {
+	if err := os.Mkdir(scenariosDir, 0o755); err != nil {
 		t.Fatalf("Failed to create scenarios dir: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestValidateMode_WithAllFeatures(t *testing.T) {
 	// Create temp scenarios directory
 	tmpDir := t.TempDir()
 	scenariosDir := filepath.Join(tmpDir, "scenarios")
-	if err := os.Mkdir(scenariosDir, 0755); err != nil {
+	if err := os.Mkdir(scenariosDir, 0o755); err != nil {
 		t.Fatalf("Failed to create scenarios dir: %v", err)
 	}
 	cfg.Mock.ScenariosDir = scenariosDir
@@ -286,13 +286,13 @@ func TestValidateMode_ScenarioFileCount(t *testing.T) {
 			// Create temp directory with files
 			tmpDir := t.TempDir()
 			scenariosDir := filepath.Join(tmpDir, "scenarios")
-			if err := os.Mkdir(scenariosDir, 0755); err != nil {
+			if err := os.Mkdir(scenariosDir, 0o755); err != nil {
 				t.Fatalf("Failed to create scenarios dir: %v", err)
 			}
 
 			for _, fileName := range tt.fileNames {
 				filePath := filepath.Join(scenariosDir, fileName)
-				if err := os.WriteFile(filePath, []byte("test"), 0644); err != nil {
+				if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
 					t.Fatalf("Failed to write file %s: %v", fileName, err)
 				}
 			}
@@ -353,14 +353,14 @@ func TestValidateMode_OutputFormat(t *testing.T) {
 func TestPrintValidationErrors(t *testing.T) {
 	t.Parallel()
 
-	errors := []config.ValidationError{
+	errs := []config.ValidationError{
 		{Field: "server.port", Message: "port must be between 1 and 65535", Value: 0},
 		{Field: "logging.level", Message: "invalid log level", Value: "invalid"},
 	}
 
 	var buf bytes.Buffer
 
-	PrintValidationErrors(&buf, errors)
+	PrintValidationErrors(&buf, errs)
 
 	output := buf.String()
 
@@ -389,7 +389,7 @@ func TestValidateMode_Integration(t *testing.T) {
 			name: "valid default config with scenarios",
 			setupConfig: func(cfg *config.Config, tmpDir string) {
 				scenariosDir := filepath.Join(tmpDir, "scenarios")
-				os.Mkdir(scenariosDir, 0755)
+				os.Mkdir(scenariosDir, 0o755)
 				cfg.Mock.ScenariosDir = scenariosDir
 			},
 			expectError: false,
@@ -788,14 +788,14 @@ func TestValidateMode_MultipleScenarioFiles(t *testing.T) {
 	// Create temp directory with multiple scenario files
 	tmpDir := t.TempDir()
 	scenariosDir := filepath.Join(tmpDir, "scenarios")
-	if err := os.Mkdir(scenariosDir, 0755); err != nil {
+	if err := os.Mkdir(scenariosDir, 0o755); err != nil {
 		t.Fatalf("Failed to create scenarios dir: %v", err)
 	}
 
 	// Create multiple scenario files
 	for i := 1; i <= 5; i++ {
 		fileName := filepath.Join(scenariosDir, "scenario"+string(rune('0'+i))+".yaml")
-		if err := os.WriteFile(fileName, []byte("name: test"), 0644); err != nil {
+		if err := os.WriteFile(fileName, []byte("name: test"), 0o644); err != nil {
 			t.Fatalf("Failed to write scenario file: %v", err)
 		}
 	}

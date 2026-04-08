@@ -77,11 +77,11 @@ func main() {
 		if err := cmd.Parse(args); err != nil {
 			fmt.Fprintf(os.Stderr, "Error parsing arguments: %v\n", err)
 			cmd.Usage()
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: cancel is best-effort cleanup
 		}
 		if err := cmd.Run(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: cancel is best-effort cleanup
 		}
 		return
 	}
@@ -153,10 +153,10 @@ func findClosestCommand(input string, commands []string) string {
 
 // levenshtein computes the Levenshtein edit distance between two strings.
 func levenshtein(a, b string) int {
-	if len(a) == 0 {
+	if a == "" {
 		return len(b)
 	}
-	if len(b) == 0 {
+	if b == "" {
 		return len(a)
 	}
 	prev := make([]int, len(b)+1)

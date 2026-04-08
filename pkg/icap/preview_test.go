@@ -4,6 +4,7 @@ package icap_test
 
 import (
 	"bufio"
+	"bytes"
 	"strings"
 	"testing"
 
@@ -359,7 +360,7 @@ func TestGetPreviewBodyAlreadyLoaded(t *testing.T) {
 	if err != nil {
 		t.Errorf("GetPreviewBody() error = %v", err)
 	}
-	if string(preview) != string(body) {
+	if !bytes.Equal(preview, body) {
 		t.Errorf("GetPreviewBody() = %s, want %s", string(preview), string(body))
 	}
 }
@@ -549,7 +550,7 @@ func TestPreviewWithChunkedEncoding(t *testing.T) {
 
 	// Should have read from chunked reader
 	expected := body[:10]
-	if string(preview) != string(expected) {
+	if !bytes.Equal(preview, expected) {
 		t.Errorf("GetPreviewBody() = %s, want %s", string(preview), string(expected))
 	}
 }

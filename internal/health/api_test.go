@@ -19,7 +19,7 @@ func TestAPIHandler_ListScenarios(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -52,7 +52,7 @@ func TestAPIHandler_AddAndGetScenario(t *testing.T) {
 	}
 
 	// Get scenario
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/test-scenario", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/test-scenario", http.NoBody)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -80,7 +80,7 @@ func TestAPIHandler_DeleteScenario(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/scenarios/to-delete", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/scenarios/to-delete", http.NoBody)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -89,7 +89,7 @@ func TestAPIHandler_DeleteScenario(t *testing.T) {
 	}
 
 	// Verify deleted
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/to-delete", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/to-delete", http.NoBody)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -106,7 +106,7 @@ func TestAPIHandler_Auth(t *testing.T) {
 	handler.RegisterRoutes(mux)
 
 	// Without token — should fail
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -115,7 +115,7 @@ func TestAPIHandler_Auth(t *testing.T) {
 	}
 
 	// With wrong token
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -125,7 +125,7 @@ func TestAPIHandler_Auth(t *testing.T) {
 	}
 
 	// With correct token
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
 	req.Header.Set("Authorization", "Bearer secret-token")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)

@@ -24,7 +24,7 @@ import (
 )
 
 // generateTestCertificate creates a test TLS certificate with specified validity period.
-func generateTestCertificate(t *testing.T, validFor time.Duration, certFile string, keyFile string) {
+func generateTestCertificate(t *testing.T, validFor time.Duration, certFile, keyFile string) {
 	t.Helper()
 
 	// Generate private key
@@ -252,7 +252,7 @@ func TestTLSCertificateMonitor_GetCertificateDaysToExpiry_Errors(t *testing.T) {
 	}
 
 	// Create invalid certificate file
-	if err := os.WriteFile(filepath.Join(tempDir, "invalid.crt"), []byte("invalid cert"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "invalid.crt"), []byte("invalid cert"), 0o644); err != nil {
 		t.Fatalf("failed to create invalid cert file: %v", err)
 	}
 

@@ -267,8 +267,8 @@ func (pb *pooledBuffer) ReadBytes(delim byte) ([]byte, error) {
 
 // ReadString reads until delimiter, returning a string including the delimiter.
 func (pb *pooledBuffer) ReadString(delim byte) (string, error) {
-	bytes, err := pb.ReadBytes(delim)
-	return string(bytes), err
+	b, err := pb.ReadBytes(delim)
+	return string(b), err
 }
 
 // Reset resets the buffer for reuse.
@@ -356,7 +356,7 @@ func (bw *bufferedWriter) Write(p []byte) (int, error) {
 // It implements the io.StringWriter interface.
 // This is more efficient than converting to []byte first.
 func (bw *bufferedWriter) WriteString(s string) (int, error) {
-	if len(s) == 0 {
+	if s == "" {
 		return 0, nil
 	}
 

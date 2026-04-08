@@ -340,13 +340,13 @@ func RetryMiddleware(cfg RetryConfig) Middleware {
 // calculateBackoffWithJitter calculates the backoff duration with jitter for the given attempt.
 // It implements exponential backoff with a maximum cap and applies jitter to prevent
 // thundering herd problem when multiple clients retry simultaneously.
-func calculateBackoffWithJitter(initial time.Duration, multiplier float64, max time.Duration, attempt int, strategy JitterStrategy, jitterPercent float64) time.Duration {
+func calculateBackoffWithJitter(initial time.Duration, multiplier float64, maxBackoff time.Duration, attempt int, strategy JitterStrategy, jitterPercent float64) time.Duration {
 	// Calculate exponential backoff: initial * (multiplier ^ attempt)
 	backoff := time.Duration(float64(initial) * pow(multiplier, attempt))
 
 	// Cap at max backoff
-	if backoff > max {
-		backoff = max
+	if backoff > maxBackoff {
+		backoff = maxBackoff
 	}
 
 	// Apply jitter based on strategy

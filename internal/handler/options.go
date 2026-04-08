@@ -151,9 +151,9 @@ func (h *OptionsHandler) UpdateServiceID(serviceID string) {
 }
 
 // UpdateMaxConnections allows updating the max connections value at runtime.
-func (h *OptionsHandler) UpdateMaxConnections(max int) {
+func (h *OptionsHandler) UpdateMaxConnections(maxConns int) {
 	h.mu.Lock()
-	h.maxConnections = max
+	h.maxConnections = maxConns
 	h.mu.Unlock()
 }
 

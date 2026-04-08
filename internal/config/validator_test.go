@@ -294,10 +294,10 @@ func TestValidator_Validate_TLS(t *testing.T) {
 	validKeyFile := tempDir + "/key.pem"
 
 	// Create the temp files
-	if err := os.WriteFile(validCertFile, []byte("test cert"), 0644); err != nil {
+	if err := os.WriteFile(validCertFile, []byte("test cert"), 0o644); err != nil {
 		t.Fatalf("Failed to create temp cert file: %v", err)
 	}
-	if err := os.WriteFile(validKeyFile, []byte("test key"), 0644); err != nil {
+	if err := os.WriteFile(validKeyFile, []byte("test key"), 0o644); err != nil {
 		t.Fatalf("Failed to create temp key file: %v", err)
 	}
 

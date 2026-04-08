@@ -21,7 +21,7 @@ import (
 
 func TestNewConnection(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -66,7 +66,7 @@ func TestConnectionRead(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, client := net.Pipe()
-			defer server.Close()
+			defer server.Close() //nolint:gocritic // deferInLoop
 			defer client.Close()
 
 			config := &ConnectionConfig{
@@ -114,7 +114,7 @@ func TestConnectionRead(t *testing.T) {
 
 func TestConnectionWrite(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -155,7 +155,7 @@ func TestConnectionWrite(t *testing.T) {
 
 func TestConnectionSetDeadline(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -208,7 +208,7 @@ func TestConnectionClose(t *testing.T) {
 
 func TestConnectionRemoteAddr(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -228,7 +228,7 @@ func TestConnectionRemoteAddr(t *testing.T) {
 
 func TestConnectionState(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -254,7 +254,7 @@ func TestConnectionState(t *testing.T) {
 
 func TestConnectionConcurrency(_ *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -283,11 +283,11 @@ func TestConnectionConcurrency(_ *testing.T) {
 }
 
 func TestConnectionPool(t *testing.T) {
-	pool := NewConnectionPool()
+	cp := NewConnectionPool()
 
 	// Test Add and Remove
 	server, _ := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 
 	config := &ConnectionConfig{
 		ReadTimeout:  5 * time.Second,
@@ -298,24 +298,24 @@ func TestConnectionPool(t *testing.T) {
 
 	conn := newConnection(server, config)
 
-	pool.Add(conn)
-	if pool.Count() != 1 {
-		t.Errorf("Count() = %d, want 1", pool.Count())
+	cp.Add(conn)
+	if cp.Count() != 1 {
+		t.Errorf("Count() = %d, want 1", cp.Count())
 	}
 
-	pool.Remove(conn)
-	if pool.Count() != 0 {
-		t.Errorf("Count() = %d, want 0", pool.Count())
+	cp.Remove(conn)
+	if cp.Count() != 0 {
+		t.Errorf("Count() = %d, want 0", cp.Count())
 	}
 }
 
 func TestConnectionPoolCloseAll(t *testing.T) {
-	pool := NewConnectionPool()
+	cp := NewConnectionPool()
 
 	// Create multiple connections
 	for i := 0; i < 3; i++ {
 		server, _ := net.Pipe()
-		defer server.Close()
+		defer server.Close() //nolint:gocritic // deferInLoop
 
 		config := &ConnectionConfig{
 			ReadTimeout:  5 * time.Second,
@@ -325,24 +325,24 @@ func TestConnectionPoolCloseAll(t *testing.T) {
 		}
 
 		conn := newConnection(server, config)
-		pool.Add(conn)
+		cp.Add(conn)
 	}
 
-	if pool.Count() != 3 {
-		t.Errorf("Count() = %d, want 3", pool.Count())
+	if cp.Count() != 3 {
+		t.Errorf("Count() = %d, want 3", cp.Count())
 	}
 
 	// Close all
 	ctx := context.Background()
-	pool.CloseAll(ctx)
+	cp.CloseAll(ctx)
 
-	if pool.Count() != 0 {
-		t.Errorf("After CloseAll() Count() = %d, want 0", pool.Count())
+	if cp.Count() != 0 {
+		t.Errorf("After CloseAll() Count() = %d, want 0", cp.Count())
 	}
 }
 
 func TestConnectionPoolWait(t *testing.T) {
-	pool := NewConnectionPool()
+	cp := NewConnectionPool()
 
 	// Create a connection
 	server, _ := net.Pipe()
@@ -353,20 +353,20 @@ func TestConnectionPoolWait(t *testing.T) {
 		Streaming:    true,
 	}
 	conn := newConnection(server, config)
-	pool.Add(conn)
+	cp.Add(conn)
 
 	// Start waiting in a goroutine
 	done := make(chan struct{})
 	go func() {
 		ctx := context.Background()
-		pool.Wait(ctx)
+		cp.Wait(ctx)
 		close(done)
 	}()
 
 	// Close the connection after a short delay
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		pool.Remove(conn)
+		cp.Remove(conn)
 		conn.Close()
 		server.Close()
 	}()
@@ -387,7 +387,7 @@ func TestConnectionPoolWait(t *testing.T) {
 // TestPooledBuffer_UsesPool verifies that pooled buffers are obtained from the pool.
 func TestPooledBuffer_UsesPool(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -458,7 +458,7 @@ func TestPooledBuffer_PassthroughRead(t *testing.T) {
 	// Here we just verify the pooled buffer is properly initialized.
 
 	server, _ := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 
 	config := &ConnectionConfig{
 		ReadTimeout:  5 * time.Second,
@@ -490,7 +490,7 @@ func TestPooledBuffer_PassthroughRead(t *testing.T) {
 // TestBufferedWriter_Passthrough tests that the buffered writer passes through writes.
 func TestBufferedWriter_Passthrough(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -562,13 +562,13 @@ func TestConnection_DoubleCloseSafety(t *testing.T) {
 
 // TestConnectionPool_List tests listing connections from pool.
 func TestConnectionPool_List(t *testing.T) {
-	pool := NewConnectionPool()
+	cp := NewConnectionPool()
 
 	// Create and add connections
 	var conns []*Connection
 	for i := 0; i < 3; i++ {
 		server, _ := net.Pipe()
-		defer server.Close()
+		defer server.Close() //nolint:gocritic // deferInLoop
 
 		config := &ConnectionConfig{
 			ReadTimeout:  5 * time.Second,
@@ -579,18 +579,18 @@ func TestConnectionPool_List(t *testing.T) {
 
 		conn := newConnection(server, config)
 		conns = append(conns, conn)
-		pool.Add(conn)
+		cp.Add(conn)
 	}
 
 	// List should return all connections
-	list := pool.List()
+	list := cp.List()
 	if len(list) != 3 {
 		t.Errorf("List() returned %d connections, want 3", len(list))
 	}
 
 	// Verify count matches
-	if pool.Count() != 3 {
-		t.Errorf("Count() = %d, want 3", pool.Count())
+	if cp.Count() != 3 {
+		t.Errorf("Count() = %d, want 3", cp.Count())
 	}
 }
 
@@ -617,7 +617,7 @@ func BenchmarkConnectionWithPool(b *testing.B) {
 // BenchmarkPooledBufferRead benchmarks reading with pooled buffers.
 func BenchmarkPooledBufferRead(b *testing.B) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -650,7 +650,7 @@ func BenchmarkPooledBufferRead(b *testing.B) {
 // BenchmarkPooledBufferReadLine benchmarks reading lines with pooled buffers.
 func BenchmarkPooledBufferReadLine(b *testing.B) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -840,7 +840,7 @@ func BenchmarkConnectionLifecycle(b *testing.B) {
 // TestConnectionUpdateActivity tests that UpdateActivity updates the last activity timestamp.
 func TestConnectionUpdateActivity(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -903,7 +903,7 @@ func TestConnectionIsIdle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, client := net.Pipe()
-			defer server.Close()
+			defer server.Close() //nolint:gocritic // deferInLoop
 			defer client.Close()
 
 			config := &ConnectionConfig{
@@ -929,7 +929,7 @@ func TestConnectionIsIdle(t *testing.T) {
 // TestConnectionLastActivity tests the LastActivity method.
 func TestConnectionLastActivity(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -959,7 +959,7 @@ func TestConnectionLastActivity(t *testing.T) {
 // TestConnectionReadUpdatesActivity tests that Read() updates activity.
 func TestConnectionReadUpdatesActivity(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -988,7 +988,7 @@ func TestConnectionReadUpdatesActivity(t *testing.T) {
 // TestConnectionWriteUpdatesActivity tests that Write() updates activity.
 func TestConnectionWriteUpdatesActivity(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -1017,7 +1017,7 @@ func TestConnectionWriteUpdatesActivity(t *testing.T) {
 // TestConnectionIdleTimeoutNoUpdate tests that connection becomes idle when no activity occurs.
 func TestConnectionIdleTimeoutNoUpdate(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	idleTimeout := 50 * time.Millisecond
@@ -1045,7 +1045,7 @@ func TestConnectionIdleTimeoutNoUpdate(t *testing.T) {
 // TestConnectionActivityResetAfterUpdate tests that idle timeout is reset after activity.
 func TestConnectionActivityResetAfterUpdate(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	idleTimeout := 50 * time.Millisecond
@@ -1076,7 +1076,7 @@ func TestConnectionActivityResetAfterUpdate(t *testing.T) {
 // TestConcurrentActivityUpdate tests that concurrent activity updates are safe.
 func TestConcurrentActivityUpdate(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close()
+	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{

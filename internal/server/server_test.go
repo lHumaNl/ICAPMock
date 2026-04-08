@@ -321,7 +321,7 @@ func TestServerConcurrentRequests(t *testing.T) {
 				return
 			}
 			// Verify we got a valid response line
-			if len(line) == 0 {
+			if line == "" {
 				errChan <- fmt.Errorf("request %d: empty response", id)
 				return
 			}
@@ -833,11 +833,9 @@ func TestContextTimeoutPropagation(t *testing.T) {
 	n, err := conn.Read(buf)
 	if err != nil {
 		t.Logf("Read error (expected if connection closed): %v", err)
-	} else {
+	} else if n == 0 {
 		// Should have received a response
-		if n == 0 {
-			t.Error("Expected response from server")
-		}
+		t.Error("Expected response from server")
 	}
 }
 

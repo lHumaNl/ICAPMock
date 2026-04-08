@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 
 	"github.com/icap-mock/icap-mock/pkg/icap"
@@ -306,57 +305,6 @@ func parseEmbeddedHTTPRequestStreaming(req *icap.Request) error {
 	return nil
 }
 
-// parseEmbeddedHTTPRequest parses the embedded HTTP request from buffered body.
-// Deprecated: Use parseEmbeddedHTTPRequestStreaming for O(1) memory usage.
-// This function is kept for backwards compatibility but loads the entire body.
-func parseEmbeddedHTTPRequest(req *icap.Request) error {
-	if len(req.Body) == 0 {
-		return nil
-	}
-
-	reader := bufio.NewReader(strings.NewReader(string(req.Body)))
-
-	// Parse HTTP request line
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	line = strings.TrimSuffix(line, "\r\n")
-	line = strings.TrimSuffix(line, "\n")
-	parts := strings.Split(line, " ")
-	if len(parts) < 3 {
-		return errors.New("invalid embedded HTTP request line")
-	}
-
-	req.HTTPRequest = &icap.HTTPMessage{
-		Method: parts[0],
-		URI:    parts[1],
-		Proto:  parts[2],
-		Header: make(icap.Header),
-	}
-
-	// Parse HTTP headers
-	httpHeaders, err := parseHeaders(reader)
-	if err != nil {
-		return err
-	}
-	req.HTTPRequest.Header = httpHeaders
-
-	// Set up body reader if there's a body - uses lazy loading
-	if req.Encapsulated.HasReqBody() {
-		bodyStart := req.Encapsulated.ReqBody
-		if bodyStart > 0 && bodyStart < len(req.Body) {
-			// Set up streaming reader - body is NOT loaded into Body field
-			req.HTTPRequest.BodyReader = icap.NewChunkedReader(
-				strings.NewReader(string(req.Body[bodyStart:])),
-			)
-		}
-	}
-
-	return nil
-}
-
 // parseEmbeddedHTTPResponseStreaming parses the embedded HTTP response directly from the stream.
 // This provides TRUE O(1) MEMORY USAGE by:
 //  1. Parsing HTTP headers from the stream (small, constant size)
@@ -412,142 +360,6 @@ func parseEmbeddedHTTPResponseStreaming(req *icap.Request) error {
 	return nil
 }
 
-// parseEmbeddedHTTPResponse parses the embedded HTTP response from buffered body.
-// Deprecated: Use parseEmbeddedHTTPResponseStreaming for O(1) memory usage.
-// This function is kept for backwards compatibility but loads the entire body.
-func parseEmbeddedHTTPResponse(req *icap.Request) error {
-	if len(req.Body) == 0 {
-		return nil
-	}
-
-	offset := req.Encapsulated.ResHdr
-	if offset < 0 || offset >= len(req.Body) {
-		return nil
-	}
-
-	reader := bufio.NewReader(strings.NewReader(string(req.Body[offset:])))
-
-	// Parse HTTP status line
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	line = strings.TrimSuffix(line, "\r\n")
-	line = strings.TrimSuffix(line, "\n")
-	parts := strings.SplitN(line, " ", 3)
-	if len(parts) < 3 {
-		return errors.New("invalid embedded HTTP response line")
-	}
-
-	req.HTTPResponse = &icap.HTTPMessage{
-		Proto:      parts[0],
-		Status:     parts[1],
-		StatusText: parts[2],
-		Header:     make(icap.Header),
-	}
-
-	// Parse HTTP headers
-	httpHeaders, err := parseHeaders(reader)
-	if err != nil {
-		return err
-	}
-	req.HTTPResponse.Header = httpHeaders
-
-	// Set up body reader if there's a body - uses lazy loading
-	if req.Encapsulated.HasResBody() {
-		bodyStart := req.Encapsulated.ResBody
-		if bodyStart > 0 && bodyStart < len(req.Body) {
-			// Set up streaming reader - body is NOT loaded into Body field
-			req.HTTPResponse.BodyReader = icap.NewChunkedReader(
-				strings.NewReader(string(req.Body[bodyStart:])),
-			)
-		}
-	}
-
-	return nil
-}
-
-// maxChunkedBodySize is the default maximum size for reading chunked bodies into memory.
-// Bodies larger than this will be rejected to prevent OOM.
-const maxChunkedBodySize = 100 * 1024 * 1024 // 100MB
-
-// readChunkedBody reads a chunked body from the reader.
-//
-// Returns the body bytes and any error encountered.
-// Limits the total body size to maxChunkedBodySize to prevent OOM on malicious input.
-func readChunkedBody(reader BufferedReader) ([]byte, error) {
-	cr := icap.NewChunkedReader(reader)
-	lr := io.LimitReader(cr, maxChunkedBodySize+1)
-	data, err := io.ReadAll(lr)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > maxChunkedBodySize {
-		return nil, fmt.Errorf("chunked body exceeds maximum size of %d bytes", maxChunkedBodySize)
-	}
-	return data, nil
-}
-
-// writeResponse writes an ICAP response to the writer.
-//
-// Parameters:
-//   - writer: The buffered writer to write to
-//   - statusCode: The ICAP status code (e.g., 200, 404, 500)
-//   - headers: Optional headers to include in the response
-//   - body: Optional body content
-//
-// Returns any error encountered during writing.
-func writeResponse(writer BufferedWriter, statusCode int, headers map[string]string, body []byte) error {
-	// Write status line
-	statusText := icap.StatusText(statusCode)
-	if _, err := writer.WriteString("ICAP/1.0 "); err != nil {
-		return fmt.Errorf("writing status line: %w", err)
-	}
-	if _, err := writer.WriteString(strconv.Itoa(statusCode)); err != nil {
-		return fmt.Errorf("writing status line: %w", err)
-	}
-	if _, err := writer.WriteString(" "); err != nil {
-		return fmt.Errorf("writing status line: %w", err)
-	}
-	if _, err := writer.WriteString(statusText); err != nil {
-		return fmt.Errorf("writing status line: %w", err)
-	}
-	if _, err := writer.WriteString("\r\n"); err != nil {
-		return fmt.Errorf("writing status line: %w", err)
-	}
-
-	// Write headers
-	for key, value := range headers {
-		if _, err := writer.WriteString(key); err != nil {
-			return fmt.Errorf("writing header %s: %w", key, err)
-		}
-		if _, err := writer.WriteString(": "); err != nil {
-			return fmt.Errorf("writing header %s: %w", key, err)
-		}
-		if _, err := writer.WriteString(value); err != nil {
-			return fmt.Errorf("writing header %s: %w", key, err)
-		}
-		if _, err := writer.WriteString("\r\n"); err != nil {
-			return fmt.Errorf("writing header %s: %w", key, err)
-		}
-	}
-
-	// Write blank line
-	if _, err := writer.WriteString("\r\n"); err != nil {
-		return fmt.Errorf("writing header terminator: %w", err)
-	}
-
-	// Write body if present
-	if len(body) > 0 {
-		if _, err := writer.Write(body); err != nil {
-			return fmt.Errorf("writing body: %w", err)
-		}
-	}
-
-	return writer.Flush()
-}
-
 // writeResponseFromICAP writes an icap.Response to the writer.
 // This handles the full ICAP response including encapsulated HTTP messages.
 //
@@ -583,67 +395,6 @@ func extractClientIP(headers icap.Header, remoteAddr string) string {
 	return host
 }
 
-// buildEncapsulatedHeader builds the Encapsulated header value.
-// This describes the structure of the encapsulated HTTP message.
-//
-// httpReq and httpRes are the encapsulated HTTP messages (nil if not present).
-// hasReqBody and hasResBody indicate whether the respective body is present.
-// Returns the Encapsulated header value string with correct byte offsets.
-func buildEncapsulatedHeader(httpReq, httpRes *icap.HTTPMessage, hasReqBody, hasResBody bool) string {
-	var parts []string
-	offset := 0
-
-	if httpReq != nil {
-		parts = append(parts, fmt.Sprintf("req-hdr=%d", offset))
-		offset += httpMessageHeaderSize(httpReq, true)
-		if hasReqBody {
-			parts = append(parts, fmt.Sprintf("req-body=%d", offset))
-		}
-	}
-
-	if httpRes != nil {
-		parts = append(parts, fmt.Sprintf("res-hdr=%d", offset))
-		offset += httpMessageHeaderSize(httpRes, false)
-		if hasResBody {
-			parts = append(parts, fmt.Sprintf("res-body=%d", offset))
-		}
-	}
-
-	// If we have headers but no body was flagged, add null-body at the current offset
-	if len(parts) > 0 && !hasReqBody && !hasResBody {
-		parts = append(parts, fmt.Sprintf("null-body=%d", offset))
-	}
-
-	// No content case
-	if len(parts) == 0 {
-		return "null-body=0"
-	}
-
-	return strings.Join(parts, ", ")
-}
-
-// httpMessageHeaderSize computes the byte size of the serialized HTTP header
-// section for an encapsulated HTTP message (request line or status line + headers + trailing CRLF).
-func httpMessageHeaderSize(msg *icap.HTTPMessage, isRequest bool) int {
-	var size int
-	if isRequest {
-		// Request line: "METHOD URI HTTP/1.1\r\n"
-		size = len(msg.Method) + 1 + len(msg.URI) + 1 + len(msg.Proto) + 2
-	} else {
-		// Status line: "HTTP/1.1 STATUS STATUS_TEXT\r\n"
-		size = len(msg.Proto) + 1 + len(msg.Status) + 1 + len(msg.StatusText) + 2
-	}
-	// Headers: "Key: Value\r\n" for each
-	for k, values := range msg.Header {
-		for _, v := range values {
-			size += len(k) + 2 + len(v) + 2 // "Key: Value\r\n"
-		}
-	}
-	// Trailing CRLF after headers
-	size += 2
-	return size
-}
-
 // isValidICAPMethod checks if the method is a valid ICAP method.
 func isValidICAPMethod(method string) bool {
 	switch method {
@@ -659,22 +410,3 @@ func isValidICAPVersion(version string) bool {
 	return version == "ICAP/1.0"
 }
 
-// parseChunkSize parses a hexadecimal chunk size.
-func parseChunkSize(s string) (int64, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, errors.New("empty chunk size")
-	}
-
-	// Handle extensions (e.g., "1a;name=value")
-	if idx := strings.IndexByte(s, ';'); idx >= 0 {
-		s = s[:idx]
-	}
-
-	size, err := strconv.ParseInt(s, 16, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid chunk size: %s", s)
-	}
-
-	return size, nil
-}

@@ -304,7 +304,7 @@ func NewHeaderPool() *HeaderPool {
 // Get returns a header map from the pool.
 // The map is cleared before being returned.
 // Always call Put() when done with the map.
-func (p *HeaderPool) Get() *map[string][]string {
+func (p *HeaderPool) Get() *map[string][]string { //nolint:gocritic // ptrToRefParam: pointer to map needed for sync.Pool
 	hdr := p.pool.Get().(*map[string][]string) //nolint:errcheck
 	// Clear the map for reuse
 	for k := range *hdr {
@@ -317,7 +317,7 @@ func (p *HeaderPool) Get() *map[string][]string {
 // Do not use the map after calling Put().
 // The map is cleared before being returned to the pool.
 // Maps that have grown beyond HeaderMapMaxSize keys are discarded to prevent memory bloat.
-func (p *HeaderPool) Put(hdr *map[string][]string) {
+func (p *HeaderPool) Put(hdr *map[string][]string) { //nolint:gocritic // ptrToRefParam: pointer to map needed for sync.Pool
 	if hdr == nil {
 		return
 	}
