@@ -120,4 +120,4 @@ ENV GODEBUG=netdns=go
 
 # Set the entrypoint and default command
 ENTRYPOINT ["./icap-mock"]
-CMD ["--config", "configs/config.yaml"]
+CMD ["--config", "configs/example.yaml"]
