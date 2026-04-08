@@ -388,7 +388,7 @@ scenarios:
 }
 
 // TestShardedScenarioRegistry_ThreadSafety тестирует потокобезопасность.
-func TestShardedScenarioRegistry_ThreadSafety(t *testing.T) {
+func TestShardedScenarioRegistry_ThreadSafety(_ *testing.T) {
 	registry := NewShardedScenarioRegistry()
 
 	done := make(chan bool)

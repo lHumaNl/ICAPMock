@@ -286,7 +286,7 @@ func (m *ScenarioManagerModel) updateCreate(msg tea.Msg) tea.Cmd {
 
 // updateInputs updates text inputs.
 func (m *ScenarioManagerModel) updateInputs(msg tea.Msg) tea.Cmd {
-	var cmds []tea.Cmd //nolint:prealloc
+	cmds := make([]tea.Cmd, 0, 6)
 	var cmd tea.Cmd
 
 	// Update all input fields
@@ -323,6 +323,8 @@ func (m *ScenarioManagerModel) SetScenarios(scenarios []ScenarioItem) {
 }
 
 // switchToListMode switches to list view.
+//
+//nolint:unparam
 func (m *ScenarioManagerModel) switchToListMode() (*ScenarioManagerModel, tea.Cmd) {
 	m.mode = ScenarioViewList
 	m.selectedScenario = nil
@@ -331,6 +333,8 @@ func (m *ScenarioManagerModel) switchToListMode() (*ScenarioManagerModel, tea.Cm
 }
 
 // switchToDetailMode switches to detail view.
+//
+//nolint:unparam
 func (m *ScenarioManagerModel) switchToDetailMode() (*ScenarioManagerModel, tea.Cmd) {
 	if m.selectedScenario == nil {
 		return m, nil
@@ -349,6 +353,8 @@ func (m *ScenarioManagerModel) switchToDetailMode() (*ScenarioManagerModel, tea.
 }
 
 // switchToEditMode switches to edit mode.
+//
+//nolint:unparam
 func (m *ScenarioManagerModel) switchToEditMode() (*ScenarioManagerModel, tea.Cmd) {
 	if m.selectedScenario == nil {
 		m.errorMessage = "No scenario selected for editing"
@@ -363,6 +369,8 @@ func (m *ScenarioManagerModel) switchToEditMode() (*ScenarioManagerModel, tea.Cm
 }
 
 // switchToCreateMode switches to create mode.
+//
+//nolint:unparam
 func (m *ScenarioManagerModel) switchToCreateMode() (*ScenarioManagerModel, tea.Cmd) {
 	m.mode = ScenarioViewCreate
 	m.nameInput.SetValue("")
@@ -390,6 +398,8 @@ response:
 }
 
 // cycleInputs cycles through input fields.
+//
+//nolint:unparam
 func (m *ScenarioManagerModel) cycleInputs() tea.Cmd {
 	if m.nameInput.Focused() {
 		m.nameInput.Blur()

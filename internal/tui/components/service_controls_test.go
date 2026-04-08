@@ -353,10 +353,10 @@ func TestServiceControlsModel_View_LoadingState(t *testing.T) {
 		notContains string
 		loading     bool
 	}{
-		{"Loading with running status", "running", true, "Processing...", ""},
-		{"Loading with stopped status", "stopped", true, "Processing...", ""},
-		{"Not loading with running status", "running", false, "Start", "Processing..."},
-		{"Not loading with stopped status", "stopped", false, "Start", "Processing..."},
+		{"Loading with running status", "running", "Processing...", "", true},
+		{"Loading with stopped status", "stopped", "Processing...", "", true},
+		{"Not loading with running status", "running", "Start", "Processing...", false},
+		{"Not loading with stopped status", "stopped", "Start", "Processing...", false},
 	}
 
 	for _, tt := range tests {

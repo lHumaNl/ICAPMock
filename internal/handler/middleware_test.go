@@ -88,7 +88,7 @@ func newMockStorage() *mockStorage {
 	}
 }
 
-func (m *mockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
+func (m *mockStorage) SaveRequest(_ context.Context, req *storage.StoredRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.requests = append(m.requests, req)
@@ -100,17 +100,17 @@ func (m *mockStorage) SaveRequest(ctx context.Context, req *storage.StoredReques
 	return m.saveErr
 }
 
-func (m *mockStorage) GetRequest(ctx context.Context, id string) (*storage.StoredRequest, error) {
+func (m *mockStorage) GetRequest(_ context.Context, _ string) (*storage.StoredRequest, error) {
 	return nil, storage.ErrRequestNotFound
 }
 
-func (m *mockStorage) ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*storage.StoredRequest, error) {
+func (m *mockStorage) ListRequests(_ context.Context, _ storage.RequestFilter) ([]*storage.StoredRequest, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.requests, nil
 }
 
-func (m *mockStorage) DeleteRequest(ctx context.Context, id string) error {
+func (m *mockStorage) DeleteRequest(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -118,11 +118,11 @@ func (m *mockStorage) Close() error {
 	return nil
 }
 
-func (m *mockStorage) Flush(ctx context.Context) error {
+func (m *mockStorage) Flush(_ context.Context) error {
 	return nil
 }
 
-func (m *mockStorage) Clear(ctx context.Context) (int64, error) {
+func (m *mockStorage) Clear(_ context.Context) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := int64(len(m.requests))
@@ -130,7 +130,7 @@ func (m *mockStorage) Clear(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-func (m *mockStorage) DeleteRequests(ctx context.Context, filter storage.RequestFilter) (int64, error) {
+func (m *mockStorage) DeleteRequests(_ context.Context, _ storage.RequestFilter) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := int64(len(m.requests))
@@ -161,7 +161,7 @@ func TestRateLimiterMiddleware_Allow(t *testing.T) {
 	t.Parallel()
 
 	limiter := &mockLimiter{allow: true}
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -189,7 +189,7 @@ func TestRateLimiterMiddleware_Deny(t *testing.T) {
 
 	limiter := &mockLimiter{allow: false}
 	called := false
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		called = true
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -228,7 +228,7 @@ func TestStorageMiddleware_SavesRequest(t *testing.T) {
 	t.Parallel()
 
 	store := newMockStorage()
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -285,7 +285,7 @@ func TestStorageMiddleware_AsyncSave(t *testing.T) {
 	// Slow save simulation - handler should return immediately
 	slowStore := &slowMockStorage{mockStorage: store}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -336,7 +336,7 @@ func TestStorageMiddleware_PropagatesError(t *testing.T) {
 
 	store := newMockStorage()
 	expectedErr := errors.New("handler error")
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return nil, expectedErr
 	}, "REQMOD")
 
@@ -407,7 +407,7 @@ func TestChainMiddleware_Order(t *testing.T) {
 	}
 
 	// Base handler
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		recordOrder("base")
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -439,7 +439,7 @@ func TestChainMiddleware_Empty(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		called = true
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -466,7 +466,7 @@ func TestRateLimiterMiddleware_Concurrent(t *testing.T) {
 
 	limiter := &mockLimiter{allow: true}
 	var callCount int64
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt64(&callCount, 1)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -505,7 +505,7 @@ func TestStorageMiddleware_Concurrent(t *testing.T) {
 
 	store := newMockStorage()
 	var callCount int64
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt64(&callCount, 1)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -551,7 +551,7 @@ func TestStorageMiddleware_WithHTTPRequest(t *testing.T) {
 	t.Parallel()
 
 	store := newMockStorage()
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -612,7 +612,7 @@ func TestPanicRecoveryMiddleware_RecoversPanic(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("test panic")
 	}, "REQMOD")
 
@@ -651,7 +651,7 @@ func TestPanicRecoveryMiddleware_PropagatesNormalError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 	expectedErr := errors.New("normal error")
-	errHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	errHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return nil, expectedErr
 	}, "REQMOD")
 
@@ -684,7 +684,7 @@ func TestPanicRecoveryMiddleware_AllowsNormalRequest(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -716,7 +716,7 @@ func TestStorageMiddlewareWithPool_SavesRequest(t *testing.T) {
 		QueueSize: 100,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -780,7 +780,7 @@ func TestStorageMiddlewareWithPool_WorkerPoolLimits(t *testing.T) {
 		QueueSize: 10,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -846,7 +846,7 @@ func TestStorageMiddlewareWithPool_Backpressure(t *testing.T) {
 		QueueSize: 2, // Very small queue
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -909,7 +909,7 @@ func TestStorageMiddlewareWithPool_Concurrent(t *testing.T) {
 	}
 
 	var callCount int64
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt64(&callCount, 1)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -978,7 +978,7 @@ func TestStorageMiddlewareWithPool_GracefulShutdown(t *testing.T) {
 		QueueSize: 100,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1040,7 +1040,7 @@ func TestStorageMiddlewareWithPool_ContextPropagation(t *testing.T) {
 		QueueSize: 10,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1094,7 +1094,7 @@ func TestStorageMiddlewareWithPool_ShutdownTimeout(t *testing.T) {
 		QueueSize: 10,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1203,7 +1203,7 @@ func TestPanicRecoveryMiddleware_WithStackTrace(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("detailed panic message with stack trace")
 	}, "REQMOD")
 
@@ -1278,7 +1278,7 @@ func TestPanicRecoveryMiddleware_DifferentPanicTypes(t *testing.T) {
 			var logBuf syncBuffer
 			logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-			panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+			panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 				panic(tt.panicVal)
 			}, "REQMOD")
 
@@ -1307,7 +1307,7 @@ func TestPanicRecoveryMiddleware_ConcurrentPanics(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("concurrent panic")
 	}, "REQMOD")
 
@@ -1346,7 +1346,7 @@ func TestPanicRecoveryMiddleware_ConnectionHeader(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("test panic")
 	}, "REQMOD")
 
@@ -1373,7 +1373,7 @@ func TestPanicRecoveryMiddleware_LogsRequestDetails(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("test panic")
 	}, "REQMOD")
 
@@ -1405,7 +1405,7 @@ func TestPanicRecoveryMiddleware_ChainedWithOtherMiddleware(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 	// Create a panic-inducing handler
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("chained panic")
 	}, "REQMOD")
 
@@ -1446,7 +1446,7 @@ func TestPanicRecoveryMiddleware_ServerContinuesAfterPanic(t *testing.T) {
 	successCount := 0
 
 	// Create a handler that panics on certain URIs
-	flakyHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	flakyHandler := handler.WrapHandler(func(_ context.Context, req *icap.Request) (*icap.Response, error) {
 		if req.URI == "icap://localhost/panic" {
 			panicCount++
 			panic("intentional panic for testing")
@@ -1521,7 +1521,7 @@ func TestPanicRecoveryMiddleware_NoServerCrash(t *testing.T) {
 
 	// This test should complete without the test itself crashing
 	// If PanicRecoveryMiddleware is broken, this test will fail/panic
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("server crash test panic")
 	}, "REQMOD")
 
@@ -1561,7 +1561,7 @@ func TestPanicRecoveryMiddleware_ThroughFullChain(t *testing.T) {
 
 	// Create a handler that sometimes panics
 	var requestCount int64
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		count := atomic.AddInt64(&requestCount, 1)
 		if count%3 == 0 {
 			panic("periodic panic")
@@ -1641,7 +1641,7 @@ func TestPanicRecoveryMiddleware_ConcurrentServerStability(t *testing.T) {
 	var successCount int64
 
 	// Handler that panics 50% of the time
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, req *icap.Request) (*icap.Response, error) {
 		// Use request URI to determine behavior for deterministic testing
 		// Panic if URI contains "/panic-trigger" (long URI)
 		if len(req.URI) > 40 {
@@ -1663,7 +1663,7 @@ func TestPanicRecoveryMiddleware_ConcurrentServerStability(t *testing.T) {
 	var errorCount int64
 
 	for g := 0; g < numGoroutines; g++ {
-		go func(goroutineID int) {
+		go func(_ int) {
 			defer wg.Done()
 			for r := 0; r < requestsPerGoroutine; r++ {
 				// Alternate between panic and normal URIs
@@ -1718,7 +1718,7 @@ func TestPanicRecoveryMiddleware_ResponseBody(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("response body test panic")
 	}, "REQMOD")
 
@@ -1757,7 +1757,7 @@ func TestPanicRecoveryMiddleware_ResponseBody(t *testing.T) {
 func BenchmarkPanicRecoveryMiddleware_NoPanic(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1776,7 +1776,7 @@ func BenchmarkPanicRecoveryMiddleware_NoPanic(b *testing.B) {
 func BenchmarkPanicRecoveryMiddleware_WithPanic(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	panicHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	panicHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		panic("benchmark panic")
 	}, "REQMOD")
 
@@ -1795,7 +1795,7 @@ func BenchmarkPanicRecoveryMiddleware_WithPanic(b *testing.B) {
 func BenchmarkRateLimiterMiddleware_Allow(b *testing.B) {
 	limiter := &mockLimiter{allow: true}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1815,7 +1815,7 @@ func BenchmarkChainMiddleware(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	limiter := &mockLimiter{allow: true}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1844,7 +1844,7 @@ func BenchmarkStorageMiddlewareWithPool(b *testing.B) {
 		QueueSize: 1000,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1877,7 +1877,7 @@ type failingMockStorage struct {
 	failCount int64
 }
 
-func (s *failingMockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
+func (s *failingMockStorage) SaveRequest(_ context.Context, _ *storage.StoredRequest) error {
 	atomic.AddInt64(&s.failCount, 1)
 	return errors.New("simulated storage failure")
 }
@@ -1903,7 +1903,7 @@ func TestStorageMiddlewareWithPool_CircuitBreakerOpens(t *testing.T) {
 		},
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1961,7 +1961,7 @@ func TestStorageMiddlewareWithPool_CircuitBreakerSkipsStorage(t *testing.T) {
 		},
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2035,7 +2035,7 @@ func TestStorageMiddlewareWithPool_CircuitBreakerRecovery(t *testing.T) {
 		},
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2115,7 +2115,7 @@ func TestStorageMiddlewareWithPool_CircuitBreakerDisabled(t *testing.T) {
 		},
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2189,7 +2189,7 @@ func TestStorageMiddlewareWithPool_CircuitBreakerWithSuccesses(t *testing.T) {
 		},
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2254,7 +2254,7 @@ func TestStorageMiddlewareWithPool_BackpressureMetrics(t *testing.T) {
 		Metrics:   metricsCollector,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2349,7 +2349,7 @@ func TestStorageMiddlewareWithPool_QueueDrainedMetrics(t *testing.T) {
 		Metrics:   metricsCollector,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2453,7 +2453,7 @@ func TestStorageMiddlewareWithPool_QueueLengthGauge(t *testing.T) {
 		Metrics:   metricsCollector,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -2543,7 +2543,7 @@ func TestStorageMiddlewareWithPool_BackpressureMetricAccuracy(t *testing.T) {
 		Metrics:   metricsCollector,
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 

@@ -83,7 +83,7 @@ func (m *DashboardModel) Init() tea.Cmd {
 
 // Update handles messages and updates the dashboard model.
 func (m *DashboardModel) Update(msg tea.Msg) (*DashboardModel, tea.Cmd) {
-	var cmds []tea.Cmd //nolint:prealloc
+	cmds := make([]tea.Cmd, 0, 4)
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -213,7 +213,7 @@ func (m *MetricsCardsModel) Init() tea.Cmd {
 }
 
 // Update handles messages and updates metrics cards model.
-func (m *MetricsCardsModel) Update(msg tea.Msg) (*MetricsCardsModel, tea.Cmd) {
+func (m *MetricsCardsModel) Update(_ tea.Msg) (*MetricsCardsModel, tea.Cmd) {
 	return m, nil
 }
 
@@ -240,7 +240,7 @@ func (m *MetricsCardsModel) View() string {
 	}
 
 	// Render each card
-	var renderedCards []string //nolint:prealloc
+	renderedCards := make([]string, 0, len(cards))
 	for _, card := range cards {
 		cardStyle := lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
@@ -393,7 +393,7 @@ func (m *MetricsGraphModel) createGraph(values []float64, title string, color li
 	}
 
 	// Generate ASCII chart
-	var lines []string //nolint:prealloc
+	lines := make([]string, 0, 3)
 	lines = append(lines, fmt.Sprintf("%s: %s", title, colorValue(m.currentValue(values), color)))
 
 	chartLine := m.generateChartLine(values, min, max, graphWidth, color)
@@ -438,7 +438,7 @@ func (m *MetricsGraphModel) currentValue(values []float64) float64 {
 }
 
 // generateChartLine generates a single line of ASCII chart.
-func (m *MetricsGraphModel) generateChartLine(values []float64, min, max float64, width int, color lipgloss.AdaptiveColor) string {
+func (m *MetricsGraphModel) generateChartLine(values []float64, min, max float64, _ int, color lipgloss.AdaptiveColor) string {
 	if len(values) == 0 {
 		return ""
 	}
@@ -515,7 +515,7 @@ func (m *LogPreviewModel) Init() tea.Cmd {
 }
 
 // Update handles messages and updates log preview model.
-func (m *LogPreviewModel) Update(msg tea.Msg) (*LogPreviewModel, tea.Cmd) {
+func (m *LogPreviewModel) Update(_ tea.Msg) (*LogPreviewModel, tea.Cmd) {
 	return m, nil
 }
 
@@ -588,7 +588,7 @@ func (m *ConnectionsModel) Init() tea.Cmd {
 }
 
 // Update handles messages and updates connections model.
-func (m *ConnectionsModel) Update(msg tea.Msg) (*ConnectionsModel, tea.Cmd) {
+func (m *ConnectionsModel) Update(_ tea.Msg) (*ConnectionsModel, tea.Cmd) {
 	return m, nil
 }
 

@@ -80,7 +80,7 @@ func (m *LogViewerModel) Init() tea.Cmd {
 
 // Update handles messages and updates the log viewer model.
 func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
-	var cmds []tea.Cmd //nolint:prealloc
+	cmds := make([]tea.Cmd, 0, 1)
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -103,7 +103,8 @@ func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.searching {
-			switch msg.Type {
+			switch msg.Type { //nolint:exhaustive // only handling specific keys
+
 			case tea.KeyEnter:
 				// Apply search
 				m.searchQuery = m.searchInput.Value()
@@ -383,7 +384,7 @@ func (m *LogViewerModel) View() string {
 	toolbar := m.renderToolbar()
 
 	// Render viewport content
-	var content string = m.viewport.View()
+	var content = m.viewport.View()
 
 	// Render status bar
 	statusBar := m.renderStatusBar()

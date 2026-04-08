@@ -496,7 +496,7 @@ func TestPreviewRateLimiter_Shutdown(t *testing.T) {
 }
 
 // TestPreviewRateLimiter_ShutdownMultipleTimes tests that Shutdown can be called multiple times safely.
-func TestPreviewRateLimiter_ShutdownMultipleTimes(t *testing.T) {
+func TestPreviewRateLimiter_ShutdownMultipleTimes(_ *testing.T) {
 	config := PreviewRateLimiterConfig{
 		Enabled:         true,
 		MaxRequests:     100,
@@ -513,7 +513,7 @@ func TestPreviewRateLimiter_ShutdownMultipleTimes(t *testing.T) {
 }
 
 // TestPreviewRateLimiter_ShutdownWhenDisabled tests shutdown when rate limiting is disabled.
-func TestPreviewRateLimiter_ShutdownWhenDisabled(t *testing.T) {
+func TestPreviewRateLimiter_ShutdownWhenDisabled(_ *testing.T) {
 	config := PreviewRateLimiterConfig{
 		Enabled:       false,
 		MaxRequests:   100,
@@ -574,7 +574,7 @@ func TestPreviewRateLimiter_ShutdownWithCleanup(t *testing.T) {
 }
 
 // TestPreviewRateLimiter_ShutdownConcurrent tests shutdown during concurrent operations.
-func TestPreviewRateLimiter_ShutdownConcurrent(t *testing.T) {
+func TestPreviewRateLimiter_ShutdownConcurrent(_ *testing.T) {
 	config := PreviewRateLimiterConfig{
 		Enabled:         true,
 		MaxRequests:     100,

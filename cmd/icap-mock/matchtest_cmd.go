@@ -62,7 +62,7 @@ func (c *MatchTestCommand) Description() string       { return "Test which scena
 func (c *MatchTestCommand) Parse(args []string) error { return c.fs.Parse(args) }
 func (c *MatchTestCommand) Usage()                    { c.fs.Usage() }
 
-func (c *MatchTestCommand) Run(ctx context.Context) error {
+func (c *MatchTestCommand) Run(_ context.Context) error {
 	// Build URI
 	uri := c.uri
 	if uri == "" && c.path != "" {

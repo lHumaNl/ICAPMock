@@ -423,7 +423,7 @@ func TestChaosProcessor_ThreadSafety(t *testing.T) {
 }
 
 // TestChaosProcessor_Interface verifies ChaosProcessor implements Processor interface.
-func TestChaosProcessor_Interface(t *testing.T) {
+func TestChaosProcessor_Interface(_ *testing.T) {
 	var _ Processor = NewChaosProcessor(ChaosConfig{}, nil, nil)
 }
 

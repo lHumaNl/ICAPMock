@@ -187,7 +187,7 @@ func TestPerClientMiddleware_UnknownIP_RaceCondition(t *testing.T) {
 	wg.Add(numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			req := &icap.Request{}
 			ctx := context.Background()
@@ -248,7 +248,7 @@ func TestPerClientRateLimiter_ConcurrentEviction(t *testing.T) {
 
 // TestPerClientMiddleware_Wait_RaceCondition tests that the Wait method
 // doesn't cause race conditions when called concurrently.
-func TestPerClientMiddleware_Wait_RaceCondition(t *testing.T) {
+func TestPerClientMiddleware_Wait_RaceCondition(_ *testing.T) {
 	config := PerClientRateLimitConfig{
 		Enabled:           true,
 		RequestsPerSecond: 10,

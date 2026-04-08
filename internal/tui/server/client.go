@@ -207,6 +207,8 @@ func (c *ServerClient) GetMetrics(ctx context.Context) (*state.MetricsSnapshot, 
 }
 
 // parseMetrics parses Prometheus metrics format from response body.
+//
+//nolint:unparam
 func (c *ServerClient) parseMetrics(body string) (*state.MetricsSnapshot, error) {
 	snapshot := &state.MetricsSnapshot{
 		Timestamp:     time.Now(),

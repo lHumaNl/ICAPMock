@@ -228,7 +228,7 @@ func TestConfigEditorModel_Update_KeyboardShortcuts(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			m := NewConfigEditorModel()
 			msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
 

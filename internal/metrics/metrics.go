@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package metrics provides collection and reporting of server metrics.
 package metrics
 
 import (
@@ -821,7 +822,7 @@ func (c *Collector) RecordRateLimitWaitTime(client string, waitTime time.Duratio
 // in Prometheus when many unique clients are being rate limited.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordPerClientRateLimitExceeded(reason string) {
+func (c *Collector) RecordPerClientRateLimitExceeded(_ string) {
 	c.perClientRateLimitExceeded.WithLabelValues().Inc()
 }
 
@@ -1112,7 +1113,7 @@ func (c *Collector) SetAdaptiveTimeout(endpoint string, method string, timeoutMs
 // rejected due to rate limiting.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordPreviewRequestRejected(clientID string) {
+func (c *Collector) RecordPreviewRequestRejected(_ string) {
 	c.previewRequestsRejected.WithLabelValues().Inc()
 }
 

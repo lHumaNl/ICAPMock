@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package health provides health check and monitoring endpoints.
 package health
 
 import (

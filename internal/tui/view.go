@@ -239,7 +239,7 @@ func (m *Model) renderStatusBar() string {
 func (m *Model) renderHelpOverlay(baseView string) string {
 	groups := m.FullHelp()
 
-	var lines []string //nolint:prealloc
+	lines := make([]string, 0, 2+len(groups)*2+1)
 	lines = append(lines, HelpKeyStyle.Render("Keyboard Shortcuts"))
 	lines = append(lines, "")
 

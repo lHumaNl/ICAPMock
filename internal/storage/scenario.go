@@ -71,12 +71,12 @@ type Scenario struct {
 	compiledPath      *regexp.Regexp
 	compiledBody      *regexp.Regexp
 	compiledHeaders   map[string]*regexp.Regexp
-	Response          ResponseTemplate   `yaml:"response" json:"response"`
 	Name              string             `yaml:"name" json:"name"`
 	Match             MatchRule          `yaml:"match" json:"match"`
 	WeightedResponses []WeightedResponse `yaml:"-" json:"-"`
 	compiledCIDRs     []*net.IPNet
-	Priority          int `yaml:"priority" json:"priority"`
+	Response          ResponseTemplate `yaml:"response" json:"response"`
+	Priority          int              `yaml:"priority" json:"priority"`
 }
 
 // WeightedResponse is a single weighted response variant used for random selection.

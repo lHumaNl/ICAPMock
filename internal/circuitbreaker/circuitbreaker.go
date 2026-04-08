@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package circuitbreaker provides circuit breaker patterns for fault tolerance.
 package circuitbreaker
 
 import (
@@ -264,7 +265,7 @@ func (cb *CircuitBreaker) Call(ctx context.Context, fn func() error) error {
 }
 
 // executeRequest executes the protected function and records the result.
-func (cb *CircuitBreaker) executeRequest(ctx context.Context, fn func() error) error {
+func (cb *CircuitBreaker) executeRequest(_ context.Context, fn func() error) error {
 	// Update current bucket
 	bucketIdx := cb.updateCurrentBucket()
 
@@ -463,6 +464,8 @@ func (cb *CircuitBreaker) recordSuccess(bucketIdx int) {
 	case StateClosed:
 		// Reset half-open request counter on success in CLOSED state
 		cb.halfOpenRequests.Store(0)
+	case StateOpen:
+		// No action needed for success in OPEN state
 	}
 }
 
@@ -512,6 +515,8 @@ func (cb *CircuitBreaker) recordFailure(bucketIdx int) {
 				"component", cb.name,
 			)
 		}
+	case StateOpen:
+		// No action needed for failure in OPEN state
 	}
 }
 
@@ -585,6 +590,8 @@ func (cb *CircuitBreaker) transitionToLocked(newState State) {
 			b.successes.Store(0)
 			b.requests.Store(0)
 		}
+	case StateOpen:
+		// No counter reset needed when transitioning to OPEN state
 	}
 
 	// Log transition

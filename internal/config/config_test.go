@@ -15,34 +15,34 @@ func TestConfig_SetDefaults(t *testing.T) {
 		field    string
 	}{
 		// Server defaults
-		{"Server.Host", "Server.Host", "0.0.0.0"},
-		{"Server.Port", "Server.Port", 1344},
-		{"Server.ReadTimeout", "Server.ReadTimeout", 30 * time.Second},
-		{"Server.WriteTimeout", "Server.WriteTimeout", 30 * time.Second},
-		{"Server.MaxConnections", "Server.MaxConnections", 15000},
-		{"Server.MaxBodySize", "Server.MaxBodySize", int64(10485760)}, // 10MB
-		{"Server.Streaming", "Server.Streaming", true},
+		{"0.0.0.0", "Server.Host", "Server.Host"},
+		{1344, "Server.Port", "Server.Port"},
+		{30 * time.Second, "Server.ReadTimeout", "Server.ReadTimeout"},
+		{30 * time.Second, "Server.WriteTimeout", "Server.WriteTimeout"},
+		{15000, "Server.MaxConnections", "Server.MaxConnections"},
+		{int64(10485760), "Server.MaxBodySize", "Server.MaxBodySize"}, // 10MB
+		{true, "Server.Streaming", "Server.Streaming"},
 
 		// Logging defaults
-		{"Logging.Level", "Logging.Level", "info"},
-		{"Logging.Format", "Logging.Format", "json"},
-		{"Logging.Output", "Logging.Output", "stdout"},
+		{"info", "Logging.Level", "Logging.Level"},
+		{"json", "Logging.Format", "Logging.Format"},
+		{"stdout", "Logging.Output", "Logging.Output"},
 
 		// Metrics defaults
-		{"Metrics.Enabled", "Metrics.Enabled", true},
-		{"Metrics.Port", "Metrics.Port", 9090},
-		{"Metrics.Path", "Metrics.Path", "/metrics"},
+		{true, "Metrics.Enabled", "Metrics.Enabled"},
+		{9090, "Metrics.Port", "Metrics.Port"},
+		{"/metrics", "Metrics.Path", "Metrics.Path"},
 
 		// Mock defaults
-		{"Mock.DefaultMode", "Mock.DefaultMode", "mock"},
-		{"Mock.DefaultTimeout", "Mock.DefaultTimeout", 5 * time.Second},
-		{"Mock.ServiceID", "Mock.ServiceID", "icap-mock"},
+		{"mock", "Mock.DefaultMode", "Mock.DefaultMode"},
+		{5 * time.Second, "Mock.DefaultTimeout", "Mock.DefaultTimeout"},
+		{"icap-mock", "Mock.ServiceID", "Mock.ServiceID"},
 
 		// Health defaults
-		{"Health.Enabled", "Health.Enabled", true},
-		{"Health.Port", "Health.Port", 8080},
-		{"Health.HealthPath", "Health.HealthPath", "/health"},
-		{"Health.ReadyPath", "Health.ReadyPath", "/ready"},
+		{true, "Health.Enabled", "Health.Enabled"},
+		{8080, "Health.Port", "Health.Port"},
+		{"/health", "Health.HealthPath", "Health.HealthPath"},
+		{"/ready", "Health.ReadyPath", "Health.ReadyPath"},
 	}
 
 	cfg := &Config{}
@@ -146,7 +146,7 @@ func TestConfig_Structure(t *testing.T) {
 }
 
 // TestServerConfig_Tags tests that yaml/json tags are properly set.
-func TestServerConfig_Tags(t *testing.T) {
+func TestServerConfig_Tags(_ *testing.T) {
 	cfg := ServerConfig{}
 	_ = cfg // Just verify it compiles
 

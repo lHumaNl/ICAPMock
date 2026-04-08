@@ -211,7 +211,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	defer log.Close() //nolint:errcheck
 
 	// Create metrics collector
-	metricsRegistry, collector, err := createMetricsCollector(cfg)
+	metricsRegistry, collector, err := createMetricsCollector()
 	if err != nil {
 		return fmt.Errorf("creating metrics collector: %w", err)
 	}
@@ -248,10 +248,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Determine server entries: use Servers map if present, otherwise fall back to legacy config
 	type serverEntry struct {
 		inlineScenarios map[string]config.InlineScenarioEntry
-		serverCfg       config.ServerConfig
 		name            string
 		scenariosDir    string
 		serviceID       string
+		serverCfg       config.ServerConfig
 	}
 	var serverEntries []serverEntry
 
@@ -396,7 +396,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 
 		// Create processor chain
-		proc, procCleanup := createProcessorChain(cfg, registry, store, collector, log)
+		proc, procCleanup := createProcessorChain(cfg, registry, log)
 		defer procCleanup(context.Background())
 
 		// Create router and register handlers
@@ -480,7 +480,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 }
 
 // createMetricsCollector creates a new metrics collector.
-func createMetricsCollector(cfg *config.Config) (*prometheus.Registry, *metrics.Collector, error) {
+func createMetricsCollector() (*prometheus.Registry, *metrics.Collector, error) {
 	// Create a Prometheus registry for metrics collection
 	reg := prometheus.NewRegistry()
 
@@ -582,8 +582,6 @@ func loadPlugins(cfg *config.Config, log *logger.Logger) (*plugin.Loader, error)
 func createProcessorChain(
 	cfg *config.Config,
 	registry storage.ScenarioRegistry,
-	store *storage.FileStorage,
-	collector *metrics.Collector,
 	log *logger.Logger,
 ) (processor.Processor, func(context.Context)) {
 	// Create processors in order: mock -> plugins -> chaos (if enabled) -> echo

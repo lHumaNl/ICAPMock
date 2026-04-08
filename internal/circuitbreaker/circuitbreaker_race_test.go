@@ -101,7 +101,7 @@ func TestCircuitBreakerRaceBucketReset(t *testing.T) {
 
 	wg.Add(numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			for j := 0; j < 5; j++ {
 				cb.Call(ctx, func() error {
@@ -140,7 +140,7 @@ func TestCircuitBreakerRaceRecordResult(t *testing.T) {
 
 	wg.Add(numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			for j := 0; j < callsPerGoroutine; j++ {
 				// Alternate between success and failure
@@ -237,7 +237,7 @@ func TestCircuitBreakerRaceBucketTransition(t *testing.T) {
 
 	wg.Add(numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			// Keep making calls over time to ensure bucket transitions happen
 			for j := 0; j < 20; j++ {

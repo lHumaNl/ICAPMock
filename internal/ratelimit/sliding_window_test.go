@@ -211,7 +211,7 @@ func TestSlidingWindowLimiter_HighConcurrency(t *testing.T) {
 
 // TestSlidingWindowLimiter_ConcurrentWithRaceDetector tests concurrent access
 // with the race detector enabled.
-func TestSlidingWindowLimiter_ConcurrentWithRaceDetector(t *testing.T) {
+func TestSlidingWindowLimiter_ConcurrentWithRaceDetector(_ *testing.T) {
 	limiter := NewSlidingWindowLimiter(1000, 500)
 
 	const numGoroutines = 100
@@ -221,7 +221,7 @@ func TestSlidingWindowLimiter_ConcurrentWithRaceDetector(t *testing.T) {
 	wg.Add(numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			for j := 0; j < requestsPerGoroutine; j++ {
 				limiter.Allow()

@@ -629,7 +629,7 @@ func TestResponseTemplate_GetBody(t *testing.T) {
 }
 
 // TestScenarioRegistry_ThreadSafety tests concurrent access.
-func TestScenarioRegistry_ThreadSafety(t *testing.T) {
+func TestScenarioRegistry_ThreadSafety(_ *testing.T) {
 	registry := NewScenarioRegistry()
 
 	done := make(chan bool)

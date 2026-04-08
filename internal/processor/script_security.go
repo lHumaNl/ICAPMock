@@ -279,7 +279,7 @@ func (p *ScriptProcessor) CreateSafeFunctionBlocker(vm *goja.Runtime, funcName s
 func (p *ScriptProcessor) CreateRuntimeLimitEnforcer(vm *goja.Runtime, monitor *ScriptRuntimeMonitor) error {
 	// Create a periodic checker function that scripts can call
 	// This is optional but provides explicit limit checking
-	checker := func(call goja.FunctionCall) goja.Value {
+	checker := func(_ goja.FunctionCall) goja.Value {
 		if err := monitor.CheckEnforceLimits(); err != nil {
 			panic(err) // This will be caught by vm.RunString()
 		}

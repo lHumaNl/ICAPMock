@@ -156,7 +156,7 @@ func TestHealthChecker_IsReady(t *testing.T) {
 }
 
 // TestHealthChecker_ConcurrentAccess tests thread safety.
-func TestHealthChecker_ConcurrentAccess(t *testing.T) {
+func TestHealthChecker_ConcurrentAccess(_ *testing.T) {
 	checker := NewHealthChecker()
 	var wg sync.WaitGroup
 

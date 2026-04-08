@@ -99,7 +99,7 @@ func DoWithRetryHTTP(ctx context.Context, config RetryConfig, httpClient *http.C
 
 		resp, err := httpClient.Do(retryReq) //nolint:gosec // URL is controlled
 		if err != nil {
-			if !shouldRetryError(err, config) {
+			if !shouldRetryError(err) {
 				return nil, err
 			}
 			lastErr = err
@@ -166,11 +166,11 @@ func shouldRetry(err error, config RetryConfig) bool {
 		}
 	}
 
-	return shouldRetryError(err, config)
+	return shouldRetryError(err)
 }
 
 // shouldRetryError determines if an error is retryable based on error type.
-func shouldRetryError(err error, config RetryConfig) bool {
+func shouldRetryError(err error) bool {
 	if err == nil {
 		return false
 	}

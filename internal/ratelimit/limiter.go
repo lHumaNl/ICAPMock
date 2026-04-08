@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package ratelimit provides rate limiting strategies for ICAP request throttling.
 package ratelimit
 
 import (

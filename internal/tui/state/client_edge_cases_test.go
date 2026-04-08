@@ -21,7 +21,7 @@ import (
 // Network error edge cases
 
 func TestMetricsClient_GetNetworkError_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -75,7 +75,7 @@ func TestMetricsClient_GetNetworkError_DNSFailure(t *testing.T) {
 }
 
 func TestMetricsClient_GetNetworkError_ConnectionReset(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		require.True(t, ok)
 		conn, _, err := hj.Hijack()
@@ -98,7 +98,7 @@ func TestMetricsClient_GetNetworkError_ConnectionReset(t *testing.T) {
 }
 
 func TestMetricsClient_GetNetworkError_UnexpectedEOF(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("partial"))
 	}))
@@ -124,7 +124,7 @@ func TestMetricsClient_GetNetworkError_UnexpectedEOF(t *testing.T) {
 func TestMetricsClient_GetMetrics_LargeResponse(t *testing.T) {
 	largeMetrics := strings.Repeat("icap_requests_total{method=\"GET\"} 1\n", 100000)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(largeMetrics))
 	}))
@@ -308,7 +308,7 @@ func TestMetricsClient_parseMetrics_NilValues(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_HTTP400(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer server.Close()
@@ -327,7 +327,7 @@ func TestMetricsClient_GetMetrics_HTTP400(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_HTTP500(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -346,7 +346,7 @@ func TestMetricsClient_GetMetrics_HTTP500(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_HTTP404(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -366,7 +366,7 @@ func TestMetricsClient_GetMetrics_HTTP404(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_InvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("invalid json"))
 	}))
@@ -386,7 +386,7 @@ func TestLogsClient_GetLogs_InvalidJSON(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_EmptyArray(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("[]"))
 	}))
@@ -407,7 +407,7 @@ func TestLogsClient_GetLogs_EmptyArray(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_EmptyBody(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(""))
 	}))
@@ -556,8 +556,8 @@ func TestRateLimiter_ConcurrentRefill_Race(t *testing.T) {
 	rl.mu.Unlock()
 }
 
-func TestMetricsClient_ConcurrentGetMetrics_Race(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestMetricsClient_ConcurrentGetMetrics_Race(_ *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
 	}))
@@ -584,7 +584,7 @@ func TestMetricsClient_ConcurrentGetMetrics_Race(t *testing.T) {
 	wg.Wait()
 }
 
-func TestLogsState_ConcurrentGetEntries_Race(t *testing.T) {
+func TestLogsState_ConcurrentGetEntries_Race(_ *testing.T) {
 	state := NewLogsState(&ClientConfig{})
 
 	for i := 0; i < 100; i++ {
@@ -658,7 +658,7 @@ func TestLogsState_MemoryExhaustion(t *testing.T) {
 func TestMetricsClient_MemoryExhaustion_LargeResponse(t *testing.T) {
 	largeMetrics := strings.Repeat("icap_requests_total{method=\"GET\"} 1\n", 1000000)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(largeMetrics))
 	}))
@@ -730,7 +730,7 @@ func TestRateLimiter_ContextCancellation_DuringWait(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_ContextTimeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -751,7 +751,7 @@ func TestMetricsClient_GetMetrics_ContextTimeout(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_ContextNoDeadline(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
 	}))
@@ -771,7 +771,7 @@ func TestMetricsClient_GetMetrics_ContextNoDeadline(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_ContextReuse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
 	}))
@@ -793,7 +793,7 @@ func TestMetricsClient_GetMetrics_ContextReuse(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_ContextCancellation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -840,7 +840,7 @@ func TestRateLimiter_ExtremelyLongTimeout(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_ClockSkew(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Date", time.Now().Add(-24*time.Hour).Format(http.TimeFormat))
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
@@ -925,7 +925,7 @@ func TestMetricsClient_GetMetrics_InvalidURL(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_MalformedResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		hj, ok := w.(http.Hijacker)
 		require.True(t, ok)
@@ -948,7 +948,7 @@ func TestMetricsClient_GetMetrics_MalformedResponse(t *testing.T) {
 	assert.Nil(t, snapshot)
 }
 
-func TestRateLimiter_RequestQueueOverflow(t *testing.T) {
+func TestRateLimiter_RequestQueueOverflow(_ *testing.T) {
 	rl := NewRateLimiter(1, 100*time.Millisecond)
 
 	ctx := context.Background()
@@ -1051,7 +1051,7 @@ func TestRateLimiter_MaxTokensNegative(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_NilContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
 	}))
@@ -1069,7 +1069,7 @@ func TestMetricsClient_GetMetrics_NilContext(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_NilContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("[]"))
 	}))
@@ -1087,7 +1087,7 @@ func TestLogsClient_GetLogs_NilContext(t *testing.T) {
 }
 
 func TestStatusClient_GetStatus_NilContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"running","port":1344,"uptime":"1m"}`))
 	}))
@@ -1105,7 +1105,7 @@ func TestStatusClient_GetStatus_NilContext(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_ReadBodyError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("["))
 	}))
@@ -1125,7 +1125,7 @@ func TestLogsClient_GetLogs_ReadBodyError(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_ReadBodyError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -1229,7 +1229,7 @@ func TestRateLimiter_RefillWithNegativeDuration(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_ChunkedResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		require.True(t, ok)
 
@@ -1258,7 +1258,7 @@ func TestMetricsClient_GetMetrics_ChunkedResponse(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_CompressedResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
@@ -1304,7 +1304,7 @@ func TestLogsState_AddEntry_MaxLines_Race(t *testing.T) {
 	assert.Equal(t, 100, state.entries.Size())
 }
 
-func TestMetricsState_GetCurrent_NilSnapshot_Race(t *testing.T) {
+func TestMetricsState_GetCurrent_NilSnapshot_Race(_ *testing.T) {
 	state := NewMetricsState(&ClientConfig{})
 
 	var wg sync.WaitGroup
@@ -1354,7 +1354,7 @@ func TestLogsState_GetEntries_ZeroLimit(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_StatusCode300(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusMultipleChoices)
 	}))
 	defer server.Close()
@@ -1373,7 +1373,7 @@ func TestMetricsClient_GetMetrics_StatusCode300(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_StatusCode300(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusMultipleChoices)
 	}))
 	defer server.Close()
@@ -1391,7 +1391,7 @@ func TestLogsClient_GetLogs_StatusCode300(t *testing.T) {
 	assert.Nil(t, entries)
 }
 
-func TestRateLimiter_RefillRace(t *testing.T) {
+func TestRateLimiter_RefillRace(_ *testing.T) {
 	rl := NewRateLimiter(10, 10*time.Millisecond)
 
 	var wg sync.WaitGroup
@@ -1435,7 +1435,7 @@ func TestLogsState_SetSearch_EmptyQuery(t *testing.T) {
 	})
 }
 
-func TestLogsState_SetAutoScroll_Race(t *testing.T) {
+func TestLogsState_SetAutoScroll_Race(_ *testing.T) {
 	state := NewLogsState(&ClientConfig{})
 
 	var wg sync.WaitGroup
@@ -1515,7 +1515,7 @@ func TestStatusClient_GetStatus_NetworkError(t *testing.T) {
 }
 
 func TestStatusClient_GetStatus_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
@@ -1550,7 +1550,7 @@ func TestRateLimiter_Acquire_ImmediateReturn(t *testing.T) {
 }
 
 func TestMetricsClient_GetMetrics_Redirect(t *testing.T) {
-	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("icap_requests_total{method=\"GET\"} 100\n"))
 	}))
@@ -1575,7 +1575,7 @@ func TestMetricsClient_GetMetrics_Redirect(t *testing.T) {
 }
 
 func TestLogsClient_GetLogs_Redirect(t *testing.T) {
-	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("[]"))
 	}))

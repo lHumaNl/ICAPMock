@@ -28,7 +28,7 @@ type mockHandler struct {
 	method   string
 }
 
-func (h *mockHandler) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (h *mockHandler) Handle(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 	resp := icap.NewResponse(icap.StatusOK)
 	resp.SetHeader("ISTag", "test")
 	if h.response != "" {
@@ -487,7 +487,7 @@ func TestServerContextCancellation(t *testing.T) {
 // panicHandler is a handler that panics on every request.
 type panicHandler struct{}
 
-func (p *panicHandler) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (p *panicHandler) Handle(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 	panic("test panic in handler")
 }
 
@@ -543,7 +543,7 @@ func TestHandleConnectionPanicRecovery(t *testing.T) {
 
 	// Read response - connection should close after panic recovery
 	buf := make([]byte, 1024)
-	_, err = conn.Read(buf)
+	_, _ = conn.Read(buf)
 	// Connection should be closed by server after panic
 	conn.Close()
 

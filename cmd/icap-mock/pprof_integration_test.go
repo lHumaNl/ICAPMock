@@ -322,7 +322,7 @@ type Flag struct {
 	Value string
 }
 
-func visit(fn func(*Flag)) {
+func visit(_ func(*Flag)) {
 	// Mock implementation
 }
 

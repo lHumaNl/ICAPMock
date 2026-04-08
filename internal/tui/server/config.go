@@ -299,7 +299,7 @@ func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (bool
 }
 
 // LoadConfigFile loads configuration from a local file (client-side).
-func (c *ConfigClient) LoadConfigFile(ctx context.Context, filePath string) (string, error) {
+func (c *ConfigClient) LoadConfigFile(_ context.Context, filePath string) (string, error) {
 	if filePath == "" {
 		return "", fmt.Errorf("file path cannot be empty")
 	}

@@ -85,7 +85,7 @@ func (s *MetricsState) StartStreaming() tea.Cmd {
 	s.streaming = true
 	s.mu.Unlock()
 
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Second, func(_ time.Time) tea.Msg {
 		// Use the stored context to check if streaming is still active
 		s.mu.RLock()
 		streaming := s.streaming

@@ -376,7 +376,7 @@ func TestRouteCache_ResetMetrics(t *testing.T) {
 }
 
 // TestRouteCache_ConcurrentAccess tests thread-safe cache operations.
-func TestRouteCache_ConcurrentAccess(t *testing.T) {
+func TestRouteCache_ConcurrentAccess(_ *testing.T) {
 	cache := NewRouteCache(100, 0)
 	var wg sync.WaitGroup
 

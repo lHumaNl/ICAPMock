@@ -52,7 +52,7 @@ func TestReplayerStart(t *testing.T) {
 
 	opts := ReplayOptions{
 		Speed: 0, // No delay for fast test
-		Callback: func(req *icap.Request, resp *icap.Response, err error) {
+		Callback: func(_ *icap.Request, _ *icap.Response, _ error) {
 			callbackMu.Lock()
 			callbackCount++
 			callbackMu.Unlock()
@@ -164,7 +164,7 @@ func TestReplayerFilter(t *testing.T) {
 
 	var replayedMethods []string
 	var mu sync.Mutex
-	opts.Callback = func(req *icap.Request, resp *icap.Response, err error) {
+	opts.Callback = func(req *icap.Request, _ *icap.Response, _ error) {
 		mu.Lock()
 		replayedMethods = append(replayedMethods, req.Method)
 		mu.Unlock()
@@ -210,7 +210,7 @@ func TestReplayerCallback(t *testing.T) {
 
 	opts := ReplayOptions{
 		Speed: 0,
-		Callback: func(req *icap.Request, resp *icap.Response, err error) {
+		Callback: func(req *icap.Request, _ *icap.Response, err error) {
 			mu.Lock()
 			callbacks = append(callbacks, struct {
 				req *icap.Request
@@ -255,7 +255,7 @@ func TestReplayerLoop(t *testing.T) {
 	opts := ReplayOptions{
 		Speed: 0,
 		Loop:  true,
-		Callback: func(req *icap.Request, resp *icap.Response, err error) {
+		Callback: func(_ *icap.Request, _ *icap.Response, _ error) {
 			mu.Lock()
 			callbackCount++
 			// Stop after 5 iterations to avoid infinite loop
@@ -658,7 +658,7 @@ func createTestRequests(t *testing.T, dir string, count int) {
 	}
 }
 
-func handleMockConnection(t *testing.T, conn net.Conn) {
+func handleMockConnection(_ *testing.T, conn net.Conn) {
 	defer conn.Close()
 
 	// Read request

@@ -255,8 +255,8 @@ func TestScenarioItem_Title(t *testing.T) {
 func TestScenarioItem_Description(t *testing.T) {
 	tests := []struct {
 		name     string
-		item     ScenarioItem
 		expected string
+		item     ScenarioItem
 	}{
 		{
 			name: "with method and path",
@@ -516,23 +516,23 @@ func TestScenarioManagerModel_cycleInputs_AllInputs(t *testing.T) {
 	assert.False(t, model.nameInput.Focused())
 	assert.True(t, model.priorityInput.Focused())
 
-	cmd = model.cycleInputs()
+	_ = model.cycleInputs()
 	assert.False(t, model.priorityInput.Focused())
 	assert.True(t, model.methodInput.Focused())
 
-	cmd = model.cycleInputs()
+	_ = model.cycleInputs()
 	assert.False(t, model.methodInput.Focused())
 	assert.True(t, model.pathInput.Focused())
 
-	cmd = model.cycleInputs()
+	_ = model.cycleInputs()
 	assert.False(t, model.pathInput.Focused())
 	assert.True(t, model.bodyPatternInput.Focused())
 
-	cmd = model.cycleInputs()
+	_ = model.cycleInputs()
 	assert.False(t, model.bodyPatternInput.Focused())
 	assert.True(t, model.yamlEditor.Focused())
 
-	cmd = model.cycleInputs()
+	_ = model.cycleInputs()
 	assert.False(t, model.yamlEditor.Focused())
 	assert.True(t, model.nameInput.Focused())
 }

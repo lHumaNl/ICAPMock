@@ -219,7 +219,7 @@ func TestServerStatus_ConcurrentUpdates(t *testing.T) {
 	done := make(chan bool)
 
 	for i := 0; i < 10; i++ {
-		go func(index int) {
+		go func(_ int) {
 			info := ServerStatusInfo{
 				State:  "running",
 				Port:   "1344",

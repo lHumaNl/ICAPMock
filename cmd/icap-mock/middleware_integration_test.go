@@ -210,7 +210,7 @@ func TestMiddlewareChain_RateLimitPreventsRequests(t *testing.T) {
 	t.Parallel()
 
 	// Create a handler that returns success
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -253,7 +253,7 @@ func TestMiddlewareChain_StorageSavesRequests(t *testing.T) {
 	store := &mockStorage{requests: make([]*storage.StoredRequest, 0)}
 
 	// Create a handler that returns success
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -304,24 +304,24 @@ type mockStorage struct {
 	mu       sync.RWMutex
 }
 
-func (m *mockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
+func (m *mockStorage) SaveRequest(_ context.Context, req *storage.StoredRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.requests = append(m.requests, req)
 	return nil
 }
 
-func (m *mockStorage) GetRequest(ctx context.Context, id string) (*storage.StoredRequest, error) {
+func (m *mockStorage) GetRequest(_ context.Context, _ string) (*storage.StoredRequest, error) {
 	return nil, storage.ErrRequestNotFound
 }
 
-func (m *mockStorage) ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*storage.StoredRequest, error) {
+func (m *mockStorage) ListRequests(_ context.Context, _ storage.RequestFilter) ([]*storage.StoredRequest, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.requests, nil
 }
 
-func (m *mockStorage) DeleteRequest(ctx context.Context, id string) error {
+func (m *mockStorage) DeleteRequest(_ context.Context, _ string) error {
 	return nil
 }
 
@@ -329,11 +329,11 @@ func (m *mockStorage) Close() error {
 	return nil
 }
 
-func (m *mockStorage) Flush(ctx context.Context) error {
+func (m *mockStorage) Flush(_ context.Context) error {
 	return nil
 }
 
-func (m *mockStorage) Clear(ctx context.Context) (int64, error) {
+func (m *mockStorage) Clear(_ context.Context) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := int64(len(m.requests))
@@ -341,7 +341,7 @@ func (m *mockStorage) Clear(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-func (m *mockStorage) DeleteRequests(ctx context.Context, filter storage.RequestFilter) (int64, error) {
+func (m *mockStorage) DeleteRequests(_ context.Context, _ storage.RequestFilter) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	count := int64(len(m.requests))

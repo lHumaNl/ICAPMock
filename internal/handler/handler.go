@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package handler implements ICAP request and response modification handlers.
 package handler
 
 import (

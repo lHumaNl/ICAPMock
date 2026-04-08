@@ -56,7 +56,7 @@ func NewCircuitBreaker(config CircuitBreakerConfig) *CircuitBreaker {
 	}
 }
 
-func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
+func (cb *CircuitBreaker) Execute(_ context.Context, fn func() error) error {
 	cb.mu.RLock()
 	enabled := cb.config.Enabled
 	state := cb.state
@@ -117,6 +117,8 @@ func (cb *CircuitBreaker) RecordSuccessLocked() {
 		}
 	case StateClosed:
 		cb.failures = max(0, cb.failures-1)
+	case StateOpen:
+		// No action needed for success in OPEN state
 	}
 }
 
@@ -141,6 +143,8 @@ func (cb *CircuitBreaker) RecordFailureLocked() {
 		cb.state = StateOpen
 		cb.successes = 0
 		log.Printf("[CircuitBreaker] Transition: HalfOpen -> Open (failure in half-open state)")
+	case StateOpen:
+		// Already open, no action needed
 	}
 }
 

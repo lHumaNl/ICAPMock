@@ -49,8 +49,8 @@ func (m *MatchValue) Matches(value string) bool {
 
 // ScenarioFileV2 is the top-level structure of a v2 scenario file.
 type ScenarioFileV2 struct {
+	Scenarios map[string]ScenarioEntryV2 `yaml:"scenarios"`
 	Defaults  ScenarioDefaultsV2         `yaml:"defaults"`
-	Scenarios map[string]ScenarioEntryV2 `yaml:"scenarios"` // ordered map
 }
 
 // ScenarioDefaultsV2 contains default values inherited by all scenarios.

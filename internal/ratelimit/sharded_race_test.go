@@ -39,7 +39,7 @@ func TestRaceCondition_ConcurrentAllowSameKey(t *testing.T) {
 
 // TestRaceCondition_ConcurrentSetRate tests that concurrent SetRate() calls
 // don't cause data races. Verifies atomic operations on rate field.
-func TestRaceCondition_ConcurrentSetRate(t *testing.T) {
+func TestRaceCondition_ConcurrentSetRate(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(100, 150)
 
 	// Run 50 goroutines each calling SetRate() with different values
@@ -69,7 +69,7 @@ func TestRaceCondition_ConcurrentSetRate(t *testing.T) {
 
 // TestRaceCondition_ConcurrentSetBurst tests that concurrent SetBurst() calls
 // don't cause data races. Verifies atomic operations on burst field.
-func TestRaceCondition_ConcurrentSetBurst(t *testing.T) {
+func TestRaceCondition_ConcurrentSetBurst(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(100, 150)
 
 	// Run 50 goroutines each calling SetBurst() with different values
@@ -99,7 +99,7 @@ func TestRaceCondition_ConcurrentSetBurst(t *testing.T) {
 
 // TestRaceCondition_ConcurrentSetRateAndSetBurst tests that concurrent
 // SetRate() and SetBurst() calls don't interfere with each other.
-func TestRaceCondition_ConcurrentSetRateAndSetBurst(t *testing.T) {
+func TestRaceCondition_ConcurrentSetRateAndSetBurst(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(100, 150)
 
 	var wg sync.WaitGroup
@@ -136,7 +136,7 @@ func TestRaceCondition_ConcurrentSetRateAndSetBurst(t *testing.T) {
 
 // TestRaceCondition_AllowDuringSetRate tests that Allow() can be called
 // while SetRate() is updating the rate, without data races.
-func TestRaceCondition_AllowDuringSetRate(t *testing.T) {
+func TestRaceCondition_AllowDuringSetRate(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(100, 150)
 
 	var wg sync.WaitGroup
@@ -165,7 +165,7 @@ func TestRaceCondition_AllowDuringSetRate(t *testing.T) {
 
 // TestRaceCondition_AllowDuringSetBurst tests that Allow() can be called
 // while SetBurst() is updating the burst, without data races.
-func TestRaceCondition_AllowDuringSetBurst(t *testing.T) {
+func TestRaceCondition_AllowDuringSetBurst(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(100, 150)
 
 	var wg sync.WaitGroup
@@ -195,7 +195,7 @@ func TestRaceCondition_AllowDuringSetBurst(t *testing.T) {
 
 // TestRaceCondition_ReserveDuringSetRate tests that Reserve() can be called
 // while SetRate() is updating the rate, without data races.
-func TestRaceCondition_ReserveDuringSetRate(t *testing.T) {
+func TestRaceCondition_ReserveDuringSetRate(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(100, 150)
 
 	var wg sync.WaitGroup
@@ -299,7 +299,7 @@ func TestRaceCondition_WaitExponentialBackoff(t *testing.T) {
 
 // TestRaceCondition_AllowAndReserveMixed tests mixed Allow() and Reserve()
 // calls to ensure they don't interfere with each other.
-func TestRaceCondition_AllowAndReserveMixed(t *testing.T) {
+func TestRaceCondition_AllowAndReserveMixed(_ *testing.T) {
 	limiter := NewKeyBasedShardedTokenBucketLimiter(1000, 1500)
 
 	var wg sync.WaitGroup

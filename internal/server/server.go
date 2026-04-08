@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package server implements the core ICAP protocol server and connection handling.
 package server
 
 import (

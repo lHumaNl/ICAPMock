@@ -24,7 +24,7 @@ type mockPlugin struct {
 	mu         sync.Mutex
 }
 
-func (m *mockPlugin) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (m *mockPlugin) Process(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.processErr != nil {
@@ -37,7 +37,7 @@ func (m *mockPlugin) Name() string {
 	return m.name
 }
 
-func (m *mockPlugin) Init(config map[string]interface{}) error {
+func (m *mockPlugin) Init(_ map[string]interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.initCalls++
@@ -253,7 +253,7 @@ func TestRegistryCloseErrors(t *testing.T) {
 // TestProcessorPluginFunc tests the ProcessorPluginFunc adapter.
 func TestProcessorPluginFunc(t *testing.T) {
 	called := false
-	f := plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	f := plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		called = true
 		return icap.NewResponse(200), nil
 	})
@@ -333,10 +333,10 @@ func TestCreatePluginProcessor(t *testing.T) {
 	defer plugin.Clear()
 
 	// Register plugins that return responses
-	plugin.MustRegister("proc-1", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("proc-1", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return nil, nil // Pass through
 	}))
-	plugin.MustRegister("proc-2", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("proc-2", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(200), nil // Handle request
 	}))
 
@@ -368,13 +368,13 @@ func TestChainPlugins(t *testing.T) {
 	defer plugin.Clear()
 
 	// Register plugins
-	plugin.MustRegister("chain-1", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("chain-1", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return nil, nil // Pass through
 	}))
-	plugin.MustRegister("chain-2", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("chain-2", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(201), nil // Handle request
 	}))
-	plugin.MustRegister("chain-3", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("chain-3", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(202), nil // Should not be reached
 	}))
 
@@ -400,7 +400,7 @@ func TestChainPlugins(t *testing.T) {
 func TestChainPluginsNonExistent(t *testing.T) {
 	defer plugin.Clear()
 
-	plugin.MustRegister("existing", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("existing", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	}))
 
@@ -430,15 +430,15 @@ func TestPluginProcessorOrder(t *testing.T) {
 	var order []string
 
 	// Register plugins in specific order
-	plugin.MustRegister("order-1", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("order-1", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		order = append(order, "order-1")
 		return nil, nil // Pass through
 	}))
-	plugin.MustRegister("order-2", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("order-2", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		order = append(order, "order-2")
 		return nil, nil // Pass through
 	}))
-	plugin.MustRegister("order-3", plugin.ProcessorPluginFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plugin.MustRegister("order-3", plugin.ProcessorPluginFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		order = append(order, "order-3")
 		return icap.NewResponse(200), nil
 	}))

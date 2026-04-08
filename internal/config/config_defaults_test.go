@@ -113,14 +113,14 @@ func TestConfigDefaults_AllServerDefaults(t *testing.T) {
 		expected interface{}
 		name     string
 	}{
-		{"Host", cfg.Server.Host, "0.0.0.0"},
-		{"Port", cfg.Server.Port, 1344},
-		{"MaxConnections", cfg.Server.MaxConnections, 15000},
-		{"MaxBodySize", cfg.Server.MaxBodySize, int64(10485760)},
-		{"Streaming", cfg.Server.Streaming, true},
-		{"ReadTimeout", cfg.Server.ReadTimeout, 30 * time.Second},
-		{"WriteTimeout", cfg.Server.WriteTimeout, 30 * time.Second},
-		{"TLS.Enabled", cfg.Server.TLS.Enabled, false},
+		{cfg.Server.Host, "0.0.0.0", "Host"},
+		{cfg.Server.Port, 1344, "Port"},
+		{cfg.Server.MaxConnections, 15000, "MaxConnections"},
+		{cfg.Server.MaxBodySize, int64(10485760), "MaxBodySize"},
+		{cfg.Server.Streaming, true, "Streaming"},
+		{cfg.Server.ReadTimeout, 30 * time.Second, "ReadTimeout"},
+		{cfg.Server.WriteTimeout, 30 * time.Second, "WriteTimeout"},
+		{cfg.Server.TLS.Enabled, false, "TLS.Enabled"},
 	}
 
 	for _, tt := range tests {

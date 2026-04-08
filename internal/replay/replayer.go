@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package replay provides capture and replay of ICAP request/response sessions.
 package replay
 
 import (
@@ -49,13 +50,13 @@ type Stats struct {
 // Replayer is safe for concurrent use after creation but Start should only
 // be called once at a time.
 type Replayer struct {
-	stats    Stats
 	storage  storage.Storage
 	logger   Logger
 	config   *config.ReplayConfig
 	client   *Client
 	metrics  *metrics.Collector
 	stopChan chan struct{}
+	stats    Stats
 	mu       sync.RWMutex
 	stopOnce sync.Once
 	running  bool

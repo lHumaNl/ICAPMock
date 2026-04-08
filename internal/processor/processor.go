@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package processor provides content processing strategies including mock, echo, and scripted responses.
 package processor
 
 import (

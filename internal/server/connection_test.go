@@ -252,7 +252,7 @@ func TestConnectionState(t *testing.T) {
 	}
 }
 
-func TestConnectionConcurrency(t *testing.T) {
+func TestConnectionConcurrency(_ *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()

@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package testing provides test helpers, mocks, and harnesses for ICAP server tests.
 package testing
 
 import (

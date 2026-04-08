@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package router provides request routing with caching for the ICAP server.
 package router
 
 import (

@@ -673,7 +673,7 @@ func (p *ConnectionPool) Count() int {
 
 // CloseAll closes all connections in the pool and removes them.
 // It waits for all connections to be removed from the pool before returning.
-func (p *ConnectionPool) CloseAll(ctx context.Context) {
+func (p *ConnectionPool) CloseAll(_ context.Context) {
 	p.mu.Lock()
 	// Get a copy of connections to avoid holding lock during close
 	conns := make([]*Connection, 0, len(p.connections))

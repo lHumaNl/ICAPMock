@@ -133,7 +133,7 @@ func TestEchoProcessor_ContextCancellation(t *testing.T) {
 }
 
 // TestEchoProcessor_Interface verifies EchoProcessor implements Processor interface.
-func TestEchoProcessor_Interface(t *testing.T) {
+func TestEchoProcessor_Interface(_ *testing.T) {
 	// This is a compile-time check
 	var _ Processor = NewEchoProcessor()
 }

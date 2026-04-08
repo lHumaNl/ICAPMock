@@ -149,7 +149,7 @@ func (m *HealthMonitorModel) renderCurrentHealth(result state.HealthCheckResult)
 
 // renderAlerts renders the alerts section.
 func (m *HealthMonitorModel) renderAlerts() string {
-	var lines []string //nolint:prealloc
+	lines := make([]string, 0, 1+len(m.alerts))
 	lines = append(lines, TitleStyle.Render("Alerts"))
 
 	for _, alert := range m.alerts {

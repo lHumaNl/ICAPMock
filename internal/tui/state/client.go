@@ -181,6 +181,7 @@ func (c *MetricsClient) GetMetrics(ctx context.Context) (*MetricsSnapshot, error
 	return c.parseMetrics(string(body))
 }
 
+//nolint:unparam
 func (c *MetricsClient) parseMetrics(body string) (*MetricsSnapshot, error) {
 	snapshot := &MetricsSnapshot{
 		Timestamp:     time.Now(),

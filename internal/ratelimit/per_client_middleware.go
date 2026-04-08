@@ -58,7 +58,7 @@ func NewPerClientMiddleware(
 // Returns:
 //   - allowed: true if request is allowed, false otherwise
 //   - err: error if context is canceled during Wait
-func (m *PerClientMiddleware) Allow(ctx context.Context, req *icap.Request) (allowed bool, err error) {
+func (m *PerClientMiddleware) Allow(_ context.Context, req *icap.Request) (allowed bool, err error) {
 	clientIP := m.extractClientIP(req)
 
 	// Skip per-client limiting for unknown IPs to prevent DoS attacks
@@ -70,7 +70,7 @@ func (m *PerClientMiddleware) Allow(ctx context.Context, req *icap.Request) (all
 
 		if ok {
 			// Client was in cache - update metrics
-			m.metrics.SetPerClientRateLimitActive(int(m.perClientLimiter.Stats().ActiveClients))
+			m.metrics.SetPerClientRateLimitActive(m.perClientLimiter.Stats().ActiveClients)
 		}
 
 		if allowed {
@@ -110,7 +110,7 @@ func (m *PerClientMiddleware) Wait(ctx context.Context, req *icap.Request) error
 
 		if ok {
 			// Client was in cache
-			m.metrics.SetPerClientRateLimitActive(int(m.perClientLimiter.Stats().ActiveClients))
+			m.metrics.SetPerClientRateLimitActive(m.perClientLimiter.Stats().ActiveClients)
 		}
 
 		if allowed {

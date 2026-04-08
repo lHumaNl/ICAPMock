@@ -125,13 +125,13 @@ func TestLogLevels(t *testing.T) {
 		level     string
 		shouldLog bool
 	}{
-		{"debug level logs debug", "debug", func(l *Logger) { l.Debug("debug msg") }, true},
-		{"info level skips debug", "info", func(l *Logger) { l.Debug("debug msg") }, false},
-		{"info level logs info", "info", func(l *Logger) { l.Info("info msg") }, true},
-		{"warn level skips info", "warn", func(l *Logger) { l.Info("info msg") }, false},
-		{"warn level logs warn", "warn", func(l *Logger) { l.Warn("warn msg") }, true},
-		{"error level skips warn", "error", func(l *Logger) { l.Warn("warn msg") }, false},
-		{"error level logs error", "error", func(l *Logger) { l.Error("error msg") }, true},
+		{func(l *Logger) { l.Debug("debug msg") }, "debug level logs debug", "debug", true},
+		{func(l *Logger) { l.Debug("debug msg") }, "info level skips debug", "info", false},
+		{func(l *Logger) { l.Info("info msg") }, "info level logs info", "info", true},
+		{func(l *Logger) { l.Info("info msg") }, "warn level skips info", "warn", false},
+		{func(l *Logger) { l.Warn("warn msg") }, "warn level logs warn", "warn", true},
+		{func(l *Logger) { l.Warn("warn msg") }, "error level skips warn", "error", false},
+		{func(l *Logger) { l.Error("error msg") }, "error level logs error", "error", true},
 	}
 
 	for _, tt := range tests {

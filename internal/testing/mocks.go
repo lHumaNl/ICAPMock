@@ -276,7 +276,7 @@ func NewMockStorage() *MockStorage {
 //
 // Returns:
 //   - error if storage is closed
-func (m *MockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
+func (m *MockStorage) SaveRequest(_ context.Context, req *storage.StoredRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -300,7 +300,7 @@ func (m *MockStorage) SaveRequest(ctx context.Context, req *storage.StoredReques
 // Returns:
 //   - The stored request
 //   - error if not found or storage is closed
-func (m *MockStorage) GetRequest(ctx context.Context, id string) (*storage.StoredRequest, error) {
+func (m *MockStorage) GetRequest(_ context.Context, id string) (*storage.StoredRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -325,7 +325,7 @@ func (m *MockStorage) GetRequest(ctx context.Context, id string) (*storage.Store
 // Returns:
 //   - All stored requests
 //   - error if storage is closed
-func (m *MockStorage) ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*storage.StoredRequest, error) {
+func (m *MockStorage) ListRequests(_ context.Context, _ storage.RequestFilter) ([]*storage.StoredRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -346,7 +346,7 @@ func (m *MockStorage) ListRequests(ctx context.Context, filter storage.RequestFi
 //
 // Returns:
 //   - error if not found or storage is closed
-func (m *MockStorage) DeleteRequest(ctx context.Context, id string) error {
+func (m *MockStorage) DeleteRequest(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -379,7 +379,7 @@ func (m *MockStorage) DeleteRequest(ctx context.Context, id string) error {
 // Returns:
 //   - Number of requests deleted
 //   - error if storage is closed
-func (m *MockStorage) DeleteRequests(ctx context.Context, filter storage.RequestFilter) (int64, error) {
+func (m *MockStorage) DeleteRequests(_ context.Context, _ storage.RequestFilter) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -401,7 +401,7 @@ func (m *MockStorage) DeleteRequests(ctx context.Context, filter storage.Request
 //
 // Returns:
 //   - Always nil
-func (m *MockStorage) Flush(ctx context.Context) error {
+func (m *MockStorage) Flush(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -420,7 +420,7 @@ func (m *MockStorage) Flush(ctx context.Context) error {
 // Returns:
 //   - Number of requests cleared
 //   - error if storage is closed
-func (m *MockStorage) Clear(ctx context.Context) (int64, error) {
+func (m *MockStorage) Clear(_ context.Context) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -526,7 +526,7 @@ func NewMockFileSystem(totalSpace int64) *MockFileSystem {
 //
 // Returns:
 //   - error if disk is full or write error is set
-func (m *MockFileSystem) WriteFile(path string, data []byte, perm int) error {
+func (m *MockFileSystem) WriteFile(path string, data []byte, _ int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -308,13 +308,13 @@ func TestValidator_Validate_TLS(t *testing.T) {
 		enabled     bool
 		expectError bool
 	}{
-		{"disabled - no files needed", false, "", "", false},
-		{"enabled - valid files", true, validCertFile, validKeyFile, false},
-		{"enabled - missing cert", true, "", validKeyFile, true},
-		{"enabled - missing key", true, validCertFile, "", true},
-		{"enabled - both missing", true, "", "", true},
-		{"enabled - cert file not found", true, "/nonexistent/cert.pem", validKeyFile, true},
-		{"enabled - key file not found", true, validCertFile, "/nonexistent/key.pem", true},
+		{"disabled - no files needed", "", "", false, false},
+		{"enabled - valid files", validCertFile, validKeyFile, true, false},
+		{"enabled - missing cert", "", validKeyFile, true, true},
+		{"enabled - missing key", validCertFile, "", true, true},
+		{"enabled - both missing", "", "", true, true},
+		{"enabled - cert file not found", "/nonexistent/cert.pem", validKeyFile, true, true},
+		{"enabled - key file not found", validCertFile, "/nonexistent/key.pem", true, true},
 	}
 
 	for _, tt := range tests {

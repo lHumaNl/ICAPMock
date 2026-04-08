@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package plugin provides a plugin loading and management system.
 package plugin
 
 import (
@@ -63,7 +64,7 @@ func (f ProcessorPluginFunc) Name() string {
 }
 
 // Init implements ProcessorPlugin.Init.
-func (f ProcessorPluginFunc) Init(config map[string]interface{}) error {
+func (f ProcessorPluginFunc) Init(_ map[string]interface{}) error {
 	return nil
 }
 

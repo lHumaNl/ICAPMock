@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package config handles loading and validation of server configuration.
 package config
 
 import (
@@ -178,22 +179,22 @@ func (e *ServerEntryConfig) ToServerConfig(defaults DefaultsConfig) ServerConfig
 // Config is the root configuration structure for the ICAP Mock Server.
 // It contains all sub-configurations for different components.
 type Config struct {
-	CircuitBreaker     CircuitBreakerGlobalConfig   `yaml:"circuit_breaker" json:"circuit_breaker"`
 	Servers            map[string]ServerEntryConfig `yaml:"servers,omitempty" json:"servers,omitempty"`
-	Server             ServerConfig                 `yaml:"server" json:"server"`
 	Health             HealthConfig                 `yaml:"health" json:"health"`
-	Metrics            MetricsConfig                `yaml:"metrics" json:"metrics"`
-	RateLimit          RateLimitConfig              `yaml:"rate_limit" json:"rate_limit"`
 	Plugin             PluginConfig                 `yaml:"plugin" json:"plugin"`
+	Metrics            MetricsConfig                `yaml:"metrics" json:"metrics"`
 	Replay             ReplayConfig                 `yaml:"replay" json:"replay"`
 	Mock               MockConfig                   `yaml:"mock" json:"mock"`
 	Logging            LoggingConfig                `yaml:"logging" json:"logging"`
-	Storage            StorageConfig                `yaml:"storage" json:"storage"`
+	RateLimit          RateLimitConfig              `yaml:"rate_limit" json:"rate_limit"`
+	CircuitBreaker     CircuitBreakerGlobalConfig   `yaml:"circuit_breaker" json:"circuit_breaker"`
 	Defaults           DefaultsConfig               `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	Server             ServerConfig                 `yaml:"server" json:"server"`
+	Storage            StorageConfig                `yaml:"storage" json:"storage"`
 	Chaos              ChaosConfig                  `yaml:"chaos" json:"chaos"`
 	PerClientRateLimit PerClientRateLimitConfig     `yaml:"per_client_rate_limit" json:"per_client_rate_limit"`
-	Sharding           ShardingConfig               `yaml:"sharding" json:"sharding"`
 	Preview            PreviewConfig                `yaml:"preview" json:"preview"`
+	Sharding           ShardingConfig               `yaml:"sharding" json:"sharding"`
 	PerMethodRateLimit PerMethodRateLimitConfig     `yaml:"per_method_rate_limit" json:"per_method_rate_limit"`
 	Pprof              PprofConfig                  `yaml:"pprof" json:"pprof"`
 }
@@ -355,8 +356,8 @@ func (c *Config) SetDefaults() {
 
 // ServerConfig contains ICAP server configuration.
 type ServerConfig struct {
-	TLS             TLSConfig     `yaml:"tls" json:"tls"`
 	Host            string        `yaml:"host" json:"host"`
+	TLS             TLSConfig     `yaml:"tls" json:"tls"`
 	Port            int           `yaml:"port" json:"port"`
 	ReadTimeout     time.Duration `yaml:"read_timeout" json:"read_timeout"`
 	WriteTimeout    time.Duration `yaml:"write_timeout" json:"write_timeout"`

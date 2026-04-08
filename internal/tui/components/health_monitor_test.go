@@ -196,10 +196,10 @@ func TestHealthMonitorModel_getStatusStyle(t *testing.T) {
 		healthy  bool
 		ready    bool
 	}{
-		{"healthy and ready", true, true, "running"},
-		{"unhealthy", false, true, "stopped"},
-		{"not ready", true, false, "warning"},
-		{"unhealthy and not ready", false, false, "stopped"},
+		{"healthy and ready", "running", true, true},
+		{"unhealthy", "stopped", false, true},
+		{"not ready", "warning", true, false},
+		{"unhealthy and not ready", "stopped", false, false},
 	}
 
 	for _, tt := range tests {
@@ -251,10 +251,10 @@ func TestHealthMonitorModel_renderCurrentHealth(t *testing.T) {
 		healthy    bool
 		ready      bool
 	}{
-		{"healthy and ready", true, true, "OK"},
-		{"unhealthy", false, true, "Unhealthy"},
-		{"not ready", true, false, "Not Ready"},
-		{"unhealthy and not ready", false, false, "Unhealthy"},
+		{"healthy and ready", "OK", true, true},
+		{"unhealthy", "Unhealthy", false, true},
+		{"not ready", "Not Ready", true, false},
+		{"unhealthy and not ready", "Unhealthy", false, false},
 	}
 
 	for _, tt := range tests {
@@ -418,10 +418,10 @@ func TestHealthMonitorModel_renderCurrentHealth_StatusStyles(t *testing.T) {
 		healthy       bool
 		ready         bool
 	}{
-		{true, true, []string{"OK"}},
-		{false, true, []string{"Unhealthy"}},
-		{true, false, []string{"Not Ready"}},
-		{false, false, []string{"Unhealthy"}},
+		{[]string{"OK"}, true, true},
+		{[]string{"Unhealthy"}, false, true},
+		{[]string{"Not Ready"}, true, false},
+		{[]string{"Unhealthy"}, false, false},
 	}
 
 	for _, tt := range tests {
@@ -623,10 +623,10 @@ func TestHealthMonitorModel_renderHistory_StatusIndicators(t *testing.T) {
 		healthy bool
 		ready   bool
 	}{
-		{true, true, "OK"},
-		{false, true, "FAIL"},
-		{true, false, "NREADY"},
-		{false, false, "FAIL"},
+		{"OK", true, true},
+		{"FAIL", false, true},
+		{"NREADY", true, false},
+		{"FAIL", false, false},
 	}
 
 	for _, check := range checks {

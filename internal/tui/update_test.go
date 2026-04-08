@@ -283,7 +283,7 @@ func TestModel_Update_KeyMsg_ReplayOperations(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			model := InitialModel("test", "1.0", &state.ClientConfig{})
 			model.currentScreen = tt.currentScreen
 

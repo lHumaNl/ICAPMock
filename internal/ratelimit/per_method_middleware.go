@@ -67,7 +67,7 @@ func NewPerMethodMiddleware(
 // Returns:
 //   - allowed: true if request is allowed, false otherwise
 //   - err: error if context is canceled during Wait
-func (m *PerMethodMiddleware) Allow(ctx context.Context, req *icap.Request) (allowed bool, err error) {
+func (m *PerMethodMiddleware) Allow(_ context.Context, req *icap.Request) (allowed bool, err error) {
 	if req == nil {
 		return true, nil // No request, allow
 	}

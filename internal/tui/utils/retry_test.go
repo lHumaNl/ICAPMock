@@ -216,7 +216,7 @@ func TestCalculateBackoff_WithJitter(t *testing.T) {
 }
 
 func TestDoWithRetryHTTP_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("success"))
 	}))
@@ -245,7 +245,7 @@ func TestDoWithRetryHTTP_Success(t *testing.T) {
 
 func TestDoWithRetryHTTP_RetryOn5xx(t *testing.T) {
 	var callCount int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		count := atomic.AddInt32(&callCount, 1)
 		if count < 3 {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -289,7 +289,7 @@ func TestDoWithRetryHTTP_RetryOn5xx(t *testing.T) {
 
 func TestDoWithRetryHTTP_NoRetryOn4xx(t *testing.T) {
 	var callCount int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&callCount, 1)
 		w.WriteHeader(http.StatusBadRequest)
 	}))
@@ -322,7 +322,7 @@ func TestDoWithRetryHTTP_NoRetryOn4xx(t *testing.T) {
 
 func TestDoWithRetryHTTP_NoRetryOn503(t *testing.T) {
 	var callCount int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&callCount, 1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
@@ -357,7 +357,7 @@ func TestDoWithRetryHTTP_RetryOnConnectionError(t *testing.T) {
 	var callCount int32
 	var shouldFail int32 = 1
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if atomic.AddInt32(&callCount, 1) < 2 && atomic.LoadInt32(&shouldFail) > 0 {
 			atomic.StoreInt32(&shouldFail, 0)
 			hj, ok := w.(http.Hijacker)
@@ -471,22 +471,21 @@ func TestShouldRetryError(t *testing.T) {
 		name     string
 		expected bool
 	}{
-		{"nil error", nil, false},
-		{"timeout error", &timeoutError{}, true},
-		{"connection refused", errors.New("dial tcp: connection refused"), true},
-		{"connection reset", errors.New("connection reset by peer"), true},
-		{"EOF error", errors.New("EOF"), true},
-		{"DNS error", errors.New("no such host"), false},
-		{"TLS error", errors.New("TLS handshake timeout"), false},
-		{"generic error", errors.New("generic error"), true},
-		{"context canceled", context.Canceled, false},
-		{"context deadline", context.DeadlineExceeded, false},
+		{nil, "nil error", false},
+		{&timeoutError{}, "timeout error", true},
+		{errors.New("dial tcp: connection refused"), "connection refused", true},
+		{errors.New("connection reset by peer"), "connection reset", true},
+		{errors.New("EOF"), "EOF error", true},
+		{errors.New("no such host"), "DNS error", false},
+		{errors.New("TLS handshake timeout"), "TLS error", false},
+		{errors.New("generic error"), "generic error", true},
+		{context.Canceled, "context canceled", false},
+		{context.DeadlineExceeded, "context deadline", false},
 	}
 
-	config := DefaultRetryConfig()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shouldRetryError(tt.err, config)
+			result := shouldRetryError(tt.err)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v for error: %v", tt.expected, result, tt.err)
 			}

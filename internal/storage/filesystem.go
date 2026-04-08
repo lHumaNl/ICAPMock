@@ -149,7 +149,7 @@ func NewFileStorage(cfg config.StorageConfig, metrics *prometheusmetrics.Collect
 //  1. Fast path: check closed atomically without lock
 //  2. Acquire read lock and check again (Close might have happened)
 //  3. If still open, send to channel while holding RLock
-func (fs *FileStorage) SaveRequest(ctx context.Context, sr *StoredRequest) error {
+func (fs *FileStorage) SaveRequest(_ context.Context, sr *StoredRequest) error {
 	if !fs.config.Enabled {
 		return ErrStorageDisabled
 	}
@@ -422,7 +422,7 @@ func (fs *FileStorage) generateFilename(t time.Time) string {
 }
 
 // GetRequest retrieves a previously stored request by its ID.
-func (fs *FileStorage) GetRequest(ctx context.Context, id string) (*StoredRequest, error) {
+func (fs *FileStorage) GetRequest(_ context.Context, id string) (*StoredRequest, error) {
 	if !fs.config.Enabled {
 		return nil, ErrStorageDisabled
 	}
@@ -494,7 +494,7 @@ func (fs *FileStorage) GetRequest(ctx context.Context, id string) (*StoredReques
 }
 
 // ListRequests retrieves requests matching the given filter.
-func (fs *FileStorage) ListRequests(ctx context.Context, filter RequestFilter) ([]*StoredRequest, error) {
+func (fs *FileStorage) ListRequests(_ context.Context, filter RequestFilter) ([]*StoredRequest, error) {
 	if !fs.config.Enabled {
 		return nil, ErrStorageDisabled
 	}
@@ -657,7 +657,7 @@ func (fs *FileStorage) readBatchFile(path string) ([]*StoredRequest, error) {
 // Note: For batch files, this marks the request as deleted but doesn't remove
 // it from the file (would require rewriting the entire batch).
 // For old format files, it removes the file entirely.
-func (fs *FileStorage) DeleteRequest(ctx context.Context, id string) error {
+func (fs *FileStorage) DeleteRequest(_ context.Context, id string) error {
 	if !fs.config.Enabled {
 		return ErrStorageDisabled
 	}
@@ -905,7 +905,7 @@ func (fs *FileStorage) Flush(ctx context.Context) error {
 // Clear removes all stored requests from storage.
 // This deletes all request files in the storage directory.
 // Returns the number of requests cleared.
-func (fs *FileStorage) Clear(ctx context.Context) (int64, error) {
+func (fs *FileStorage) Clear(_ context.Context) (int64, error) {
 	if !fs.config.Enabled {
 		return 0, nil
 	}
@@ -967,7 +967,7 @@ func (fs *FileStorage) Clear(ctx context.Context) (int64, error) {
 
 // DeleteRequests removes multiple requests matching the given filter.
 // Returns the number of requests deleted.
-func (fs *FileStorage) DeleteRequests(ctx context.Context, filter RequestFilter) (int64, error) {
+func (fs *FileStorage) DeleteRequests(_ context.Context, filter RequestFilter) (int64, error) {
 	if !fs.config.Enabled {
 		return 0, nil
 	}

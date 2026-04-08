@@ -22,14 +22,14 @@ type mockScenarioRegistry struct {
 	err      error
 }
 
-func (m *mockScenarioRegistry) Match(req *icap.Request) (*storage.Scenario, error) {
+func (m *mockScenarioRegistry) Match(_ *icap.Request) (*storage.Scenario, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.scenario, nil
 }
 
-func (m *mockScenarioRegistry) Load(path string) error {
+func (m *mockScenarioRegistry) Load(_ string) error {
 	return nil
 }
 
@@ -49,7 +49,7 @@ func (m *mockScenarioRegistry) Add(scenario *storage.Scenario) error {
 	return nil
 }
 
-func (m *mockScenarioRegistry) Remove(name string) error {
+func (m *mockScenarioRegistry) Remove(_ string) error {
 	return nil
 }
 

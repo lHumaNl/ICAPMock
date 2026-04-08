@@ -450,7 +450,7 @@ func (dm *DiskMonitor) getDiskUsageSyscalls() (DiskUsage, error) {
 func (dm *DiskMonitor) getDiskUsageWalk() (DiskUsage, error) {
 	// Get directory size
 	var size int64
-	walkErr := filepath.Walk(dm.path, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk(dm.path, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
 			// Ignore temporary access errors (e.g., locked files on Windows)
 			if os.IsPermission(err) {

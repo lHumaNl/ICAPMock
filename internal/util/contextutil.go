@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package util provides general-purpose utility functions.
 package util
 
 import (

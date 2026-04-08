@@ -246,7 +246,7 @@ func TestTokenBucketLimiter_ZeroRate(t *testing.T) {
 	}
 }
 
-func TestTokenBucketLimiter_ZeroBurst(t *testing.T) {
+func TestTokenBucketLimiter_ZeroBurst(_ *testing.T) {
 	// With zero burst, only replenishment allows requests
 	limiter := NewTokenBucketLimiter(100, 0)
 

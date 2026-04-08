@@ -403,7 +403,7 @@ func TestValidateMode_Integration(t *testing.T) {
 		},
 		{
 			name: "no scenarios directory configured",
-			setupConfig: func(cfg *config.Config, tmpDir string) {
+			setupConfig: func(cfg *config.Config, _ string) {
 				cfg.Mock.ScenariosDir = ""
 			},
 			expectError: false,

@@ -32,7 +32,7 @@ func NewEchoProcessor() *EchoProcessor {
 // is not modified.
 //
 // The request is always handled successfully (no error is returned).
-func (p *EchoProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (p *EchoProcessor) Process(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 	return &icap.Response{
 		StatusCode: icap.StatusNoContentNeeded,
 		Proto:      icap.Version,

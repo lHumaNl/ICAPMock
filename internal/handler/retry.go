@@ -361,7 +361,7 @@ func applyJitter(backoff time.Duration, strategy JitterStrategy, jitterPercent f
 		return backoff
 	}
 
-	switch strategy {
+	switch strategy { //nolint:exhaustive // JitterNone handled above
 	case JitterFull:
 		// Full jitter: random value between 0 and backoff
 		// This is the most aggressive jitter strategy

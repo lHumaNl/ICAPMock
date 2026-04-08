@@ -53,7 +53,7 @@ func TestProcessorInterface(t *testing.T) {
 func TestProcessorFunc(t *testing.T) {
 	t.Run("returns response", func(t *testing.T) {
 		expectedStatus := 204
-		p := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return icap.NewResponse(expectedStatus), nil
 		})
 
@@ -70,7 +70,7 @@ func TestProcessorFunc(t *testing.T) {
 
 	t.Run("returns error", func(t *testing.T) {
 		expectedErr := context.Canceled
-		p := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, expectedErr
 		})
 
@@ -93,13 +93,13 @@ func TestProcessorFunc(t *testing.T) {
 // TestChainProcessor tests the Chain processor.
 func TestChainProcessor(t *testing.T) {
 	t.Run("returns first non-nil response", func(t *testing.T) {
-		p1 := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p1 := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, nil // pass through
 		})
-		p2 := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p2 := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return icap.NewResponse(200), nil // return response
 		})
-		p3 := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p3 := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return icap.NewResponse(500), nil // should not be called
 		})
 
@@ -117,7 +117,7 @@ func TestChainProcessor(t *testing.T) {
 
 	t.Run("returns error from processor", func(t *testing.T) {
 		expectedErr := context.DeadlineExceeded
-		p1 := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p1 := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, expectedErr
 		})
 
@@ -131,10 +131,10 @@ func TestChainProcessor(t *testing.T) {
 	})
 
 	t.Run("returns 204 when all processors pass through", func(t *testing.T) {
-		p1 := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p1 := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, nil
 		})
-		p2 := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		p2 := ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, nil
 		})
 
@@ -160,7 +160,7 @@ func TestChainProcessor(t *testing.T) {
 
 // Helper functions
 
-func mockProcessFunc(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func mockProcessFunc(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 	return icap.NewResponse(icap.StatusNoContentNeeded), nil
 }
 

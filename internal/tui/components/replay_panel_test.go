@@ -336,8 +336,8 @@ func TestReplayPanelModel_getStatusIcon(t *testing.T) {
 		want    string
 		success bool
 	}{
-		{"success", true, "✓"},
-		{"failure", false, "✗"},
+		{"success", "✓", true},
+		{"failure", "✗", false},
 	}
 
 	for _, tt := range tests {
@@ -370,8 +370,8 @@ func TestReplayRequestItem_Title(t *testing.T) {
 		want     string
 		selected bool
 	}{
-		{"selected", true, "[✓]"},
-		{"not selected", false, "[ ]"},
+		{"selected", "[✓]", true},
+		{"not selected", "[ ]", false},
 	}
 
 	for _, tt := range tests {

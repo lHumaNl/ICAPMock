@@ -134,7 +134,7 @@ func TestExampleIntegration(t *testing.T) {
 // TestExampleIntegrationMemory demonstrates using the memory server harness.
 func TestExampleIntegrationMemory(t *testing.T) {
 	harness := NewMemoryServerHarness(t)
-	harness.SetHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	harness.SetHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	})
 
@@ -181,7 +181,7 @@ func TestExampleIntegrationStorage(t *testing.T) {
 
 // TestExampleConcurrent demonstrates concurrent testing.
 func TestExampleConcurrent(t *testing.T) {
-	RunConcurrent(t, 100, func(goroutineID int) {
+	RunConcurrent(t, 100, func(_ int) {
 		req := BuildICAPRequest("REQMOD", "icap://localhost/reqmod", nil, nil)
 		_ = req
 	})
@@ -189,7 +189,7 @@ func TestExampleConcurrent(t *testing.T) {
 
 // TestExampleConcurrentWithTimeout demonstrates concurrent testing with timeout.
 func TestExampleConcurrentWithTimeout(t *testing.T) {
-	err := RunConcurrentWithTimeout(t, 1000, 5*time.Second, func(goroutineID int, ctx context.Context) {
+	err := RunConcurrentWithTimeout(t, 1000, 5*time.Second, func(_ int, _ context.Context) {
 		req := BuildICAPRequest("REQMOD", "icap://localhost/reqmod", nil, nil)
 		_ = req
 	})
@@ -206,7 +206,7 @@ func TestExampleStress(t *testing.T) {
 		Timeout:    30 * time.Second,
 	}
 
-	RunConcurrentStress(t, cfg, func(goroutineID, iteration int) {
+	RunConcurrentStress(t, cfg, func(_, _ int) {
 		req := BuildICAPRequest("REQMOD", "icap://localhost/reqmod", nil, nil)
 		_ = req
 	})
@@ -214,7 +214,7 @@ func TestExampleStress(t *testing.T) {
 
 // TestExampleConcurrentWithResults demonstrates collecting results from concurrent operations.
 func TestExampleConcurrentWithResults(t *testing.T) {
-	results := RunConcurrentWithResults(t, 100, 10, func(goroutineID, iteration int) error {
+	results := RunConcurrentWithResults(t, 100, 10, func(_, _ int) error {
 		req := BuildICAPRequest("REQMOD", "icap://localhost/reqmod", nil, nil)
 		_ = req
 		return nil
@@ -344,7 +344,7 @@ func TestExampleGracefulShutdown(t *testing.T) {
 	require.NoError(t, harness.Start())
 
 	// Start some requests
-	RunConcurrent(t, 10, func(goroutineID int) {
+	RunConcurrent(t, 10, func(_ int) {
 		req := BuildICAPRequest("OPTIONS", "icap://localhost/options", nil, nil)
 		_, _ = harness.SendRequest(req)
 	})
@@ -380,7 +380,7 @@ func TestExampleHighLoad(t *testing.T) {
 	}
 
 	var errCount int64
-	RunConcurrentStress(t, stressCfg, func(goroutineID, iteration int) {
+	RunConcurrentStress(t, stressCfg, func(_, _ int) {
 		req := BuildICAPRequest("OPTIONS", "icap://localhost/options", nil, nil)
 		_, err := harness.SendRequest(req)
 		if err != nil {
@@ -410,7 +410,7 @@ func TestExampleRateLimit(t *testing.T) {
 		_ = harness.Stop(ctx)
 	}()
 
-	results := RunConcurrentWithResults(t, 500, 10, func(goroutineID, iteration int) error {
+	results := RunConcurrentWithResults(t, 500, 10, func(_, _ int) error {
 		req := BuildICAPRequest("OPTIONS", "icap://localhost/options", nil, nil)
 		resp, err := harness.SendRequest(req)
 		_ = resp
@@ -426,7 +426,7 @@ func TestExampleCircuitBreaker(t *testing.T) {
 	mockMetrics := NewMockMetricsCollector()
 	testErr := errors.New("test error")
 
-	results := RunConcurrentWithResults(t, 100, 10, func(goroutineID, iteration int) error {
+	results := RunConcurrentWithResults(t, 100, 10, func(_, iteration int) error {
 		if iteration%10 == 0 {
 			mockMetrics.RecordError("REQMOD", testErr)
 			return testErr

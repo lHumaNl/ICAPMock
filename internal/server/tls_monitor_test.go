@@ -452,7 +452,7 @@ func TestTLSCertificateMonitor_WarningThresholds(t *testing.T) {
 	}
 }
 
-func TestTLSCertificateMonitor_NilMonitor(t *testing.T) {
+func TestTLSCertificateMonitor_NilMonitor(_ *testing.T) {
 	// Test that nil monitor methods don't panic
 	var monitor *TLSCertificateMonitor
 

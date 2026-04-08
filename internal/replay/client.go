@@ -140,7 +140,7 @@ func (c *Client) Ping(ctx context.Context, targetURL string) error {
 
 // parseICAPURL parses an ICAP URL and returns the host and service path.
 // URL format: icap://host:port/service or icap://host/service
-func parseICAPURL(url string) (host, service string, err error) {
+func parseICAPURL(url string) (host, service string, err error) { //nolint:unparam
 	// Remove icap:// prefix
 	if !strings.HasPrefix(strings.ToLower(url), "icap://") {
 		return "", "", fmt.Errorf("invalid ICAP URL scheme, expected icap://")

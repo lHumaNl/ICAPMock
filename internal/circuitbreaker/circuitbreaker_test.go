@@ -495,7 +495,7 @@ func TestCircuitBreakerConcurrentCalls(t *testing.T) {
 
 	wg.Add(numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			for j := 0; j < callsPerGoroutine; j++ {
 				cb.Call(ctx, func() error {
@@ -592,10 +592,10 @@ func TestCircuitBreakerStateString(t *testing.T) {
 		expected string
 		state    State
 	}{
-		{StateClosed, "CLOSED"},
-		{StateHalfOpen, "HALF_OPEN"},
-		{StateOpen, "OPEN"},
-		{State(99), "UNKNOWN"},
+		{"CLOSED", StateClosed},
+		{"HALF_OPEN", StateHalfOpen},
+		{"OPEN", StateOpen},
+		{"UNKNOWN", State(99)},
 	}
 
 	for _, tt := range tests {

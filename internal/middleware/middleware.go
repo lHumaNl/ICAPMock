@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package middleware provides composable middleware for ICAP request processing.
 package middleware
 
 import (
@@ -104,8 +105,8 @@ type storageJob struct {
 
 // StorageMiddlewareConfig holds configuration for the storage middleware.
 type StorageMiddlewareConfig struct {
-	CircuitBreaker CircuitBreakerConfig
 	Metrics        *metrics.Collector
+	CircuitBreaker CircuitBreakerConfig
 	Workers        int
 	QueueSize      int
 }

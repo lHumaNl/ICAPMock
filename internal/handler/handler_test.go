@@ -22,21 +22,21 @@ func TestHandlerInterface(t *testing.T) {
 	}{
 		{
 			name: "mock handler returns correct method",
-			handler: handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+			handler: handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 				return icap.NewResponse(icap.StatusOK), nil
 			}, "REQMOD"),
 			method: "REQMOD",
 		},
 		{
 			name: "mock handler returns RESPMOD",
-			handler: handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+			handler: handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 				return icap.NewResponse(icap.StatusOK), nil
 			}, "RESPMOD"),
 			method: "RESPMOD",
 		},
 		{
 			name: "mock handler returns OPTIONS",
-			handler: handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+			handler: handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 				return icap.NewResponse(icap.StatusOK), nil
 			}, "OPTIONS"),
 			method: "OPTIONS",
@@ -60,7 +60,7 @@ func TestHandlerFunc(t *testing.T) {
 		expectedResp := icap.NewResponse(icap.StatusOK)
 		called := false
 
-		hf := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		hf := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			called = true
 			return expectedResp, nil
 		}, "REQMOD")
@@ -87,7 +87,7 @@ func TestHandlerFunc(t *testing.T) {
 	t.Run("HandleFunc propagates error", func(t *testing.T) {
 		expectedErr := errors.New("test error")
 
-		hf := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		hf := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, expectedErr
 		}, "REQMOD")
 
@@ -106,7 +106,7 @@ func TestHandlerFunc(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		hf := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		hf := handler.WrapHandler(func(ctx context.Context, _ *icap.Request) (*icap.Response, error) {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -132,7 +132,7 @@ func TestWrapHandler(t *testing.T) {
 	t.Run("WrapHandler wraps function correctly", func(t *testing.T) {
 		expectedResp := icap.NewResponse(icap.StatusNoContentNeeded)
 
-		h := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return expectedResp, nil
 		}, "TEST")
 
@@ -160,15 +160,15 @@ func TestHandlerChain(t *testing.T) {
 		resp1 := icap.NewResponse(icap.StatusOK)
 		resp2 := icap.NewResponse(icap.StatusNoContentNeeded)
 
-		h1 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h1 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, nil // Skip
 		}, "REQMOD")
 
-		h2 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h2 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return resp1, nil
 		}, "REQMOD")
 
-		h3 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h3 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return resp2, nil
 		}, "REQMOD")
 
@@ -186,11 +186,11 @@ func TestHandlerChain(t *testing.T) {
 	})
 
 	t.Run("Chain returns 204 when all return nil", func(t *testing.T) {
-		h1 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h1 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, nil
 		}, "REQMOD")
 
-		h2 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h2 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, nil
 		}, "REQMOD")
 
@@ -210,11 +210,11 @@ func TestHandlerChain(t *testing.T) {
 	t.Run("Chain propagates error", func(t *testing.T) {
 		expectedErr := errors.New("handler error")
 
-		h1 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h1 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return nil, expectedErr
 		}, "REQMOD")
 
-		h2 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		h2 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return icap.NewResponse(icap.StatusOK), nil
 		}, "REQMOD")
 

@@ -248,7 +248,7 @@ func TestRetryMiddleware_JitterPreventsThunderingHerd(t *testing.T) {
 
 	var callTimes []time.Time
 	var mu sync.Mutex
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		mu.Lock()
 		callTimes = append(callTimes, time.Now())
 		mu.Unlock()
@@ -348,7 +348,7 @@ func BenchmarkRetryMiddleware_WithoutJitter(b *testing.B) {
 		Logger:         slog.Default(),
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -374,7 +374,7 @@ func BenchmarkRetryMiddleware_WithJitter(b *testing.B) {
 		Logger:         slog.Default(),
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -399,6 +399,8 @@ func abs(f float64) float64 {
 }
 
 // calculateBackoffWithJitter is a helper function to test the private function.
+//
+//nolint:unparam
 func calculateBackoffWithJitter(initial time.Duration, multiplier float64, max time.Duration, attempt int, strategy handler.JitterStrategy, jitterPercent float64) time.Duration {
 	// This is a test helper that mirrors the implementation in retry.go
 	// We use reflection or package-level access if needed
@@ -417,7 +419,7 @@ func calculateBackoffWithJitter(initial time.Duration, multiplier float64, max t
 		return backoff
 	}
 
-	switch strategy {
+	switch strategy { //nolint:exhaustive // JitterNone handled above
 	case handler.JitterFull:
 		jitter := rand.Float64()
 		return time.Duration(float64(backoff) * jitter)
@@ -668,7 +670,7 @@ func TestRetryMiddleware_SuccessOnFirstAttempt(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -701,7 +703,7 @@ func TestRetryMiddleware_RetryOnTransientError(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		count := atomic.AddInt32(&callCount, 1)
 		if count <= 2 {
 			// Fail first 2 attempts
@@ -746,7 +748,7 @@ func TestRetryMiddleware_NoRetryOnNonTransientError(t *testing.T) {
 
 	var callCount int32
 	expectedErr := errors.New("validation error")
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return nil, expectedErr
 	}, "REQMOD")
@@ -780,7 +782,7 @@ func TestRetryMiddleware_MaxRetriesEnforced(t *testing.T) {
 
 	var callCount int32
 	retryableErr := syscall.ECONNRESET
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return nil, retryableErr
 	}, "REQMOD")
@@ -818,7 +820,7 @@ func TestRetryMiddleware_ExponentialBackoffTiming(t *testing.T) {
 
 	var callTimes []time.Time
 	var mu sync.Mutex
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		mu.Lock()
 		callTimes = append(callTimes, time.Now())
 		mu.Unlock()
@@ -875,7 +877,7 @@ func TestRetryMiddleware_ContextCancellation(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
@@ -915,7 +917,7 @@ func TestRetryMiddleware_ContextDeadlineExceeded(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
@@ -952,7 +954,7 @@ func TestRetryMiddleware_ConcurrentRequests(t *testing.T) {
 	}
 
 	var callCount int64
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		count := atomic.AddInt64(&callCount, 1)
 		// Fail first attempt, succeed on retry
 		if count == 1 {
@@ -1009,7 +1011,7 @@ func TestRetryMiddleware_ZeroMaxRetries(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return nil, syscall.ECONNRESET
 	}, "REQMOD")
@@ -1041,7 +1043,7 @@ func TestRetryMiddleware_NegativeMaxRetries(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		count := atomic.AddInt32(&callCount, 1)
 		if count == 1 {
 			return nil, syscall.ECONNRESET
@@ -1082,7 +1084,7 @@ func TestRetryMiddleware_MaxBackoffCap(t *testing.T) {
 
 	var callTimes []time.Time
 	var mu sync.Mutex
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		mu.Lock()
 		callTimes = append(callTimes, time.Now())
 		mu.Unlock()
@@ -1150,7 +1152,7 @@ func TestRetryMiddleware_IntegrationWithOtherMiddleware(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		count := atomic.AddInt32(&callCount, 1)
 		if count <= 2 {
 			return nil, syscall.ECONNRESET
@@ -1190,7 +1192,7 @@ func TestRetryMiddleware_NilLogger(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -1219,7 +1221,7 @@ func TestRetryMiddleware_NilResponse(t *testing.T) {
 	}
 
 	var callCount int32
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		atomic.AddInt32(&callCount, 1)
 		return nil, nil // Nil response, no error
 	}, "REQMOD")
@@ -1249,7 +1251,7 @@ func BenchmarkRetryMiddleware_NoRetry(b *testing.B) {
 		Logger:         slog.Default(),
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -1275,7 +1277,7 @@ func BenchmarkRetryMiddleware_WithRetry(b *testing.B) {
 		Logger:         slog.Default(),
 	}
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		count := atomic.AddInt32(&callCount, 1)
 		atomic.AddInt32(&callCount, -1) // Reset for next benchmark iteration
 		// Fail first attempt

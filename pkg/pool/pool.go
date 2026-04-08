@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package pool provides object pooling for efficient resource reuse.
 package pool
 
 import (

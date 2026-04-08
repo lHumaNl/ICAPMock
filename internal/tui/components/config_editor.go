@@ -17,10 +17,10 @@ import (
 // ConfigEditorModel represents configuration editor component.
 type ConfigEditorModel struct {
 	textarea   textarea.Model
-	validation ValidationStatus
 	content    string
 	filePath   string
 	fileType   string
+	validation ValidationStatus
 	width      int
 	height     int
 	maxSize    int
@@ -371,7 +371,7 @@ func (m *ConfigEditorModel) renderHelp() string {
 		{"Esc", "Back", "196"},
 	}
 
-	var rendered []string //nolint:prealloc
+	rendered := make([]string, 0, len(shortcuts))
 	for _, s := range shortcuts {
 		keyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(s.color)).

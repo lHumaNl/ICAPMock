@@ -164,7 +164,7 @@ func TestE2E_ErrorScenarios(t *testing.T) {
 	})
 
 	t.Run("Server returns errors", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer ts.Close()
@@ -199,7 +199,7 @@ func TestE2E_ErrorScenarios(t *testing.T) {
 	})
 
 	t.Run("Invalid responses", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("invalid json"))
 		}))
@@ -226,7 +226,7 @@ func TestE2E_ErrorScenarios(t *testing.T) {
 }
 
 func TestE2E_MetricsStateLifecycle(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		metrics := `icap_requests_total 1000
 icap_request_duration_seconds{quantile="0.5"} 0.05
 icap_active_connections 50`
@@ -294,17 +294,17 @@ icap_active_connections 50`
 		assert.LessOrEqual(t, len(history), 100, "History should be limited to maxHistory")
 	})
 
-	t.Run("Stop streaming", func(t *testing.T) {
+	t.Run("Stop streaming", func(_ *testing.T) {
 		metricsState.StopStreaming()
 	})
 
-	t.Run("Shutdown", func(t *testing.T) {
+	t.Run("Shutdown", func(_ *testing.T) {
 		metricsState.Shutdown()
 	})
 }
 
 func TestE2E_LogsStateLifecycle(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		logs := []*state.LogEntry{
 			{Timestamp: time.Now(), Level: "INFO", Message: "Test log", Fields: map[string]interface{}{}},
 		}
@@ -377,11 +377,11 @@ func TestE2E_LogsStateLifecycle(t *testing.T) {
 		assert.LessOrEqual(t, len(entries), 1000, "Entries should be limited to maxLines")
 	})
 
-	t.Run("Stop streaming", func(t *testing.T) {
+	t.Run("Stop streaming", func(_ *testing.T) {
 		logsState.StopStreaming()
 	})
 
-	t.Run("Shutdown", func(t *testing.T) {
+	t.Run("Shutdown", func(_ *testing.T) {
 		logsState.Shutdown()
 	})
 }
@@ -481,7 +481,7 @@ icap_active_connections 50`
 
 func TestE2E_RateLimiting(t *testing.T) {
 	requestCount := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requestCount++
 		metrics := `icap_requests_total 1000
 icap_active_connections 50`
@@ -547,9 +547,9 @@ func TestE2E_ClientConfiguration(t *testing.T) {
 			name    string
 			wantErr bool
 		}{
-			{"Empty metrics URL", &state.ClientConfig{MetricsURL: "", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: 5}, true},
-			{"Invalid timeout", &state.ClientConfig{MetricsURL: "http://localhost", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: -1}, true},
-			{"Invalid max concurrent", &state.ClientConfig{MetricsURL: "http://localhost", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: 5, MaxConcurrentRequests: -1}, true},
+			{&state.ClientConfig{MetricsURL: "", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: 5}, "Empty metrics URL", true},
+			{&state.ClientConfig{MetricsURL: "http://localhost", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: -1}, "Invalid timeout", true},
+			{&state.ClientConfig{MetricsURL: "http://localhost", LogsURL: "http://localhost", StatusURL: "http://localhost", Timeout: 5, MaxConcurrentRequests: -1}, "Invalid max concurrent", true},
 		}
 
 		for _, tc := range testCases {
@@ -566,7 +566,7 @@ func TestE2E_ClientConfiguration(t *testing.T) {
 }
 
 func TestE2E_GracefulShutdown(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(50 * time.Millisecond)
 		metrics := `icap_requests_total 1000
 icap_active_connections 50`
@@ -588,7 +588,7 @@ icap_active_connections 50`
 	metricsState := state.NewMetricsState(cfg)
 	logsState := state.NewLogsState(cfg)
 
-	t.Run("Make requests before shutdown", func(t *testing.T) {
+	t.Run("Make requests before shutdown", func(_ *testing.T) {
 		snapshot := &state.MetricsSnapshot{
 			Timestamp:     time.Now(),
 			RPS:           10.5,

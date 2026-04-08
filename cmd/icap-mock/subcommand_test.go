@@ -314,7 +314,7 @@ func (m *mockCommand) Parse(args []string) error {
 	return nil
 }
 
-func (m *mockCommand) Run(ctx context.Context) error {
+func (m *mockCommand) Run(_ context.Context) error {
 	m.runCalled = true
 	return m.runError
 }

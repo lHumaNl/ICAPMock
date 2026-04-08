@@ -19,9 +19,9 @@ import (
 //	storageCB := factory.Create("storage")
 //	scenarioCB := factory.Create("scenario_loader")
 type Factory struct {
-	config  config.CircuitBreakerGlobalConfig
 	logger  *slog.Logger
 	metrics *metrics.Collector
+	config  config.CircuitBreakerGlobalConfig
 }
 
 // NewFactory creates a new circuit breaker factory.

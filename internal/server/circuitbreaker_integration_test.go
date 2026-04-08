@@ -135,7 +135,7 @@ func TestServerCircuitBreakerStateTransitions(t *testing.T) {
 	}
 
 	// HALF_OPEN -> CLOSED (success)
-	var callErr error = cb.Call(testCtx, func() error {
+	var callErr = cb.Call(testCtx, func() error {
 		return nil
 	})
 	if callErr != nil {

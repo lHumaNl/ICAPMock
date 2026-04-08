@@ -60,17 +60,17 @@ func TestResponseStatusText(t *testing.T) {
 		wantText string
 		code     int
 	}{
-		{200, "OK"},
-		{204, "No Content Needed"},
-		{400, "Bad Request"},
-		{404, "ICAP Service not found"},
-		{405, "Method not allowed"},
-		{500, "Server error"},
-		{501, "Not implemented"},
-		{502, "Bad Gateway"},
-		{503, "Service overloaded"},
-		{505, "ICAP version not supported"},
-		{999, "Unknown"}, // Unknown code
+		{"OK", 200},
+		{"No Content Needed", 204},
+		{"Bad Request", 400},
+		{"ICAP Service not found", 404},
+		{"Method not allowed", 405},
+		{"Server error", 500},
+		{"Not implemented", 501},
+		{"Bad Gateway", 502},
+		{"Service overloaded", 503},
+		{"ICAP version not supported", 505},
+		{"Unknown", 999}, // Unknown code
 	}
 
 	for _, tt := range tests {
@@ -293,11 +293,11 @@ func TestResponseError(t *testing.T) {
 		wantInOutput string
 		code         int
 	}{
-		{400, "Invalid request format", "Invalid request format"},
-		{404, "Service not found", "Service not found"},
-		{500, "Internal error", "Internal error"},
-		{501, "Method not supported", "Method not supported"},
-		{503, "Server busy", "Server busy"},
+		{"Invalid request format", "Invalid request format", 400},
+		{"Service not found", "Service not found", 404},
+		{"Internal error", "Internal error", 500},
+		{"Method not supported", "Method not supported", 501},
+		{"Server busy", "Server busy", 503},
 	}
 
 	for _, tt := range tests {

@@ -34,9 +34,9 @@ func getDiskUsagePlatform(path string) (total, used, available uint64, err error
 	// Bfree: Free blocks
 	// Bavail: Available blocks (for non-root)
 	blockSize := uint64(stat.Bsize)
-	total = blockSize * uint64(stat.Blocks)
-	freeBytes := blockSize * uint64(stat.Bfree)
-	available = blockSize * uint64(stat.Bavail)
+	total = blockSize * stat.Blocks
+	freeBytes := blockSize * stat.Bfree
+	available = blockSize * stat.Bavail
 	used = total - freeBytes
 
 	return total, used, available, nil

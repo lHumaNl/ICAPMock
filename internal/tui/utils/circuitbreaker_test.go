@@ -501,11 +501,11 @@ func TestCircuitBreaker_DefaultConfigs(t *testing.T) {
 		expectedFailure int
 		expectedTimeout time.Duration
 	}{
-		{"Metrics", DefaultMetricsCircuitBreaker, 10, 30 * time.Second},
-		{"Config", DefaultConfigCircuitBreaker, 5, 60 * time.Second},
-		{"Control", DefaultControlCircuitBreaker, 3, 30 * time.Second},
-		{"Scenarios", DefaultScenariosCircuitBreaker, 5, 60 * time.Second},
-		{"Replay", DefaultReplayCircuitBreaker, 3, 30 * time.Second},
+		{DefaultMetricsCircuitBreaker, "Metrics", 10, 30 * time.Second},
+		{DefaultConfigCircuitBreaker, "Config", 5, 60 * time.Second},
+		{DefaultControlCircuitBreaker, "Control", 3, 30 * time.Second},
+		{DefaultScenariosCircuitBreaker, "Scenarios", 5, 60 * time.Second},
+		{DefaultReplayCircuitBreaker, "Replay", 3, 30 * time.Second},
 	}
 
 	for _, tt := range tests {
@@ -581,10 +581,10 @@ func TestCircuitState_String(t *testing.T) {
 		expected string
 		state    CircuitState
 	}{
-		{StateClosed, "Closed"},
-		{StateHalfOpen, "HalfOpen"},
-		{StateOpen, "Open"},
-		{CircuitState(99), "Unknown"},
+		{"Closed", StateClosed},
+		{"HalfOpen", StateHalfOpen},
+		{"Open", StateOpen},
+		{"Unknown", CircuitState(99)},
 	}
 
 	for _, tt := range tests {

@@ -23,10 +23,7 @@ func TestInitialModel(t *testing.T) {
 		version string
 	}{
 		{
-			name:    "default initialization",
-			appName: "test-app",
-			version: "1.0.0",
-			cfg:     &state.ClientConfig{},
+			cfg: &state.ClientConfig{},
 			check: func(t *testing.T, m *Model) {
 				assert.NotNil(t, m.header)
 				assert.NotNil(t, m.footer)
@@ -76,13 +73,13 @@ func TestScreen_String(t *testing.T) {
 		want   string
 		screen Screen
 	}{
-		{ScreenDashboard, "Dashboard"},
-		{ScreenConfig, "Config Editor"},
-		{ScreenScenarios, "Scenarios"},
-		{ScreenLogs, "Logs"},
-		{ScreenReplay, "Replay"},
-		{ScreenHealth, "Health Monitor"},
-		{Screen(99), "Unknown"},
+		{"Dashboard", ScreenDashboard},
+		{"Config Editor", ScreenConfig},
+		{"Scenarios", ScreenScenarios},
+		{"Logs", ScreenLogs},
+		{"Replay", ScreenReplay},
+		{"Health Monitor", ScreenHealth},
+		{"Unknown", Screen(99)},
 	}
 
 	for _, tt := range tests {
@@ -373,8 +370,8 @@ func TestModel_Update_ScreenChangeMsg(t *testing.T) {
 func TestModel_Update_ConfigSavedMsg(t *testing.T) {
 	tests := []struct {
 		name     string
-		msg      ConfigSavedMsg
 		expected string
+		msg      ConfigSavedMsg
 	}{
 		{
 			name: "save success",

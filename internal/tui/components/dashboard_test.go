@@ -348,10 +348,10 @@ func TestFormatBytes(t *testing.T) {
 		want  string
 		bytes int64
 	}{
-		{"bytes", 512, "512 B"},
-		{"kilobytes", 1024, "1.0 KiB"},
-		{"megabytes", 1048576, "1.0 MiB"},
-		{"gigabytes", 1073741824, "1.0 GiB"},
+		{"bytes", "512 B", 512},
+		{"kilobytes", "1.0 KiB", 1024},
+		{"megabytes", "1.0 MiB", 1048576},
+		{"gigabytes", "1.0 GiB", 1073741824},
 	}
 
 	for _, tt := range tests {
@@ -369,9 +369,9 @@ func TestTruncate(t *testing.T) {
 		want   string
 		maxLen int
 	}{
-		{"no truncation", "hello world", 20, "hello world"},
-		{"truncation", "this is a very long string that needs to be truncated", 20, "this is a very lo..."},
-		{"exact length", "exactly", 7, "exactly"},
+		{"no truncation", "hello world", "hello world", 20},
+		{"truncation", "this is a very long string that needs to be truncated", "this is a very lo...", 20},
+		{"exact length", "exactly", "exactly", 7},
 	}
 
 	for _, tt := range tests {
@@ -593,10 +593,10 @@ func TestFormatBytes_EdgeCases(t *testing.T) {
 		want  string
 		bytes int64
 	}{
-		{"zero bytes", 0, "0 B"},
-		{"exactly 1KB", 1024, "1.0 KiB"},
-		{"exactly 1MB", 1048576, "1.0 MiB"},
-		{"terabytes", 1099511627776, "1.0 TiB"},
+		{"zero bytes", "0 B", 0},
+		{"exactly 1KB", "1.0 KiB", 1024},
+		{"exactly 1MB", "1.0 MiB", 1048576},
+		{"terabytes", "1.0 TiB", 1099511627776},
 	}
 
 	for _, tt := range tests {

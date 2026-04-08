@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package errors provides structured error types and wrapping utilities.
 package errors
 
 import (

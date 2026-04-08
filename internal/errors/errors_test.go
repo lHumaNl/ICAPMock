@@ -175,15 +175,15 @@ func TestPredefinedErrors(t *testing.T) {
 		code       int
 		icapStatus int
 	}{
-		{"ErrInvalidRequest", icaperrors.ErrInvalidRequest, 1001, 400},
-		{"ErrUnknownMethod", icaperrors.ErrUnknownMethod, 1002, 501},
-		{"ErrServiceUnavailable", icaperrors.ErrServiceUnavailable, 1003, 503},
-		{"ErrTimeout", icaperrors.ErrTimeout, 1004, 504},
-		{"ErrInternalServerError", icaperrors.ErrInternalServerError, 1005, 500},
-		{"ErrScenarioNotFound", icaperrors.ErrScenarioNotFound, 1006, 404},
-		{"ErrRateLimitExceeded", icaperrors.ErrRateLimitExceeded, 1007, 503},
-		{"ErrBodyTooLarge", icaperrors.ErrBodyTooLarge, 1008, 413},
-		{"ErrConnectionDropped", icaperrors.ErrConnectionDropped, 1009, 502},
+		{icaperrors.ErrInvalidRequest, "ErrInvalidRequest", 1001, 400},
+		{icaperrors.ErrUnknownMethod, "ErrUnknownMethod", 1002, 501},
+		{icaperrors.ErrServiceUnavailable, "ErrServiceUnavailable", 1003, 503},
+		{icaperrors.ErrTimeout, "ErrTimeout", 1004, 504},
+		{icaperrors.ErrInternalServerError, "ErrInternalServerError", 1005, 500},
+		{icaperrors.ErrScenarioNotFound, "ErrScenarioNotFound", 1006, 404},
+		{icaperrors.ErrRateLimitExceeded, "ErrRateLimitExceeded", 1007, 503},
+		{icaperrors.ErrBodyTooLarge, "ErrBodyTooLarge", 1008, 413},
+		{icaperrors.ErrConnectionDropped, "ErrConnectionDropped", 1009, 502},
 	}
 
 	for _, tt := range tests {
@@ -373,10 +373,10 @@ func TestTimeoutErrorTypes(t *testing.T) {
 		code       int
 		icapStatus int
 	}{
-		{"ErrReadTimeout", icaperrors.ErrReadTimeout, 1010, 504},
-		{"ErrWriteTimeout", icaperrors.ErrWriteTimeout, 1011, 504},
-		{"ErrContextDeadlineExceeded", icaperrors.ErrContextDeadlineExceeded, 1012, 504},
-		{"ErrIdleTimeout", icaperrors.ErrIdleTimeout, 1013, 504},
+		{icaperrors.ErrReadTimeout, "ErrReadTimeout", 1010, 504},
+		{icaperrors.ErrWriteTimeout, "ErrWriteTimeout", 1011, 504},
+		{icaperrors.ErrContextDeadlineExceeded, "ErrContextDeadlineExceeded", 1012, 504},
+		{icaperrors.ErrIdleTimeout, "ErrIdleTimeout", 1013, 504},
 	}
 
 	for _, tt := range tests {
@@ -462,18 +462,18 @@ func TestIsTimeout(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"ErrReadTimeout", icaperrors.ErrReadTimeout, true},
-		{"ErrWriteTimeout", icaperrors.ErrWriteTimeout, true},
-		{"ErrIdleTimeout", icaperrors.ErrIdleTimeout, true},
-		{"ErrContextDeadlineExceeded", icaperrors.ErrContextDeadlineExceeded, true},
-		{"NewReadTimeout", icaperrors.NewReadTimeout("test"), true},
-		{"NewWriteTimeout", icaperrors.NewWriteTimeout("test"), true},
-		{"NewIdleTimeout", icaperrors.NewIdleTimeout(), true},
-		{"ErrInvalidRequest", icaperrors.ErrInvalidRequest, false},
-		{"ErrConnectionDropped", icaperrors.ErrConnectionDropped, false},
-		{"ErrTimeout (generic)", icaperrors.ErrTimeout, false},
-		{"Standard error", errors.New("standard error"), false},
-		{"Nil error", nil, false},
+		{icaperrors.ErrReadTimeout, "ErrReadTimeout", true},
+		{icaperrors.ErrWriteTimeout, "ErrWriteTimeout", true},
+		{icaperrors.ErrIdleTimeout, "ErrIdleTimeout", true},
+		{icaperrors.ErrContextDeadlineExceeded, "ErrContextDeadlineExceeded", true},
+		{icaperrors.NewReadTimeout("test"), "NewReadTimeout", true},
+		{icaperrors.NewWriteTimeout("test"), "NewWriteTimeout", true},
+		{icaperrors.NewIdleTimeout(), "NewIdleTimeout", true},
+		{icaperrors.ErrInvalidRequest, "ErrInvalidRequest", false},
+		{icaperrors.ErrConnectionDropped, "ErrConnectionDropped", false},
+		{icaperrors.ErrTimeout, "ErrTimeout (generic)", false},
+		{errors.New("standard error"), "Standard error", false},
+		{nil, "Nil error", false},
 	}
 
 	for _, tt := range tests {

@@ -365,12 +365,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.ScenarioUpdateMsg:
 		// Handle scenario update
 		m.lastMessage = fmt.Sprintf("Updating scenario: %s", msg.ScenarioName)
-		cmds = append(cmds, m.updateScenarioCmd(msg.ScenarioName, msg.Name, msg.YAML))
+		cmds = append(cmds, m.updateScenarioCmd(msg.ScenarioName, msg.Name))
 
 	case components.ScenarioCreateMsg:
 		// Handle scenario creation
 		m.lastMessage = fmt.Sprintf("Creating scenario: %s", msg.Name)
-		cmds = append(cmds, m.createScenarioCmd(msg.Name, msg.YAML))
+		cmds = append(cmds, m.createScenarioCmd(msg.Name))
 
 	case components.ScenarioReloadMsg:
 		// Handle scenario reload
@@ -560,7 +560,7 @@ func (m *Model) deleteScenarioCmd(name string) tea.Cmd {
 }
 
 // updateScenarioCmd updates a scenario.
-func (m *Model) updateScenarioCmd(oldName, newName, yamlContent string) tea.Cmd {
+func (m *Model) updateScenarioCmd(oldName, newName string) tea.Cmd {
 	return func() tea.Msg {
 		if m.scenarioClient == nil {
 			return components.ScenarioErrorMsg{Err: fmt.Errorf("scenario client not available")}
@@ -584,7 +584,7 @@ func (m *Model) updateScenarioCmd(oldName, newName, yamlContent string) tea.Cmd 
 }
 
 // createScenarioCmd creates a new scenario.
-func (m *Model) createScenarioCmd(name, yamlContent string) tea.Cmd {
+func (m *Model) createScenarioCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		if m.scenarioClient == nil {
 			return components.ScenarioErrorMsg{Err: fmt.Errorf("scenario client not available")}

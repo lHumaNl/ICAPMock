@@ -162,6 +162,8 @@ func (m *ReplayPanelModel) Update(msg tea.Msg) (*ReplayPanelModel, tea.Cmd) {
 			return m.handleListKeys(msg)
 		case ReplayViewResults:
 			return m.handleResultsKeys(msg)
+		case ReplayViewDetail:
+			// Detail view handled below
 		}
 	}
 
@@ -173,6 +175,8 @@ func (m *ReplayPanelModel) Update(msg tea.Msg) (*ReplayPanelModel, tea.Cmd) {
 	case ReplayViewResults:
 		resultsCmd := m.updateResults(msg)
 		cmd = tea.Batch(cmd, resultsCmd)
+	case ReplayViewDetail:
+		// No specific update for detail mode
 	}
 
 	return m, cmd
@@ -284,7 +288,7 @@ func (m *ReplayPanelModel) updateList(msg tea.Msg) tea.Cmd {
 }
 
 // updateResults updates the results view.
-func (m *ReplayPanelModel) updateResults(msg tea.Msg) tea.Cmd {
+func (m *ReplayPanelModel) updateResults(_ tea.Msg) tea.Cmd {
 	return nil
 }
 

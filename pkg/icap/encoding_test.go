@@ -237,11 +237,11 @@ func TestFormatChunkSize(t *testing.T) {
 		want  string
 		input int64
 	}{
-		{0, "0"},
-		{5, "5"},
-		{26, "1a"},
-		{255, "ff"},
-		{4096, "1000"},
+		{"0", 0},
+		{"5", 5},
+		{"1a", 26},
+		{"ff", 255},
+		{"1000", 4096},
 	}
 
 	for _, tt := range tests {

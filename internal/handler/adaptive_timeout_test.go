@@ -213,7 +213,7 @@ func TestAdaptiveTimeoutMiddleware_Handle(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		// Simulate some processing
 		time.Sleep(10 * time.Millisecond)
 		return icap.NewResponse(icap.StatusOK), nil
@@ -255,7 +255,7 @@ func TestAdaptiveTimeoutMiddleware_ContextDeadlineExceeded(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		// Simulate long processing that exceeds timeout
 		time.Sleep(20 * time.Millisecond)
 		return icap.NewResponse(icap.StatusOK), nil
@@ -290,7 +290,7 @@ func TestAdaptiveTimeoutMiddleware_BasePath(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		time.Sleep(1 * time.Millisecond)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -319,7 +319,7 @@ func TestAdaptiveTimeoutMiddleware_ConcurrentRequests(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		time.Sleep(10 * time.Millisecond)
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
@@ -459,7 +459,7 @@ func TestAdaptiveTimeoutMiddleware_GetTracker(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -475,7 +475,7 @@ func TestAdaptiveTimeoutMiddleware_GetTracker(t *testing.T) {
 	}
 
 	// Test with non-AdaptiveTimeoutMiddleware handler
-	plainHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	plainHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 	retrievedTracker = handler.GetAdaptiveTimeoutTracker(plainHandler)
@@ -494,7 +494,7 @@ func TestAdaptiveTimeoutMiddleware_GetTrackerInstance(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -524,7 +524,7 @@ func TestAdaptiveTimeoutMiddleware_WrapMethod(t *testing.T) {
 		Tracker: tracker,
 	})
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -534,7 +534,7 @@ func TestAdaptiveTimeoutMiddleware_WrapMethod(t *testing.T) {
 	// Now get the AdaptiveTimeoutMiddleware instance and use its Wrap method
 	if am, ok := wrappedHandler.(*handler.AdaptiveTimeoutMiddleware); ok {
 		// Create another base handler
-		baseHandler2 := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		baseHandler2 := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			return icap.NewResponse(icap.StatusOK), nil
 		}, "REQMOD")
 
@@ -570,7 +570,7 @@ func TestAdaptiveTimeoutMiddleware_Method(t *testing.T) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
@@ -596,7 +596,7 @@ func BenchmarkAdaptiveTimeoutMiddleware(b *testing.B) {
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
-	baseHandler := handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 

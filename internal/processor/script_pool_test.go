@@ -31,7 +31,7 @@ func TestScriptWorkerPool_BasicExecution(t *testing.T) {
 	// Mock execute function
 	execCount := 0
 	mu := sync.Mutex{}
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		mu.Lock()
 		execCount++
 		mu.Unlock()
@@ -61,7 +61,7 @@ func TestScriptWorkerPool_QueueOverflow(t *testing.T) {
 	cfg.QueueSize = 2
 
 	// Slow execution function - block long enough for queue to fill
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(200 * time.Millisecond)
 		return icap.NewResponse(200), nil
 	}
@@ -113,7 +113,7 @@ func TestScriptWorkerPool_WorkerLimit(t *testing.T) {
 	currentConcurrent := 0
 	mu := sync.Mutex{}
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		mu.Lock()
 		currentConcurrent++
 		if currentConcurrent > maxConcurrent {
@@ -162,7 +162,7 @@ func TestScriptWorkerPool_GracefulShutdown(t *testing.T) {
 	mu := sync.Mutex{}
 
 	// Slow execution function
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(10 * time.Millisecond)
 		mu.Lock()
 		execCount++
@@ -199,7 +199,7 @@ func TestScriptWorkerPool_ShutdownWithTimeout(t *testing.T) {
 	cfg.QueueSize = 5
 
 	// Very slow execution function
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(1 * time.Second)
 		return icap.NewResponse(200), nil
 	}
@@ -227,7 +227,7 @@ func TestScriptWorkerPool_ContextCancellation(t *testing.T) {
 	cfg.Workers = 2
 	cfg.QueueSize = 10
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(50 * time.Millisecond)
 		return icap.NewResponse(200), nil
 	}
@@ -258,7 +258,7 @@ func TestScriptWorkerPool_Metrics(t *testing.T) {
 	cfg.QueueSize = 5
 	cfg.Metrics = metricsCollector
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	}
 
@@ -293,7 +293,7 @@ func TestScriptWorkerPool_Metrics(t *testing.T) {
 	cfgSlow.QueueSize = 2
 	cfgSlow.Metrics = metricsCollector
 
-	scriptFuncSlow := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFuncSlow := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(200 * time.Millisecond)
 		return icap.NewResponse(200), nil
 	}
@@ -334,7 +334,7 @@ func TestScriptWorkerPool_PanicRecovery(t *testing.T) {
 	cfg.QueueSize = 10
 
 	shouldPanic := true
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		if shouldPanic {
 			panic("test panic")
 		}
@@ -369,7 +369,7 @@ func TestScriptWorkerPool_MultipleRequests(t *testing.T) {
 	cfg.Workers = 20
 	cfg.QueueSize = 200
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(5 * time.Millisecond)
 		return icap.NewResponse(200), nil
 	}
@@ -411,7 +411,7 @@ func TestScriptWorkerPool_ZeroConfig(t *testing.T) {
 	cfg.Workers = 0
 	cfg.QueueSize = 0
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	}
 
@@ -434,7 +434,7 @@ func BenchmarkScriptPool_Throughput(b *testing.B) {
 	cfg.Workers = 10
 	cfg.QueueSize = 100
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	}
 
@@ -457,7 +457,7 @@ func BenchmarkScriptPool_Throughput(b *testing.B) {
 
 // BenchmarkScriptPool_WithoutPool benchmarks throughput without pool (baseline).
 func BenchmarkScriptPool_WithoutPool(b *testing.B) {
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) { //nolint:unparam
 		return icap.NewResponse(200), nil
 	}
 
@@ -481,7 +481,7 @@ func BenchmarkScriptPool_Concurrent(b *testing.B) {
 	cfg.Workers = 10
 	cfg.QueueSize = 100
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	}
 
@@ -514,7 +514,7 @@ func TestScriptWorkerPool_PanicWithConcurrentShutdown(t *testing.T) {
 	panicTriggered := false
 	mu := sync.Mutex{}
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(10 * time.Millisecond)
 		mu.Lock()
 		if panicTriggered {
@@ -571,7 +571,7 @@ func TestScriptWorkerPool_WorkerHealth(t *testing.T) {
 	cfg.Workers = 3
 	cfg.QueueSize = 10
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		return icap.NewResponse(200), nil
 	}
 
@@ -612,7 +612,7 @@ func TestScriptWorkerPool_PanicHealthTracking(t *testing.T) {
 	panicCount := 0
 	mu := sync.Mutex{}
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		mu.Lock()
 		shouldPanicLocal := shouldPanic
 		mu.Unlock()
@@ -682,7 +682,7 @@ func TestScriptWorkerPool_NoGoroutineLeak(t *testing.T) {
 	cfg.Workers = 10
 	cfg.QueueSize = 20
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(5 * time.Millisecond)
 		return icap.NewResponse(200), nil
 	}
@@ -721,7 +721,7 @@ func TestScriptWorkerPool_NoGoroutineLeak(t *testing.T) {
 	t.Logf("Initial goroutines: %d, Final goroutines: %d, Delta: %d",
 		initialGoroutines, finalGoroutines, goroutineDelta)
 
-	assert.LessOrEqual(t, goroutineDelta, int(cfg.Workers)+5,
+	assert.LessOrEqual(t, goroutineDelta, cfg.Workers+5,
 		"should not have significant goroutine leak (delta should be small)")
 }
 
@@ -734,7 +734,7 @@ func TestScriptWorkerPool_PanicDuringShutdown(t *testing.T) {
 	shutdownStarted := false
 	mu := sync.Mutex{}
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		mu.Lock()
 		if shutdownStarted {
 			panic("shutdown panic")
@@ -783,7 +783,7 @@ func TestScriptWorkerPool_ContextCancelDuringPanic(t *testing.T) {
 	cfg.Workers = 2
 	cfg.QueueSize = 10
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		panic("test panic")
 	}
 
@@ -814,7 +814,7 @@ func TestScriptWorkerPool_WorkerExitOnChannelClose(t *testing.T) {
 	jobCount := 0
 	mu := sync.Mutex{}
 
-	scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+	scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 		time.Sleep(5 * time.Millisecond)
 		mu.Lock()
 		jobCount++
@@ -863,7 +863,7 @@ func TestScriptWorkerPool_ConcurrentExecuteAndShutdown(t *testing.T) {
 		cfg.Workers = 4
 		cfg.QueueSize = 10
 
-		scriptFunc := func(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+		scriptFunc := func(_ context.Context, _ *icap.Request, _ string) (*icap.Response, error) {
 			return &icap.Response{StatusCode: 200}, nil
 		}
 

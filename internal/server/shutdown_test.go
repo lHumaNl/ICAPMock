@@ -399,7 +399,7 @@ func TestHandleConnection_PanicRecovery(t *testing.T) {
 	// Read response (should be handled gracefully despite panic)
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 1024)
-	_, err = conn.Read(buf)
+	_, _ = conn.Read(buf)
 
 	// Connection should be closed (error expected)
 	conn.Close()

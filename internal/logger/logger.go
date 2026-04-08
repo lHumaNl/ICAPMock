@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package logger provides structured logging for the ICAP server.
 package logger
 
 import (

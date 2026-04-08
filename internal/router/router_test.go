@@ -23,7 +23,7 @@ type mockHandler struct {
 }
 
 // Handle implements Handler interface.
-func (h *mockHandler) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (h *mockHandler) Handle(_ context.Context, req *icap.Request) (*icap.Response, error) {
 	h.called.Store(true)
 	h.lastReq.Store(req)
 	if h.err != nil {
@@ -124,7 +124,7 @@ func TestRouter_HandleFunc(t *testing.T) {
 	r := NewRouter()
 	called := false
 
-	err := r.HandleFunc("/reqmod", func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	err := r.HandleFunc("/reqmod", func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		called = true
 		return icap.NewResponse(icap.StatusOK), nil
 	})
@@ -157,7 +157,7 @@ func TestRouter_HandleFunc(t *testing.T) {
 func TestRouter_HandleFunc_EmptyPath(t *testing.T) {
 	r := NewRouter()
 
-	err := r.HandleFunc("", func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	err := r.HandleFunc("", func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
 	})
 	if err == nil {
@@ -335,7 +335,7 @@ func TestRouter_Routes(t *testing.T) {
 }
 
 // TestRouter_ConcurrentAccess tests thread-safe route registration and serving.
-func TestRouter_ConcurrentAccess(t *testing.T) {
+func TestRouter_ConcurrentAccess(_ *testing.T) {
 	r := NewRouter()
 	var wg sync.WaitGroup
 
@@ -466,7 +466,7 @@ func TestRouter_Serve_ExtractPath(t *testing.T) {
 func TestHandlerFunc(t *testing.T) {
 	called := false
 
-	hf := handler.HandlerFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	hf := handler.HandlerFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		called = true
 		return icap.NewResponse(icap.StatusOK), nil
 	})
@@ -500,7 +500,7 @@ func TestRouter_Serve_ContextCancellation(t *testing.T) {
 	r := NewRouter()
 
 	// Handler that respects context
-	err := r.HandleFunc("/slow", func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	err := r.HandleFunc("/slow", func(ctx context.Context, _ *icap.Request) (*icap.Response, error) {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

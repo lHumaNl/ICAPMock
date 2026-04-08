@@ -205,12 +205,12 @@ func NewFileStorageAdapter(dir string) *FileStorageAdapter {
 }
 
 // SaveRequest is not supported for FileStorageAdapter (read-only).
-func (a *FileStorageAdapter) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
+func (a *FileStorageAdapter) SaveRequest(_ context.Context, _ *storage.StoredRequest) error {
 	return fmt.Errorf("FileStorageAdapter is read-only")
 }
 
 // GetRequest retrieves a request by ID.
-func (a *FileStorageAdapter) GetRequest(ctx context.Context, id string) (*storage.StoredRequest, error) {
+func (a *FileStorageAdapter) GetRequest(_ context.Context, id string) (*storage.StoredRequest, error) {
 	requests, err := LoadRequestFiles(a.dir, storage.RequestFilter{})
 	if err != nil {
 		return nil, err
@@ -226,27 +226,27 @@ func (a *FileStorageAdapter) GetRequest(ctx context.Context, id string) (*storag
 }
 
 // ListRequests lists all requests matching the filter.
-func (a *FileStorageAdapter) ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*storage.StoredRequest, error) {
+func (a *FileStorageAdapter) ListRequests(_ context.Context, filter storage.RequestFilter) ([]*storage.StoredRequest, error) {
 	return LoadRequestFiles(a.dir, filter)
 }
 
 // DeleteRequest is not supported for FileStorageAdapter (read-only).
-func (a *FileStorageAdapter) DeleteRequest(ctx context.Context, id string) error {
+func (a *FileStorageAdapter) DeleteRequest(_ context.Context, _ string) error {
 	return fmt.Errorf("FileStorageAdapter is read-only")
 }
 
 // DeleteRequests is not supported for FileStorageAdapter (read-only).
-func (a *FileStorageAdapter) DeleteRequests(ctx context.Context, filter storage.RequestFilter) (int64, error) {
+func (a *FileStorageAdapter) DeleteRequests(_ context.Context, _ storage.RequestFilter) (int64, error) {
 	return 0, fmt.Errorf("FileStorageAdapter is read-only")
 }
 
 // Flush is a no-op for FileStorageAdapter (read-only).
-func (a *FileStorageAdapter) Flush(ctx context.Context) error {
+func (a *FileStorageAdapter) Flush(_ context.Context) error {
 	return nil
 }
 
 // Clear is not supported for FileStorageAdapter (read-only).
-func (a *FileStorageAdapter) Clear(ctx context.Context) (int64, error) {
+func (a *FileStorageAdapter) Clear(_ context.Context) (int64, error) {
 	return 0, fmt.Errorf("FileStorageAdapter is read-only")
 }
 

@@ -1,5 +1,6 @@
 // Copyright 2026 ICAP Mock
 
+// Package main implements the ICAP mock server CLI.
 package main
 
 import (
@@ -48,7 +49,7 @@ func (c *AssertCommand) Description() string {
 func (c *AssertCommand) Parse(args []string) error { return c.fs.Parse(args) }
 func (c *AssertCommand) Usage()                    { c.fs.Usage() }
 
-func (c *AssertCommand) Run(ctx context.Context) error {
+func (c *AssertCommand) Run(_ context.Context) error {
 	// Fetch metrics
 	client := &http.Client{Timeout: c.timeout}
 	resp, err := client.Get(c.metricsURL)

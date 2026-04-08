@@ -851,7 +851,7 @@ func TestHTTPMessageSetLoadedBodyConcurrent(t *testing.T) {
 
 	for i := 0; i < goroutines; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func(_ int) {
 			defer wg.Done()
 			msg.SetLoadedBody([]byte("test"))
 		}(i)
@@ -867,7 +867,7 @@ func TestHTTPMessageSetLoadedBodyConcurrent(t *testing.T) {
 
 // TestHTTPMessageRaceCondition tests that race conditions are properly handled.
 // This test uses the race detector to verify thread-safety.
-func TestHTTPMessageRaceCondition(t *testing.T) {
+func TestHTTPMessageRaceCondition(_ *testing.T) {
 	input := "10\r\nhello world\r\n0\r\n\r\n"
 	msg := &icap.HTTPMessage{
 		BodyReader: icap.NewChunkedReader(strings.NewReader(input)),
@@ -997,7 +997,7 @@ type errorReader struct {
 	err error
 }
 
-func (r *errorReader) Read(p []byte) (n int, err error) {
+func (r *errorReader) Read(_ []byte) (n int, err error) {
 	return 0, r.err
 }
 

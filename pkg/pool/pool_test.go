@@ -128,7 +128,7 @@ func TestBufferPoolConvenienceMethods(t *testing.T) {
 }
 
 // TestBufferPoolNilPut tests that Put(nil) doesn't panic.
-func TestBufferPoolNilPut(t *testing.T) {
+func TestBufferPoolNilPut(_ *testing.T) {
 	p := NewSlicePool()
 	p.Put(nil) // Should not panic
 }
@@ -166,7 +166,7 @@ func TestBytesPoolGetPut(t *testing.T) {
 }
 
 // TestBytesPoolNilPut tests that Put(nil) doesn't panic.
-func TestBytesPoolNilPut(t *testing.T) {
+func TestBytesPoolNilPut(_ *testing.T) {
 	p := NewBytesPool()
 	p.Put(nil) // Should not panic
 }
@@ -219,7 +219,7 @@ func TestBuilderPoolGetPut(t *testing.T) {
 }
 
 // TestBuilderPoolNilPut tests that Put(nil) doesn't panic.
-func TestBuilderPoolNilPut(t *testing.T) {
+func TestBuilderPoolNilPut(_ *testing.T) {
 	p := NewBuilderPool()
 	p.Put(nil) // Should not panic
 }
@@ -279,7 +279,7 @@ func TestResponsePoolGetPut(t *testing.T) {
 }
 
 // TestResponsePoolNilPut tests that Put(nil) doesn't panic.
-func TestResponsePoolNilPut(t *testing.T) {
+func TestResponsePoolNilPut(_ *testing.T) {
 	p := NewResponsePool()
 	p.Put(nil) // Should not panic
 }
@@ -366,7 +366,7 @@ func TestHeaderPoolGetPut(t *testing.T) {
 }
 
 // TestHeaderPoolNilPut tests that Put(nil) doesn't panic.
-func TestHeaderPoolNilPut(t *testing.T) {
+func TestHeaderPoolNilPut(_ *testing.T) {
 	p := NewHeaderPool()
 	p.Put(nil) // Should not panic
 }
@@ -430,7 +430,7 @@ func TestHeaderPoolReset(t *testing.T) {
 }
 
 // TestConcurrentHeaderPool tests concurrent access to HeaderPool.
-func TestConcurrentHeaderPool(t *testing.T) {
+func TestConcurrentHeaderPool(_ *testing.T) {
 	p := NewHeaderPool()
 	var wg sync.WaitGroup
 
@@ -494,7 +494,7 @@ func TestGlobalPools(t *testing.T) {
 }
 
 // TestConcurrentBufferPool tests concurrent access to SlicePool.
-func TestConcurrentBufferPool(t *testing.T) {
+func TestConcurrentBufferPool(_ *testing.T) {
 	p := NewSlicePool()
 	var wg sync.WaitGroup
 
@@ -515,7 +515,7 @@ func TestConcurrentBufferPool(t *testing.T) {
 }
 
 // TestConcurrentBytesPool tests concurrent access to BytesPool.
-func TestConcurrentBytesPool(t *testing.T) {
+func TestConcurrentBytesPool(_ *testing.T) {
 	p := NewBytesPool()
 	var wg sync.WaitGroup
 
@@ -535,7 +535,7 @@ func TestConcurrentBytesPool(t *testing.T) {
 }
 
 // TestConcurrentBuilderPool tests concurrent access to BuilderPool.
-func TestConcurrentBuilderPool(t *testing.T) {
+func TestConcurrentBuilderPool(_ *testing.T) {
 	p := NewBuilderPool()
 	var wg sync.WaitGroup
 
@@ -555,7 +555,7 @@ func TestConcurrentBuilderPool(t *testing.T) {
 }
 
 // TestConcurrentResponsePool tests concurrent access to ResponsePool.
-func TestConcurrentResponsePool(t *testing.T) {
+func TestConcurrentResponsePool(_ *testing.T) {
 	p := NewResponsePool()
 	var wg sync.WaitGroup
 

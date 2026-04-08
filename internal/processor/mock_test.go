@@ -391,7 +391,7 @@ func TestMockProcessor_ThreadSafety(t *testing.T) {
 }
 
 // TestMockProcessor_Interface verifies MockProcessor implements Processor interface.
-func TestMockProcessor_Interface(t *testing.T) {
+func TestMockProcessor_Interface(_ *testing.T) {
 	var _ Processor = NewMockProcessor(nil, nil)
 }
 

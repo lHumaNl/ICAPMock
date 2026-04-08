@@ -66,7 +66,7 @@ icap_errors_total 5
 }
 
 func TestMetricsClient_NotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -92,7 +92,7 @@ func TestMetricsClient_NotFound(t *testing.T) {
 }
 
 func TestMetricsClient_InternalServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -118,7 +118,7 @@ func TestMetricsClient_InternalServerError(t *testing.T) {
 }
 
 func TestMetricsClient_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -165,7 +165,7 @@ func TestMetricsClient_ConnectionError(t *testing.T) {
 
 func TestMetricsClient_RateLimit(t *testing.T) {
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requestCount++
 		metrics := `icap_requests_total 100
 icap_request_duration_seconds{quantile="0.5"} 0.05
@@ -199,7 +199,7 @@ icap_active_connections 10`
 }
 
 func TestMetricsClient_ContextCancellation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -262,7 +262,7 @@ func TestLogsClient_Success(t *testing.T) {
 }
 
 func TestLogsClient_NotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -324,7 +324,7 @@ func TestLogsClient_InvalidLimit(t *testing.T) {
 }
 
 func TestLogsClient_InternalServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -350,7 +350,7 @@ func TestLogsClient_InternalServerError(t *testing.T) {
 }
 
 func TestLogsClient_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -428,7 +428,7 @@ func TestStatusClient_ConnectionError(t *testing.T) {
 }
 
 func TestStatusClient_InternalServerError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
@@ -454,7 +454,7 @@ func TestStatusClient_InternalServerError(t *testing.T) {
 
 func TestStatusClient_RateLimit(t *testing.T) {
 	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requestCount++
 		status := `{"status":"running","port":1344,"uptime":"1s"}`
 		w.WriteHeader(http.StatusOK)
@@ -484,7 +484,7 @@ func TestStatusClient_RateLimit(t *testing.T) {
 }
 
 func TestConnectionPooling(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"running","port":1344,"uptime":"1s"}`))
 	}))

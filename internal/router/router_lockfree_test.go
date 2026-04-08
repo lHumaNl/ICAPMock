@@ -23,7 +23,7 @@ type atomicMockHandler struct {
 }
 
 // Handle implements Handler interface.
-func (h *atomicMockHandler) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (h *atomicMockHandler) Handle(_ context.Context, req *icap.Request) (*icap.Response, error) {
 	atomic.AddInt64(&h.called, 1)
 	h.lastReq.Store(req)
 	if h.err != nil {
@@ -46,6 +46,8 @@ func (h *atomicMockHandler) GetCalledCount() int64 {
 }
 
 // buildTestRequest creates a test ICAP request.
+//
+//nolint:unparam
 func buildTestRequest(method, uri string) *icap.Request {
 	return &icap.Request{
 		Method: method,
@@ -267,7 +269,7 @@ func TestLockFreeRouter_HighConcurrencyStress(t *testing.T) {
 		}
 	}
 
-	results := runConcurrentWithResults(t, 1000, 100, func(goroutineID, iteration int) error {
+	results := runConcurrentWithResults(t, 1000, 100, func(_, iteration int) error {
 		path := fmt.Sprintf("/service%d", iteration%50)
 		req := buildTestRequest(icap.MethodREQMOD, fmt.Sprintf("icap://localhost:1344%s", path))
 		_, err := r.Serve(context.Background(), req)
