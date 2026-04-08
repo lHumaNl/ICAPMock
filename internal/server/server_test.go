@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1401,7 +1402,7 @@ func TestGetGoroutineStats_AlertLevel(t *testing.T) {
 
 // TestResetGoroutineBaseline tests resetting the goroutine baseline.
 func TestResetGoroutineBaseline(t *testing.T) {
-	t.Parallel()
+	// Not parallel: this test relies on runtime.NumGoroutine() being stable.
 
 	cfg := &config.ServerConfig{
 		Host:           "127.0.0.1",
@@ -1417,27 +1418,32 @@ func TestResetGoroutineBaseline(t *testing.T) {
 	srv, err := NewServer(cfg, pool, nil)
 	require.NoError(t, err, "NewServer should not return error")
 
-	originalBaseline := srv.goroutineBaseline
+	// Reset baseline to capture current goroutine count as a stable reference.
+	srv.ResetGoroutineBaseline()
+	baselineBefore := srv.goroutineBaseline
 
-	// Create some goroutines to increase count
+	// Create goroutines that block until we release them, guaranteeing
+	// the goroutine count is higher when we reset the baseline.
+	blocker := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			time.Sleep(100 * time.Millisecond)
+			<-blocker
 		}()
 	}
 
 	// Give goroutines time to start
+	runtime.Gosched()
 	time.Sleep(50 * time.Millisecond)
 
-	// Reset baseline
+	// Reset baseline while extra goroutines are still alive
 	srv.ResetGoroutineBaseline()
 
-	// New baseline should be different (likely higher)
-	assert.NotEqual(t, originalBaseline, srv.goroutineBaseline,
-		"Baseline should be different after reset")
+	// New baseline should be higher since we added goroutines
+	assert.Greater(t, srv.goroutineBaseline, baselineBefore,
+		"Baseline should be higher after adding goroutines and resetting")
 
 	// Peak should be reset to new baseline
 	assert.Equal(t, srv.goroutineBaseline, srv.goroutinePeak,
@@ -1447,6 +1453,7 @@ func TestResetGoroutineBaseline(t *testing.T) {
 	assert.Equal(t, 0, srv.goroutineConsecutiveGrowth,
 		"Consecutive growth should be reset to 0")
 
+	close(blocker)
 	wg.Wait()
 }
 
