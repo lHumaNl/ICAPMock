@@ -6,6 +6,7 @@
 *.dylib
 /icap-mock
 *.sum
+!go.sum
 
 # Build directory
 bin/
