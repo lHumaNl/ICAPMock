@@ -31,6 +31,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+var (
+	// errStorageDisabled is returned by createStorageManager when storage is not enabled.
+	errStorageDisabled = errors.New("storage is disabled")
+	// errPluginsDisabled is returned by loadPlugins when plugins are not enabled.
+	errPluginsDisabled = errors.New("plugins are disabled")
+)
+
 // PrintVersion prints version information to stdout.
 func PrintVersion() {
 	fmt.Printf("icap-mock version %s\n", version)
@@ -219,77 +226,20 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create rate limiter (used for request throttling)
 	limiter := createRateLimiter(cfg)
 
-	// Create storage manager
-	store, err := createStorageManager(cfg, collector)
+	// Create storage manager and middleware
+	store, storageMiddleware, err := createStorageStack(cfg, collector, log)
 	if err != nil {
-		return fmt.Errorf("creating storage manager: %w", err)
+		return err
 	}
-
-	// Create storage middleware for async request saving
-	var storageMiddleware *middleware.StorageMiddleware
-	if store != nil && cfg.Storage.Enabled {
-		storageCfg := middleware.StorageMiddlewareConfig{
-			Workers:   cfg.Storage.Workers,
-			QueueSize: cfg.Storage.QueueSize,
-			CircuitBreaker: middleware.CircuitBreakerConfig{
-				Enabled:          cfg.Storage.CircuitBreaker.Enabled,
-				MaxFailures:      cfg.Storage.CircuitBreaker.MaxFailures,
-				ResetTimeout:     cfg.Storage.CircuitBreaker.ResetTimeout,
-				SuccessThreshold: cfg.Storage.CircuitBreaker.SuccessThreshold,
-			},
-		}
-		storageMiddleware, err = middleware.NewStorageMiddlewareWithPool(store, log.Logger, storageCfg)
-		if err != nil {
-			return fmt.Errorf("creating storage middleware: %w", err)
-		}
-		defer storageMiddleware.Shutdown(context.Background()) //nolint:errcheck
+	if storageMiddleware != nil {
+		defer storageMiddleware.Shutdown(context.Background()) //nolint:errcheck,contextcheck // shutdown uses fresh context because parent is canceled
 	}
 
 	// Determine server entries: use Servers map if present, otherwise fall back to legacy config
-	type serverEntry struct {
-		inlineScenarios map[string]config.InlineScenarioEntry
-		name            string
-		scenariosDir    string
-		serviceID       string
-		serverCfg       config.ServerConfig
-	}
-	var serverEntries []serverEntry
-
-	if len(cfg.Servers) > 0 {
-		// New multi-server mode
-		for name, entry := range cfg.Servers {
-			srvCfg := entry.ToServerConfig(cfg.Defaults)
-			sid := entry.ServiceID
-			if sid == "" {
-				sid = cfg.Mock.ServiceID
-			}
-			serverEntries = append(serverEntries, serverEntry{
-				name:            name,
-				serverCfg:       srvCfg,
-				scenariosDir:    entry.ScenariosDir,
-				serviceID:       sid,
-				inlineScenarios: entry.Scenarios,
-			})
-		}
-	} else {
-		// Legacy single-server mode (backward compatible)
-		serverEntries = append(serverEntries, serverEntry{
-			name:         "default",
-			serverCfg:    cfg.Server,
-			scenariosDir: cfg.Mock.ScenariosDir,
-			serviceID:    cfg.Mock.ServiceID,
-		})
-	}
+	serverEntries := buildServerEntries(cfg)
 
 	// Load plugins if enabled
-	var pluginLoader *plugin.Loader
-	if cfg.Plugin.Enabled {
-		var pluginErr error
-		pluginLoader, pluginErr = loadPlugins(cfg, log)
-		if pluginErr != nil {
-			log.Warn("failed to load plugins", "error", pluginErr)
-		}
-	}
+	pluginLoader := tryLoadPlugins(cfg, log)
 	defer func() {
 		if pluginLoader != nil {
 			_ = pluginLoader.Close()
@@ -297,44 +247,68 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}()
 
 	// Start health check server if enabled
-	var healthServer *health.HealthServer
-	if cfg.Health.Enabled {
-		healthServer, err = health.NewHealthServer(&cfg.Health)
-		if err != nil {
-			return fmt.Errorf("creating health server: %w", err)
-		}
+	healthServer, err := createHealthServer(cfg)
+	if err != nil {
+		return err
 	}
 
 	// Start metrics server if enabled
-	if cfg.Metrics.Enabled {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error("panic in metrics server", "error", r)
-				}
-			}()
-			if err := startMetricsServer(ctx, cfg, log, metricsRegistry, collector); err != nil {
-				log.Error("metrics server error", "error", err)
-			}
-		}()
-	}
+	launchMetricsServer(ctx, cfg, log, metricsRegistry, collector)
 
 	// Start all ICAP servers
-	var allServers []*server.ICAPServer
-	var firstRegistry storage.ScenarioRegistry
+	allServers, firstRegistry, err := startAllServers(ctx, cfg, serverEntries, collector, limiter, storageMiddleware, log)
+	if err != nil {
+		return err
+	}
+
+	// Start health server (after ICAP servers are up)
+	startHealthServer(ctx, cfg, healthServer, firstRegistry, log)
+
+	// Wait for shutdown
+	<-ctx.Done()
+
+	// Graceful shutdown
 	shutdownTimeout := cfg.Server.ShutdownTimeout
 	if cfg.Defaults.ShutdownTimeout != 0 {
 		shutdownTimeout = cfg.Defaults.ShutdownTimeout
 	}
+	for _, srv := range allServers {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		if err := srv.Stop(shutdownCtx); err != nil { //nolint:contextcheck // shutdown uses fresh context because parent is canceled
+			log.Warn("error stopping server", "error", err)
+		}
+		cancel()
+	}
+
+	if store != nil {
+		if err := store.Close(); err != nil {
+			log.Warn("error closing storage", "error", err)
+		}
+	}
+
+	log.Info("all servers stopped gracefully")
+	return nil
+}
+
+// startAllServers creates and starts all ICAP servers from the server entries.
+func startAllServers(
+	ctx context.Context,
+	cfg *config.Config,
+	serverEntries []serverEntry,
+	collector *metrics.Collector,
+	limiter ratelimit.Limiter,
+	storageMiddleware *middleware.StorageMiddleware,
+	log *logger.Logger,
+) ([]*server.ICAPServer, storage.ScenarioRegistry, error) {
+	var allServers []*server.ICAPServer
+	var firstRegistry storage.ScenarioRegistry
 
 	for _, entry := range serverEntries {
-		// Create scenario registry for this server
 		registry := storage.NewShardedScenarioRegistry()
 		if firstRegistry == nil {
 			firstRegistry = registry
 		}
 
-		// Load scenarios
 		if entry.scenariosDir != "" {
 			entryCfg := &config.Config{
 				Mock: config.MockConfig{ScenariosDir: entry.scenariosDir},
@@ -344,79 +318,22 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			}
 		}
 
-		// Merge inline scenarios (higher priority than file-loaded)
 		if len(entry.inlineScenarios) > 0 {
-			// Convert config.InlineScenarioEntry to storage.ScenarioEntryV2
-			storageScenarios := make(map[string]storage.ScenarioEntryV2, len(entry.inlineScenarios))
-			orderedNames := make([]string, 0, len(entry.inlineScenarios))
-			for name, e := range entry.inlineScenarios {
-				responses := make([]storage.WeightedResponseV2, len(e.Responses))
-				for i, r := range e.Responses {
-					responses[i] = storage.WeightedResponseV2{
-						Weight:     r.Weight,
-						Set:        r.Set,
-						Status:     r.Status,
-						HTTPStatus: r.HTTPStatus,
-						Body:       r.Body,
-						Delay:      r.Delay,
-					}
-				}
-				storageScenarios[name] = storage.ScenarioEntryV2{
-					Method:     e.Method,
-					Endpoint:   e.Endpoint,
-					Status:     e.Status,
-					HTTPStatus: e.HTTPStatus,
-					Priority:   e.Priority,
-					When:       e.When,
-					Set:        e.Set,
-					Body:       e.Body,
-					BodyFile:   e.BodyFile,
-					Delay:      e.Delay,
-					Responses:  responses,
-				}
-				orderedNames = append(orderedNames, name)
-			}
-			file := &storage.ScenarioFileV2{
-				Scenarios: storageScenarios,
-			}
-			inlineScenarios, convErr := storage.ConvertV2ToScenarios(file, orderedNames)
-			if convErr != nil {
-				log.Warn("failed to convert inline scenarios", "server", entry.name, "error", convErr)
-			} else {
-				// Give inline scenarios higher priority (2000+)
-				for i, s := range inlineScenarios {
-					s.Priority = 2000 - i
-				}
-				for _, s := range inlineScenarios {
-					if addErr := registry.Add(s); addErr != nil {
-						log.Warn("failed to add inline scenario", "server", entry.name, "scenario", s.Name, "error", addErr)
-					}
-				}
-			}
+			loadInlineScenarios(entry, registry, log)
 		}
 
-		// Create processor chain
-		proc, procCleanup := createProcessorChain(cfg, registry, log)
-		defer procCleanup(context.Background()) //nolint:gocritic // deferInLoop: cleanup is per-server, intentional
+		proc, _ := createProcessorChain(cfg, registry, log)
 
-		// Create router and register handlers
 		rtr := router.NewRouter()
-		previewRL, err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log)
-		if err != nil {
-			return fmt.Errorf("registering handlers for %s: %w", entry.name, err)
+		if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log); err != nil {
+			return nil, nil, fmt.Errorf("registering handlers for %s: %w", entry.name, err)
 		}
-		defer func() { //nolint:gocritic // deferInLoop: cleanup is per-server, intentional
-			if previewRL != nil {
-				previewRL.Shutdown()
-			}
-		}()
 
-		// Create connection pool and server
 		srvCfg := entry.serverCfg
 		pool := server.NewConnectionPool()
 		srv, err := server.NewServer(&srvCfg, pool, log.Logger)
 		if err != nil {
-			return fmt.Errorf("creating server %s: %w", entry.name, err)
+			return nil, nil, fmt.Errorf("creating server %s: %w", entry.name, err)
 		}
 		srv.SetRouter(rtr)
 		srv.SetMetrics(collector)
@@ -430,53 +347,190 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		)
 
 		if err := srv.Start(ctx); err != nil {
-			return fmt.Errorf("starting server %s: %w", entry.name, err)
+			return nil, nil, fmt.Errorf("starting server %s: %w", entry.name, err)
 		}
 		allServers = append(allServers, srv)
 	}
 
-	// Start health server (after ICAP servers are up)
-	if healthServer != nil {
-		if firstRegistry != nil {
-			healthServer.SetupAPI(firstRegistry)
-			healthServer.Checker().SetScenariosCount(len(firstRegistry.List()))
-		}
-		healthServer.Checker().SetICAPReady(true)
-		healthServer.Checker().SetStorageReady(true)
+	return allServers, firstRegistry, nil
+}
 
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error("panic in health server", "error", r)
-				}
-			}()
-			if err := healthServer.Start(ctx); err != nil {
-				log.Error("health server error", "error", err)
+// startHealthServer starts the health check server if enabled and configured.
+func startHealthServer(ctx context.Context, _ *config.Config, healthServer *health.Server, firstRegistry storage.ScenarioRegistry, log *logger.Logger) {
+	if healthServer == nil {
+		return
+	}
+	if firstRegistry != nil {
+		healthServer.SetupAPI(firstRegistry)
+		healthServer.Checker().SetScenariosCount(len(firstRegistry.List()))
+	}
+	healthServer.Checker().SetICAPReady(true)
+	healthServer.Checker().SetStorageReady(true)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("panic in health server", "error", r)
 			}
 		}()
-	}
-
-	// Wait for shutdown
-	<-ctx.Done()
-
-	// Stop all ICAP servers
-	for _, srv := range allServers {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		if err := srv.Stop(shutdownCtx); err != nil {
-			log.Warn("error stopping server", "error", err)
+		if err := healthServer.Start(ctx); err != nil {
+			log.Error("health server error", "error", err)
 		}
-		cancel()
-	}
+	}()
+}
 
-	// Shutdown storage
-	if store != nil {
-		if err := store.Close(); err != nil {
-			log.Warn("error closing storage", "error", err)
+// serverEntry represents a single ICAP server configuration.
+type serverEntry struct {
+	inlineScenarios map[string]config.InlineScenarioEntry
+	name            string
+	scenariosDir    string
+	serviceID       string
+	serverCfg       config.ServerConfig
+}
+
+// buildServerEntries determines server entries from config.
+func buildServerEntries(cfg *config.Config) []serverEntry {
+	if len(cfg.Servers) > 0 {
+		entries := make([]serverEntry, 0, len(cfg.Servers))
+		for name, entry := range cfg.Servers {
+			srvCfg := entry.ToServerConfig(cfg.Defaults)
+			sid := entry.ServiceID
+			if sid == "" {
+				sid = cfg.Mock.ServiceID
+			}
+			entries = append(entries, serverEntry{
+				name:            name,
+				serverCfg:       srvCfg,
+				scenariosDir:    entry.ScenariosDir,
+				serviceID:       sid,
+				inlineScenarios: entry.Scenarios,
+			})
+		}
+		return entries
+	}
+	return []serverEntry{{
+		name:         "default",
+		serverCfg:    cfg.Server,
+		scenariosDir: cfg.Mock.ScenariosDir,
+		serviceID:    cfg.Mock.ServiceID,
+	}}
+}
+
+// loadInlineScenarios converts inline scenario config entries and adds them to the registry.
+func loadInlineScenarios(entry serverEntry, registry storage.ScenarioRegistry, log *logger.Logger) {
+	storageScenarios := make(map[string]storage.ScenarioEntryV2, len(entry.inlineScenarios))
+	orderedNames := make([]string, 0, len(entry.inlineScenarios))
+	for name, e := range entry.inlineScenarios {
+		responses := make([]storage.WeightedResponseV2, len(e.Responses))
+		for i, r := range e.Responses {
+			responses[i] = storage.WeightedResponseV2{
+				Weight:     r.Weight,
+				Set:        r.Set,
+				Status:     r.Status,
+				HTTPStatus: r.HTTPStatus,
+				Body:       r.Body,
+				Delay:      r.Delay,
+			}
+		}
+		storageScenarios[name] = storage.ScenarioEntryV2{
+			Method:     e.Method,
+			Endpoint:   e.Endpoint,
+			Status:     e.Status,
+			HTTPStatus: e.HTTPStatus,
+			Priority:   e.Priority,
+			When:       e.When,
+			Set:        e.Set,
+			Body:       e.Body,
+			BodyFile:   e.BodyFile,
+			Delay:      e.Delay,
+			Responses:  responses,
+		}
+		orderedNames = append(orderedNames, name)
+	}
+	file := &storage.ScenarioFileV2{
+		Scenarios: storageScenarios,
+	}
+	inlineScenarios, convErr := storage.ConvertV2ToScenarios(file, orderedNames)
+	if convErr != nil {
+		log.Warn("failed to convert inline scenarios", "server", entry.name, "error", convErr)
+		return
+	}
+	// Give inline scenarios higher priority (2000+)
+	for i, s := range inlineScenarios {
+		s.Priority = 2000 - i
+	}
+	for _, s := range inlineScenarios {
+		if addErr := registry.Add(s); addErr != nil {
+			log.Warn("failed to add inline scenario", "server", entry.name, "scenario", s.Name, "error", addErr)
 		}
 	}
+}
 
-	log.Info("all servers stopped gracefully")
-	return nil
+// tryLoadPlugins loads plugins if enabled, logging any errors.
+func tryLoadPlugins(cfg *config.Config, log *logger.Logger) *plugin.DynamicLoader {
+	if !cfg.Plugin.Enabled {
+		return nil
+	}
+	pluginLoader, pluginErr := loadPlugins(cfg, log)
+	if pluginErr != nil {
+		log.Warn("failed to load plugins", "error", pluginErr)
+	}
+	return pluginLoader
+}
+
+// createHealthServer creates a health server if health checks are enabled.
+func createHealthServer(cfg *config.Config) (*health.Server, error) {
+	if !cfg.Health.Enabled {
+		return nil, nil //nolint:nilnil // nil server signals health is disabled; caller checks for nil
+	}
+	srv, err := health.NewServer(&cfg.Health)
+	if err != nil {
+		return nil, fmt.Errorf("creating health server: %w", err)
+	}
+	return srv, nil
+}
+
+// launchMetricsServer starts the metrics server in a goroutine if enabled.
+func launchMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Logger, metricsRegistry *prometheus.Registry, collector *metrics.Collector) {
+	if !cfg.Metrics.Enabled {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("panic in metrics server", "error", r)
+			}
+		}()
+		if err := startMetricsServer(ctx, cfg, log, metricsRegistry, collector); err != nil {
+			log.Error("metrics server error", "error", err)
+		}
+	}()
+}
+
+// createStorageStack creates the storage manager and middleware.
+func createStorageStack(cfg *config.Config, collector *metrics.Collector, log *logger.Logger) (*storage.FileStorage, *middleware.StorageMiddleware, error) {
+	store, err := createStorageManager(cfg, collector)
+	if err != nil && !errors.Is(err, errStorageDisabled) {
+		return nil, nil, fmt.Errorf("creating storage manager: %w", err)
+	}
+	if store == nil || !cfg.Storage.Enabled {
+		return store, nil, nil
+	}
+	storageCfg := middleware.StorageMiddlewareConfig{
+		Workers:   cfg.Storage.Workers,
+		QueueSize: cfg.Storage.QueueSize,
+		CircuitBreaker: middleware.CircuitBreakerConfig{
+			Enabled:          cfg.Storage.CircuitBreaker.Enabled,
+			MaxFailures:      cfg.Storage.CircuitBreaker.MaxFailures,
+			ResetTimeout:     cfg.Storage.CircuitBreaker.ResetTimeout,
+			SuccessThreshold: cfg.Storage.CircuitBreaker.SuccessThreshold,
+		},
+	}
+	sm, err := middleware.NewStorageMiddlewareWithPool(store, log.Logger, storageCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating storage middleware: %w", err)
+	}
+	return store, sm, nil
 }
 
 // createMetricsCollector creates a new metrics collector.
@@ -512,7 +566,7 @@ func createRateLimiter(cfg *config.Config) ratelimit.Limiter {
 // P0 FIX: Added metrics collector parameter for rotation monitoring.
 func createStorageManager(cfg *config.Config, m *metrics.Collector) (*storage.FileStorage, error) {
 	if !cfg.Storage.Enabled {
-		return nil, nil
+		return nil, errStorageDisabled
 	}
 
 	return storage.NewFileStorage(cfg.Storage, m)
@@ -553,9 +607,9 @@ func loadScenarios(cfg *config.Config, registry storage.ScenarioRegistry, log *l
 }
 
 // loadPlugins loads plugins from the configured directory.
-func loadPlugins(cfg *config.Config, log *logger.Logger) (*plugin.Loader, error) {
+func loadPlugins(cfg *config.Config, log *logger.Logger) (*plugin.DynamicLoader, error) {
 	if !cfg.Plugin.Enabled {
-		return nil, nil
+		return nil, errPluginsDisabled
 	}
 
 	log.Info("loading plugins", "directory", cfg.Plugin.Dir)
@@ -641,7 +695,6 @@ func createProcessorChain(
 }
 
 // registerHandlers registers all ICAP handlers with the router.
-// Returns the preview rate limiter for proper shutdown.
 func registerHandlers(
 	rtr *router.Router,
 	proc processor.Processor,
@@ -650,7 +703,7 @@ func registerHandlers(
 	storageMiddleware *middleware.StorageMiddleware,
 	cfg *config.Config,
 	log *logger.Logger,
-) (*handler.PreviewRateLimiter, error) {
+) error {
 	// PanicRecoveryMiddleware provides protection against panics in handlers.
 	// It recovers from panics, logs the error with request context, and returns
 	// a 500 Internal Server Error response to prevent server crashes.
@@ -707,14 +760,14 @@ func registerHandlers(
 	// Wraps handler with panic recovery, rate limiting, and storage
 	reqmodHandler := handler.NewReqmodHandler(proc, collector, log.Logger, previewRateLimiter)
 	if err := rtr.Handle("/reqmod", applyMiddleware(reqmodHandler)); err != nil {
-		return nil, fmt.Errorf("registering REQMOD handler: %w", err)
+		return fmt.Errorf("registering REQMOD handler: %w", err)
 	}
 
 	// Register RESPMOD handler with middleware chain
 	// Ensures response modification is protected and logged
 	respmodHandler := handler.NewRespmodHandler(proc, collector, log.Logger, previewRateLimiter)
 	if err := rtr.Handle("/respmod", applyMiddleware(respmodHandler)); err != nil {
-		return nil, fmt.Errorf("registering RESPMOD handler: %w", err)
+		return fmt.Errorf("registering RESPMOD handler: %w", err)
 	}
 
 	// Register OPTIONS handler with middleware chain
@@ -727,10 +780,10 @@ func registerHandlers(
 		OptionsTTL:     3600 * time.Second,
 	})
 	if err := rtr.Handle("/options", applyMiddleware(optionsHandler)); err != nil {
-		return nil, fmt.Errorf("registering OPTIONS handler: %w", err)
+		return fmt.Errorf("registering OPTIONS handler: %w", err)
 	}
 
-	return previewRateLimiter, nil
+	return nil
 }
 
 // startMetricsServer starts the Prometheus metrics HTTP server.
@@ -777,7 +830,7 @@ func startMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Log
 		// Graceful shutdown
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		return srv.Shutdown(shutdownCtx) //nolint:contextcheck // shutdown uses fresh context because parent is canceled
 	case err := <-errChan:
 		return err
 	}

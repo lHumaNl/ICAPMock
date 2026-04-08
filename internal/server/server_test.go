@@ -22,6 +22,10 @@ import (
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
+// wrongContextKey is a different typed key used to verify that contextKey-based
+// lookups are not confused by keys of other types with the same underlying value.
+type wrongContextKey string
+
 // mockHandler is a simple handler for testing.
 type mockHandler struct {
 	response string
@@ -717,7 +721,7 @@ func TestRequestIDFromContext(t *testing.T) {
 		},
 		{
 			name:     "context with wrong key type",
-			ctx:      context.WithValue(context.Background(), "request_id", "wrong-type"),
+			ctx:      context.WithValue(context.Background(), wrongContextKey("request_id"), "wrong-type"),
 			expected: "",
 		},
 		{
@@ -763,7 +767,7 @@ func TestClientIPFromContext(t *testing.T) {
 		},
 		{
 			name:     "context with wrong key type",
-			ctx:      context.WithValue(context.Background(), "client_ip", "wrong-type"),
+			ctx:      context.WithValue(context.Background(), wrongContextKey("client_ip"), "wrong-type"),
 			expected: "",
 		},
 		{
@@ -930,7 +934,7 @@ func TestContextKeyUniqueness(t *testing.T) {
 	ctx = context.WithValue(ctx, clientIPKey, "1.2.3.4")
 
 	// Add a string key (should not interfere)
-	ctx = context.WithValue(ctx, "request_id", "different-value")
+	ctx = context.WithValue(ctx, wrongContextKey("request_id"), "different-value")
 
 	// Our typed keys should still work
 	if RequestIDFromContext(ctx) != "test-id" {

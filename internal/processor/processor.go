@@ -32,31 +32,29 @@ type Processor interface {
 	Name() string
 }
 
-// ProcessorFunc is an adapter type that allows using ordinary functions as Processors.
+// Func is an adapter type that allows using ordinary functions as Processors.
 // This is useful for simple processors or testing.
 //
 // Example:
 //
-//	processor := ProcessorFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+//	processor := Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 //	    return icap.NewResponse(204), nil
 //	})
-type ProcessorFunc func(ctx context.Context, req *icap.Request) (*icap.Response, error)
+type Func func(ctx context.Context, req *icap.Request) (*icap.Response, error)
 
-// Process implements the Processor interface for ProcessorFunc.
-func (f ProcessorFunc) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+// Process implements the Processor interface for Func.
+func (f Func) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 	return f(ctx, req)
 }
 
-// Name returns "ProcessorFunc" as the processor name.
-func (f ProcessorFunc) Name() string {
-	return "ProcessorFunc"
+// Name returns "Func" as the processor name.
+func (f Func) Name() string {
+	return "Func"
 }
 
 // Chain creates a processor that chains multiple processors together.
 // Processors are called in order until one returns a non-nil response.
 // If all processors return nil, a default 204 response is returned.
-//
-// Deprecated: Use middleware pattern instead for better flexibility.
 func Chain(processors ...Processor) Processor {
 	return &chainProcessor{processors: processors}
 }

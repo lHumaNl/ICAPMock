@@ -57,10 +57,6 @@ func IsRetryable(err error) bool {
 		if netErr.Timeout() {
 			return true
 		}
-		// Temporary network errors are retryable
-		if netErr.Temporary() {
-			return true
-		}
 	}
 
 	// Check for specific system call errors
@@ -84,18 +80,14 @@ func IsRetryable(err error) bool {
 
 	// Check for connection-related string errors (fallback)
 	errMsg := err.Error()
-	if containsAny(errMsg, []string{
+	return containsAny(errMsg, []string{
 		"connection reset",
 		"connection refused",
 		"broken pipe",
 		"network is unreachable",
 		"temporary failure",
 		"timeout",
-	}) {
-		return true
-	}
-
-	return false
+	})
 }
 
 // errTemporary is a sentinel error for marking errors as temporary.
@@ -176,164 +168,159 @@ func DefaultRetryConfig() RetryConfig {
 //	middleware := handler.RetryMiddleware(cfg)
 //	handler := middleware(baseHandler)
 func RetryMiddleware(cfg RetryConfig) Middleware {
-	// Apply defaults
+	applyRetryDefaults(&cfg)
+
+	retryAttemptsTotal := initRetryMetrics(cfg)
+
+	return func(next Handler) Handler {
+		return WrapHandler(Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+			rs := &retryState{cfg: &cfg, metrics: retryAttemptsTotal, component: req.Method}
+			return rs.execute(ctx, req, next)
+		}), next.Method())
+	}
+}
+
+// applyRetryDefaults fills zero-value fields in cfg with defaults.
+func applyRetryDefaults(cfg *RetryConfig) {
+	defaults := DefaultRetryConfig()
 	if cfg.MaxRetries < 0 {
-		cfg.MaxRetries = DefaultRetryConfig().MaxRetries
+		cfg.MaxRetries = defaults.MaxRetries
 	}
 	if cfg.InitialBackoff <= 0 {
-		cfg.InitialBackoff = DefaultRetryConfig().InitialBackoff
+		cfg.InitialBackoff = defaults.InitialBackoff
 	}
 	if cfg.MaxBackoff <= 0 {
-		cfg.MaxBackoff = DefaultRetryConfig().MaxBackoff
+		cfg.MaxBackoff = defaults.MaxBackoff
 	}
 	if cfg.BackoffMultiplier <= 0 {
-		cfg.BackoffMultiplier = DefaultRetryConfig().BackoffMultiplier
+		cfg.BackoffMultiplier = defaults.BackoffMultiplier
 	}
 	if cfg.JitterPercent < 0 || cfg.JitterPercent > 1.0 {
-		cfg.JitterPercent = DefaultRetryConfig().JitterPercent
+		cfg.JitterPercent = defaults.JitterPercent
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+}
 
-	// Initialize retry metrics
-	var retryAttemptsTotal *prometheus.CounterVec
-	if cfg.MetricsCollector != nil {
-		retryAttemptsTotal = prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "retry_attempts_total",
-				Help:      "Total number of retry attempts by component and status.",
-			},
-			[]string{"component", "status", "error_type"},
-		)
-		// Register the metric; ignore AlreadyRegisteredError for idempotency
-		if err := prometheus.Register(retryAttemptsTotal); err != nil {
-			var are prometheus.AlreadyRegisteredError
-			if errors.As(err, &are) {
-				retryAttemptsTotal = are.ExistingCollector.(*prometheus.CounterVec) //nolint:errcheck
-			}
+// initRetryMetrics initializes Prometheus metrics for retry tracking.
+func initRetryMetrics(cfg RetryConfig) *prometheus.CounterVec {
+	if cfg.MetricsCollector == nil {
+		return nil
+	}
+	retryAttemptsTotal := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "icap",
+			Name:      "retry_attempts_total",
+			Help:      "Total number of retry attempts by component and status.",
+		},
+		[]string{"component", "status", "error_type"},
+	)
+	if err := prometheus.Register(retryAttemptsTotal); err != nil {
+		var are prometheus.AlreadyRegisteredError
+		if errors.As(err, &are) {
+			retryAttemptsTotal = are.ExistingCollector.(*prometheus.CounterVec) //nolint:errcheck
 		}
 	}
+	return retryAttemptsTotal
+}
 
-	return func(next Handler) Handler {
-		return WrapHandler(HandlerFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
-			component := req.Method
+// retryState holds per-request retry state.
+type retryState struct {
+	cfg       *RetryConfig
+	metrics   *prometheus.CounterVec
+	component string
+}
 
-			var lastErr error
-			for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
-				// Execute handler
-				resp, err := next.Handle(ctx, req)
+func (rs *retryState) execute(ctx context.Context, req *icap.Request, next Handler) (*icap.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt <= rs.cfg.MaxRetries; attempt++ {
+		resp, err := next.Handle(ctx, req)
 
-				// Success on first attempt
-				if attempt == 0 && err == nil {
-					return resp, nil
-				}
-
-				// No error on retry
-				if err == nil {
-					// Record successful retry
-					if cfg.MetricsCollector != nil && retryAttemptsTotal != nil {
-						retryAttemptsTotal.WithLabelValues(component, "success", "").Inc()
-					}
-					if cfg.Logger != nil {
-						cfg.Logger.Debug("request succeeded after retry",
-							"component", component,
-							"attempt", attempt+1,
-							"uri", req.URI,
-						)
-					}
-					return resp, nil
-				}
-
-				// Store the error
-				lastErr = err
-
-				// Check if error is retryable
-				isRetryable := IsRetryable(err)
-				if cfg.RetryableErrors != nil {
-					// Use custom retryable errors list
-					isRetryable = false
-					for _, retryableErr := range cfg.RetryableErrors {
-						if errors.Is(err, retryableErr) {
-							isRetryable = true
-							break
-						}
-					}
-				}
-
-				// If not retryable or max retries exceeded, return error
-				if !isRetryable || attempt >= cfg.MaxRetries {
-					// Record failed retry or non-retryable error
-					if cfg.MetricsCollector != nil && retryAttemptsTotal != nil {
-						status := "non_retryable"
-						if isRetryable {
-							status = "exhausted"
-						}
-						errorType := getErrorType(err)
-						retryAttemptsTotal.WithLabelValues(component, status, errorType).Inc()
-					}
-
-					if cfg.Logger != nil {
-						logLevel := slog.LevelError
-						if !isRetryable {
-							logLevel = slog.LevelInfo
-						}
-						cfg.Logger.Log(ctx, logLevel, "request failed",
-							"component", component,
-							"attempts", attempt+1,
-							"retryable", isRetryable,
-							"error", err,
-							"uri", req.URI,
-						)
-					}
-
-					return nil, err
-				}
-
-				// Calculate backoff duration with jitter
-				backoff := calculateBackoffWithJitter(cfg.InitialBackoff, cfg.BackoffMultiplier, cfg.MaxBackoff, attempt, cfg.JitterStrategy, cfg.JitterPercent)
-
-				// Record retry attempt
-				if cfg.MetricsCollector != nil && retryAttemptsTotal != nil {
-					errorType := getErrorType(err)
-					retryAttemptsTotal.WithLabelValues(component, "retry", errorType).Inc()
-				}
-
-				if cfg.Logger != nil {
-					cfg.Logger.Warn("request failed, retrying",
-						"component", component,
-						"attempt", attempt+1,
-						"max_retries", cfg.MaxRetries+1,
-						"backoff", backoff,
-						"error", err,
-						"uri", req.URI,
-					)
-				}
-
-				// Wait with exponential backoff
-				select {
-				case <-time.After(backoff):
-					// Continue to next retry
-				case <-ctx.Done():
-					// Context canceled, abort retry
-					if cfg.MetricsCollector != nil && retryAttemptsTotal != nil {
-						retryAttemptsTotal.WithLabelValues(component, "canceled", getErrorType(ctx.Err())).Inc()
-					}
-					if cfg.Logger != nil {
-						cfg.Logger.Warn("retry canceled by context",
-							"component", component,
-							"attempt", attempt+1,
-							"error", ctx.Err(),
-						)
-					}
-					return nil, ctx.Err()
+		if err == nil {
+			if attempt > 0 {
+				rs.recordMetric("success", "")
+				if rs.cfg.Logger != nil {
+					rs.cfg.Logger.Debug("request succeeded after retry",
+						"component", rs.component, "attempt", attempt+1, "uri", req.URI)
 				}
 			}
+			return resp, nil
+		}
 
-			// Should not reach here, but return last error if we do
-			return nil, lastErr
-		}), next.Method())
+		lastErr = err
+		retryable := rs.isRetryable(err)
+
+		if !retryable || attempt >= rs.cfg.MaxRetries {
+			rs.recordFinalFailure(ctx, req, err, retryable, attempt)
+			return nil, err
+		}
+
+		if waitErr := rs.waitBackoff(ctx, req, err, attempt); waitErr != nil {
+			return nil, waitErr
+		}
+	}
+	return nil, lastErr
+}
+
+func (rs *retryState) isRetryable(err error) bool {
+	if rs.cfg.RetryableErrors == nil {
+		return IsRetryable(err)
+	}
+	for _, retryableErr := range rs.cfg.RetryableErrors {
+		if errors.Is(err, retryableErr) {
+			return true
+		}
+	}
+	return false
+}
+
+func (rs *retryState) recordMetric(status, errorType string) {
+	if rs.cfg.MetricsCollector != nil && rs.metrics != nil {
+		rs.metrics.WithLabelValues(rs.component, status, errorType).Inc()
+	}
+}
+
+func (rs *retryState) recordFinalFailure(ctx context.Context, req *icap.Request, err error, retryable bool, attempt int) {
+	status := "non_retryable"
+	if retryable {
+		status = "exhausted"
+	}
+	rs.recordMetric(status, getErrorType(err))
+
+	if rs.cfg.Logger != nil {
+		logLevel := slog.LevelError
+		if !retryable {
+			logLevel = slog.LevelInfo
+		}
+		rs.cfg.Logger.Log(ctx, logLevel, "request failed",
+			"component", rs.component, "attempts", attempt+1,
+			"retryable", retryable, "error", err, "uri", req.URI)
+	}
+}
+
+func (rs *retryState) waitBackoff(ctx context.Context, req *icap.Request, err error, attempt int) error {
+	backoff := calculateBackoffWithJitter(rs.cfg.InitialBackoff, rs.cfg.BackoffMultiplier, rs.cfg.MaxBackoff, attempt, rs.cfg.JitterStrategy, rs.cfg.JitterPercent)
+
+	rs.recordMetric("retry", getErrorType(err))
+
+	if rs.cfg.Logger != nil {
+		rs.cfg.Logger.Warn("request failed, retrying",
+			"component", rs.component, "attempt", attempt+1,
+			"max_retries", rs.cfg.MaxRetries+1, "backoff", backoff,
+			"error", err, "uri", req.URI)
+	}
+
+	select {
+	case <-time.After(backoff):
+		return nil
+	case <-ctx.Done():
+		rs.recordMetric("canceled", getErrorType(ctx.Err()))
+		if rs.cfg.Logger != nil {
+			rs.cfg.Logger.Warn("retry canceled by context",
+				"component", rs.component, "attempt", attempt+1, "error", ctx.Err())
+		}
+		return ctx.Err()
 	}
 }
 

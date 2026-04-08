@@ -276,7 +276,7 @@ func TestRaceCondition_WaitExponentialBackoff(t *testing.T) {
 
 	// Measure time for Wait() to complete
 	start := time.Now()
-	err := limiter.Wait(GlobalKey, context.Background())
+	err := limiter.Wait(context.Background(), GlobalKey)
 	elapsed := time.Since(start)
 
 	if err != nil {

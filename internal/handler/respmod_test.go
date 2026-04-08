@@ -202,7 +202,7 @@ func TestRespmodHandlerContextCancellation(t *testing.T) {
 	})
 
 	t.Run("handles context deadline", func(t *testing.T) {
-		mockProc := processor.ProcessorFunc(func(ctx context.Context, _ *icap.Request) (*icap.Response, error) {
+		mockProc := processor.Func(func(ctx context.Context, _ *icap.Request) (*icap.Response, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -229,7 +229,7 @@ func TestRespmodHandlerContextCancellation(t *testing.T) {
 
 	// P0 FIX: Test that response is not sent when context is canceled after processing
 	t.Run("does not send response when context canceled after processing", func(t *testing.T) {
-		mockProc := processor.ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+		mockProc := processor.Func(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			// Processor takes time and creates response
 			time.Sleep(50 * time.Millisecond)
 			resp := icap.NewResponse(icap.StatusOK)
@@ -269,7 +269,7 @@ func TestRespmodHandlerWithHTTPResponse(t *testing.T) {
 	t.Run("passes HTTP response to processor", func(t *testing.T) {
 		var receivedReq *icap.Request
 
-		mockProc := processor.ProcessorFunc(func(_ context.Context, req *icap.Request) (*icap.Response, error) {
+		mockProc := processor.Func(func(_ context.Context, req *icap.Request) (*icap.Response, error) {
 			receivedReq = req
 			return icap.NewResponse(icap.StatusNoContentNeeded), nil
 		})
@@ -305,7 +305,7 @@ func TestRespmodHandlerConcurrent(t *testing.T) {
 	t.Parallel()
 
 	t.Run("handles concurrent requests", func(t *testing.T) {
-		mockProc := processor.ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+		mockProc := processor.Func(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			time.Sleep(10 * time.Millisecond)
 			return icap.NewResponse(icap.StatusNoContentNeeded), nil
 		})
@@ -339,7 +339,7 @@ func TestRespmodHandlerModifiedResponse(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns modified HTTP response", func(t *testing.T) {
-		mockProc := processor.ProcessorFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+		mockProc := processor.Func(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 			resp := icap.NewResponse(icap.StatusOK)
 			resp.HTTPResponse = &icap.HTTPMessage{
 				Proto:      "HTTP/1.1",

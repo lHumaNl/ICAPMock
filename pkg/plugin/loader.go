@@ -19,8 +19,8 @@ const PluginSymbol = "Plugin"
 // If exported, this function is called after loading.
 const PluginInitSymbol = "Init"
 
-// PluginInfoSymbol is the symbol name for plugin metadata.
-const PluginInfoSymbol = "PluginInfo"
+// InfoSymbol is the symbol name for plugin metadata.
+const InfoSymbol = "PluginInfo"
 
 // LoadError represents an error that occurred during plugin loading.
 type LoadError struct {
@@ -39,8 +39,8 @@ func (e *LoadError) Unwrap() error {
 	return e.Internal
 }
 
-// PluginLoader defines the interface for loading plugins.
-type PluginLoader interface {
+// Loader defines the interface for loading plugins from disk.
+type Loader interface {
 	// Load loads a plugin from the given path.
 	// The path must point to a .so file or a directory containing plugin files.
 	Load(path string) error
@@ -55,27 +55,27 @@ type PluginLoader interface {
 	Close() error
 }
 
-// Loader implements PluginLoader for dynamic .so plugins.
-type Loader struct {
+// DynamicLoader loads Go plugins (.so files) at runtime via the plugin package.
+type DynamicLoader struct {
 	loaded   map[string]string
 	plugins  map[string]*plugin.Plugin
 	registry *Registry
 	mu       sync.RWMutex
 }
 
-// LoaderOption is a function that configures the Loader.
-type LoaderOption func(*Loader)
+// LoaderOption is a function that configures a DynamicLoader.
+type LoaderOption func(*DynamicLoader)
 
 // WithRegistry sets a custom registry for the loader.
 func WithRegistry(registry *Registry) LoaderOption {
-	return func(l *Loader) {
+	return func(l *DynamicLoader) {
 		l.registry = registry
 	}
 }
 
-// NewLoader creates a new plugin loader.
-func NewLoader(opts ...LoaderOption) *Loader {
-	l := &Loader{
+// NewLoader creates a new DynamicLoader that loads .so plugins at runtime.
+func NewLoader(opts ...LoaderOption) *DynamicLoader {
+	l := &DynamicLoader{
 		loaded:   make(map[string]string),
 		plugins:  make(map[string]*plugin.Plugin),
 		registry: globalRegistry,
@@ -96,16 +96,16 @@ func NewLoader(opts ...LoaderOption) *Loader {
 //
 // Optionally, plugins can export:
 //   - "Init" function: func() error - called after loading
-//   - "PluginInfo" variable: *PluginInfo - plugin metadata
-func (l *Loader) Load(path string) error {
+//   - "PluginInfo" variable: *Info - plugin metadata
+func (l *DynamicLoader) Load(path string) error { //nolint:gocyclo // plugin loading requires sequential steps: stat, open, lookup, init, register
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return &LoadError{Path: path, Phase: "abs", Internal: err}
 	}
 
 	// Check if file exists
-	if _, err := os.Stat(absPath); err != nil {
-		return &LoadError{Path: path, Phase: "stat", Internal: err}
+	if _, statErr := os.Stat(absPath); statErr != nil {
+		return &LoadError{Path: path, Phase: "stat", Internal: statErr}
 	}
 
 	// Check if already loaded
@@ -138,9 +138,9 @@ func (l *Loader) Load(path string) error {
 	}
 
 	// Look up optional PluginInfo
-	var pluginInfo *PluginInfo
-	if infoSym, err := pl.Lookup(PluginInfoSymbol); err == nil {
-		if info, ok := infoSym.(*PluginInfo); ok {
+	var pluginInfo *Info
+	if infoSym, err := pl.Lookup(InfoSymbol); err == nil {
+		if info, ok := infoSym.(*Info); ok {
 			pluginInfo = info
 		}
 	}
@@ -158,7 +158,7 @@ func (l *Loader) Load(path string) error {
 	if pluginInfo != nil {
 		l.mu.Lock()
 		if l.registry != nil {
-			_ = l.registry.SetPluginInfo(p.Name(), *pluginInfo)
+			_ = l.registry.SetInfo(p.Name(), *pluginInfo)
 		}
 		l.mu.Unlock()
 	}
@@ -185,7 +185,7 @@ func (l *Loader) Load(path string) error {
 
 // LoadDir loads all plugins from the given directory.
 // Only files with .so extension will be loaded.
-func (l *Loader) LoadDir(dir string) error {
+func (l *DynamicLoader) LoadDir(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return &LoadError{
@@ -220,7 +220,7 @@ func (l *Loader) LoadDir(dir string) error {
 }
 
 // Loaded returns a list of loaded plugin paths.
-func (l *Loader) Loaded() []string {
+func (l *DynamicLoader) Loaded() []string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -234,7 +234,7 @@ func (l *Loader) Loaded() []string {
 // Close unloads all loaded plugins.
 // Note: Go plugins cannot be unloaded at runtime.
 // This method only removes references from the registry.
-func (l *Loader) Close() error {
+func (l *DynamicLoader) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -257,7 +257,7 @@ func (l *Loader) Close() error {
 }
 
 // GetLoadedPlugin returns the name of the plugin loaded from the given path.
-func (l *Loader) GetLoadedPlugin(path string) (string, bool) {
+func (l *DynamicLoader) GetLoadedPlugin(path string) (string, bool) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -271,7 +271,7 @@ func (l *Loader) GetLoadedPlugin(path string) (string, bool) {
 }
 
 // Count returns the number of loaded plugins.
-func (l *Loader) Count() int {
+func (l *DynamicLoader) Count() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return len(l.loaded)

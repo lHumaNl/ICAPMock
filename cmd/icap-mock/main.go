@@ -53,40 +53,44 @@ func main() {
 		}
 	}
 
+	cmd, cmdArgs := resolveCommand(registry, args)
+
+	// Parse command arguments
+	if err := cmd.Parse(cmdArgs); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing arguments: %v\n", err)
+		cmd.Usage()
+		os.Exit(1)
+	}
+
+	// Setup signal handling and run
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		cancel()
+	}()
+
+	if err := cmd.Run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1) //nolint:gocritic // exitAfterDefer: cancel is best-effort cleanup
+	}
+}
+
+// resolveCommand determines which command to run and returns it along with its arguments.
+func resolveCommand(registry *CommandRegistry, args []string) (cmd Command, remaining []string) {
 	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
-		// No subcommand or starts with flag, use default
-		cmd, ok := registry.GetDefault()
+		defaultCmd, ok := registry.GetDefault()
 		if !ok {
 			fmt.Fprintf(os.Stderr, "Error: no default command\n")
 			os.Exit(1)
 		}
-
-		// Setup signal handling
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-		go func() {
-			<-sigChan
-			cancel()
-		}()
-
-		// Parse arguments and run default command
-		if err := cmd.Parse(args); err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing arguments: %v\n", err)
-			cmd.Usage()
-			os.Exit(1) //nolint:gocritic // exitAfterDefer: cancel is best-effort cleanup
-		}
-		if err := cmd.Run(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1) //nolint:gocritic // exitAfterDefer: cancel is best-effort cleanup
-		}
-		return
+		return defaultCmd, args
 	}
 
-	// Look up command
 	cmdName := args[0]
 	cmd, ok := registry.Get(cmdName)
 	if !ok {
@@ -104,30 +108,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Parse command arguments
-	if err := cmd.Parse(args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing arguments: %v\n", err)
-		cmd.Usage()
-		os.Exit(1)
-	}
-
-	// Setup signal handling
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		cancel()
-	}()
-
-	// Run command
-	if err := cmd.Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	return cmd, args[1:]
 }
 
 // RunWithContext starts the ICAP server with the given context.

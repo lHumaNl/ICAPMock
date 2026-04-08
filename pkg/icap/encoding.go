@@ -71,9 +71,9 @@ func (cr *ChunkedReader) Read(p []byte) (n int, err error) {
 		}
 		if cr.n == 0 {
 			cr.finished = true
-			if err := cr.readTrailer(); err != nil {
-				cr.err = err
-				return 0, err
+			if trailerErr := cr.readTrailer(); trailerErr != nil {
+				cr.err = trailerErr
+				return 0, trailerErr
 			}
 			return 0, io.EOF
 		}

@@ -25,26 +25,29 @@ import (
 //	calls := mock.GetCalls()
 //	require.Len(t, calls, 2)
 type MockMetricsCollector struct {
-	requests         []mockRequestCall
-	requestDurations []mockRequestDurationCall
-	errors           []mockErrorCall
+	requests         []MockRequestCall
+	requestDurations []MockRequestDurationCall
+	errors           []MockErrorCall
 	requestCount     atomic.Int64
 	errorCount       atomic.Int64
 	mu               sync.Mutex
 }
 
-type mockRequestCall struct {
+// MockRequestCall records a single RecordRequest invocation.
+type MockRequestCall struct {
 	time   time.Time
 	method string
 }
 
-type mockRequestDurationCall struct {
+// MockRequestDurationCall records a single RecordRequestDuration invocation.
+type MockRequestDurationCall struct {
 	time     time.Time
 	method   string
 	duration time.Duration
 }
 
-type mockErrorCall struct {
+// MockErrorCall records a single RecordError invocation.
+type MockErrorCall struct {
 	time   time.Time
 	method string
 	err    string
@@ -56,9 +59,9 @@ type mockErrorCall struct {
 //   - A new MockMetricsCollector instance
 func NewMockMetricsCollector() *MockMetricsCollector {
 	return &MockMetricsCollector{
-		requests:         make([]mockRequestCall, 0),
-		requestDurations: make([]mockRequestDurationCall, 0),
-		errors:           make([]mockErrorCall, 0),
+		requests:         make([]MockRequestCall, 0),
+		requestDurations: make([]MockRequestDurationCall, 0),
+		errors:           make([]MockErrorCall, 0),
 	}
 }
 
@@ -70,7 +73,7 @@ func (m *MockMetricsCollector) RecordRequest(method string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.requests = append(m.requests, mockRequestCall{
+	m.requests = append(m.requests, MockRequestCall{
 		method: method,
 		time:   time.Now(),
 	})
@@ -86,7 +89,7 @@ func (m *MockMetricsCollector) RecordRequestDuration(method string, duration tim
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.requestDurations = append(m.requestDurations, mockRequestDurationCall{
+	m.requestDurations = append(m.requestDurations, MockRequestDurationCall{
 		method:   method,
 		duration: duration,
 		time:     time.Now(),
@@ -102,7 +105,7 @@ func (m *MockMetricsCollector) RecordError(method string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.errors = append(m.errors, mockErrorCall{
+	m.errors = append(m.errors, MockErrorCall{
 		method: method,
 		err:    err.Error(),
 		time:   time.Now(),
@@ -114,11 +117,11 @@ func (m *MockMetricsCollector) RecordError(method string, err error) {
 //
 // Returns:
 //   - Slice of request calls
-func (m *MockMetricsCollector) GetRequestCalls() []mockRequestCall {
+func (m *MockMetricsCollector) GetRequestCalls() []MockRequestCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := make([]mockRequestCall, len(m.requests))
+	result := make([]MockRequestCall, len(m.requests))
 	copy(result, m.requests)
 	return result
 }
@@ -127,11 +130,11 @@ func (m *MockMetricsCollector) GetRequestCalls() []mockRequestCall {
 //
 // Returns:
 //   - Slice of request duration calls
-func (m *MockMetricsCollector) GetRequestDurationCalls() []mockRequestDurationCall {
+func (m *MockMetricsCollector) GetRequestDurationCalls() []MockRequestDurationCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := make([]mockRequestDurationCall, len(m.requestDurations))
+	result := make([]MockRequestDurationCall, len(m.requestDurations))
 	copy(result, m.requestDurations)
 	return result
 }
@@ -140,11 +143,11 @@ func (m *MockMetricsCollector) GetRequestDurationCalls() []mockRequestDurationCa
 //
 // Returns:
 //   - Slice of error calls
-func (m *MockMetricsCollector) GetErrorCalls() []mockErrorCall {
+func (m *MockMetricsCollector) GetErrorCalls() []MockErrorCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := make([]mockErrorCall, len(m.errors))
+	result := make([]MockErrorCall, len(m.errors))
 	copy(result, m.errors)
 	return result
 }
@@ -170,9 +173,9 @@ func (m *MockMetricsCollector) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.requests = make([]mockRequestCall, 0)
-	m.requestDurations = make([]mockRequestDurationCall, 0)
-	m.errors = make([]mockErrorCall, 0)
+	m.requests = make([]MockRequestCall, 0)
+	m.requestDurations = make([]MockRequestDurationCall, 0)
+	m.errors = make([]MockErrorCall, 0)
 	m.requestCount.Store(0)
 	m.errorCount.Store(0)
 }

@@ -25,8 +25,8 @@ type Logger interface {
 	Error(msg string, args ...any)
 }
 
-// ReplayOptions configures the replay behavior.
-type ReplayOptions struct {
+// Options configures the replay behavior.
+type Options struct {
 	Callback   func(req *icap.Request, resp *icap.Response, err error)
 	OnProgress func(current, total int)
 	TargetURL  string
@@ -108,7 +108,7 @@ func NewReplayer(cfg *config.ReplayConfig, store storage.Storage, log Logger, m 
 //
 // Returns an error if the replay fails to start or encounters a fatal error.
 // Individual request failures are recorded in stats but don't cause Start to return an error.
-func (r *Replayer) Start(ctx context.Context, opts ReplayOptions) error {
+func (r *Replayer) Start(ctx context.Context, opts Options) error {
 	r.mu.Lock()
 	if r.running {
 		r.mu.Unlock()
@@ -160,184 +160,20 @@ func (r *Replayer) Start(ctx context.Context, opts ReplayOptions) error {
 		parallel = 1
 	}
 
-	// Track the original timeline for timing
-	var lastTimestamp time.Time
-	var simulatedTime time.Time
-
 	for {
-		// Reset stats for each iteration (except TotalRequests for looping)
-		replayedCount := 0
+		var replayedCount int
+		var err error
 
 		if parallel > 1 {
-			// Parallel replay using worker pool
-			type workItem struct {
-				storedReq *storage.StoredRequest
-				index     int
-			}
-
-			workCh := make(chan workItem, parallel)
-			var wg sync.WaitGroup
-			var progressMu sync.Mutex
-			progressCount := 0
-
-			// Start workers
-			for w := 0; w < parallel; w++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for item := range workCh {
-						req := r.convertStoredRequest(item.storedReq)
-						targetURL := opts.TargetURL
-						if targetURL == "" {
-							targetURL = req.URI
-						}
-
-						start := time.Now()
-						resp, reqErr := r.client.Do(ctx, targetURL, req)
-
-						r.mu.Lock()
-						r.stats.TotalRequests++
-						if reqErr != nil {
-							r.stats.FailedRequests++
-						} else {
-							r.stats.SuccessfulRequests++
-						}
-						r.stats.TotalDuration += time.Since(start)
-						r.mu.Unlock()
-
-						if r.metrics != nil {
-							r.metrics.RecordReplayRequest()
-							if reqErr != nil {
-								r.metrics.RecordReplayFailure()
-							}
-							r.metrics.RecordReplayDuration(time.Since(start))
-						}
-
-						if opts.Callback != nil {
-							opts.Callback(req, resp, reqErr)
-						}
-
-						if opts.OnProgress != nil {
-							progressMu.Lock()
-							progressCount++
-							current := progressCount
-							progressMu.Unlock()
-							opts.OnProgress(current, len(requests))
-						}
-					}
-				}()
-			}
-
-			// Dispatch work
-			for i, storedReq := range requests {
-				select {
-				case <-ctx.Done():
-					close(workCh)
-					wg.Wait()
-					r.logger.Info("replay canceled")
-					return ctx.Err()
-				case <-r.stopChan:
-					close(workCh)
-					wg.Wait()
-					r.logger.Info("replay stopped")
-					return nil
-				case workCh <- workItem{index: i, storedReq: storedReq}:
-				}
-			}
-			close(workCh)
-			wg.Wait()
-			replayedCount = len(requests)
+			replayedCount, err = r.replayParallel(ctx, requests, opts, parallel)
 		} else {
-			// Sequential replay (original behavior)
-			for i, storedReq := range requests {
-				select {
-				case <-ctx.Done():
-					r.logger.Info("replay canceled")
-					return ctx.Err()
-				case <-r.stopChan:
-					r.logger.Info("replay stopped")
-					return nil
-				default:
-				}
-
-				// Convert stored request to ICAP request
-				req := r.convertStoredRequest(storedReq)
-
-				// Override target URL if specified
-				targetURL := opts.TargetURL
-				if targetURL == "" {
-					targetURL = req.URI
-				}
-
-				// Calculate and apply timing delay to maintain original timeline
-				if opts.Speed > 0 && i > 0 {
-					timeSinceLast := storedReq.Timestamp.Sub(lastTimestamp)
-					delay := time.Duration(float64(timeSinceLast) / opts.Speed)
-
-					// Wait for the delay or until context/stops
-					select {
-					case <-time.After(delay):
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-r.stopChan:
-						return nil
-					}
-
-					// Update simulated time
-					simulatedTime = simulatedTime.Add(timeSinceLast)
-				}
-
-				lastTimestamp = storedReq.Timestamp
-
-				// Send the request
-				start := time.Now()
-				resp, err := r.client.Do(ctx, targetURL, req)
-
-				// Update statistics
-				r.mu.Lock()
-				r.stats.TotalRequests++
-				if err != nil {
-					r.stats.FailedRequests++
-				} else {
-					r.stats.SuccessfulRequests++
-				}
-				r.stats.TotalDuration += time.Since(start)
-				r.mu.Unlock()
-
-				// Record metrics
-				if r.metrics != nil {
-					r.metrics.RecordReplayRequest()
-					if err != nil {
-						r.metrics.RecordReplayFailure()
-					}
-					r.metrics.RecordReplayDuration(time.Since(start))
-
-					// Track how far behind we are from original timeline
-					if opts.Speed > 0 {
-						realElapsed := time.Since(r.stats.StartTime)
-						if i > 0 {
-							originalElapsed := lastTimestamp.Sub(requests[0].Timestamp)
-							behind := realElapsed.Seconds() - (originalElapsed.Seconds() / opts.Speed)
-							r.metrics.SetReplayBehindOriginal(behind)
-						}
-					}
-				}
-
-				// Call callback if provided
-				if opts.Callback != nil {
-					opts.Callback(req, resp, err)
-				}
-
-				// Call progress callback if provided
-				if opts.OnProgress != nil {
-					opts.OnProgress(i+1, len(requests))
-				}
-
-				replayedCount++
-			}
+			replayedCount, err = r.replaySequential(ctx, requests, opts)
 		}
 
-		// If not looping, we're done
+		if err != nil {
+			return err
+		}
+
 		if !opts.Loop {
 			break
 		}
@@ -355,6 +191,146 @@ func (r *Replayer) Start(ctx context.Context, opts ReplayOptions) error {
 	)
 
 	return nil
+}
+
+// recordReplayResult updates stats and metrics for a single replayed request.
+func (r *Replayer) recordReplayResult(start time.Time, req *icap.Request, resp *icap.Response, err error, opts Options) {
+	r.mu.Lock()
+	r.stats.TotalRequests++
+	if err != nil {
+		r.stats.FailedRequests++
+	} else {
+		r.stats.SuccessfulRequests++
+	}
+	r.stats.TotalDuration += time.Since(start)
+	r.mu.Unlock()
+
+	if r.metrics != nil {
+		r.metrics.RecordReplayRequest()
+		if err != nil {
+			r.metrics.RecordReplayFailure()
+		}
+		r.metrics.RecordReplayDuration(time.Since(start))
+	}
+
+	if opts.Callback != nil {
+		opts.Callback(req, resp, err)
+	}
+}
+
+// replayParallel replays requests using a worker pool.
+func (r *Replayer) replayParallel(ctx context.Context, requests []*storage.StoredRequest, opts Options, parallel int) (int, error) {
+	type workItem struct {
+		storedReq *storage.StoredRequest
+		index     int
+	}
+
+	workCh := make(chan workItem, parallel)
+	var wg sync.WaitGroup
+	var progressMu sync.Mutex
+	progressCount := 0
+
+	for w := 0; w < parallel; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range workCh {
+				req := r.convertStoredRequest(item.storedReq)
+				targetURL := opts.TargetURL
+				if targetURL == "" {
+					targetURL = req.URI
+				}
+
+				start := time.Now()
+				resp, reqErr := r.client.Do(ctx, targetURL, req)
+				r.recordReplayResult(start, req, resp, reqErr, opts)
+
+				if opts.OnProgress != nil {
+					progressMu.Lock()
+					progressCount++
+					current := progressCount
+					progressMu.Unlock()
+					opts.OnProgress(current, len(requests))
+				}
+			}
+		}()
+	}
+
+	for i, storedReq := range requests {
+		select {
+		case <-ctx.Done():
+			close(workCh)
+			wg.Wait()
+			r.logger.Info("replay canceled")
+			return 0, ctx.Err()
+		case <-r.stopChan:
+			close(workCh)
+			wg.Wait()
+			r.logger.Info("replay stopped")
+			return 0, nil
+		case workCh <- workItem{index: i, storedReq: storedReq}:
+		}
+	}
+	close(workCh)
+	wg.Wait()
+	return len(requests), nil
+}
+
+// replaySequential replays requests one by one with timing.
+func (r *Replayer) replaySequential(ctx context.Context, requests []*storage.StoredRequest, opts Options) (int, error) {
+	var lastTimestamp time.Time
+	replayedCount := 0
+
+	for i, storedReq := range requests {
+		select {
+		case <-ctx.Done():
+			r.logger.Info("replay canceled")
+			return replayedCount, ctx.Err()
+		case <-r.stopChan:
+			r.logger.Info("replay stopped")
+			return replayedCount, nil
+		default:
+		}
+
+		req := r.convertStoredRequest(storedReq)
+		targetURL := opts.TargetURL
+		if targetURL == "" {
+			targetURL = req.URI
+		}
+
+		// Apply timing delay
+		if opts.Speed > 0 && i > 0 {
+			delay := time.Duration(float64(storedReq.Timestamp.Sub(lastTimestamp)) / opts.Speed)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return replayedCount, ctx.Err()
+			case <-r.stopChan:
+				return replayedCount, nil
+			}
+		}
+
+		lastTimestamp = storedReq.Timestamp
+
+		start := time.Now()
+		resp, err := r.client.Do(ctx, targetURL, req)
+		r.recordReplayResult(start, req, resp, err, opts)
+
+		// Track how far behind we are from original timeline
+		if r.metrics != nil && opts.Speed > 0 && i > 0 {
+			realElapsed := time.Since(r.stats.StartTime)
+			originalElapsed := lastTimestamp.Sub(requests[0].Timestamp)
+			behind := realElapsed.Seconds() - (originalElapsed.Seconds() / opts.Speed)
+			r.metrics.SetReplayBehindOriginal(behind)
+		}
+
+		if opts.OnProgress != nil {
+			opts.OnProgress(i+1, len(requests))
+		}
+
+		replayedCount++
+	}
+	return replayedCount, nil
 }
 
 // Stop stops an in-progress replay.

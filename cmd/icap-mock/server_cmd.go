@@ -239,7 +239,7 @@ func (c *ServerCommand) Run(ctx context.Context) error {
 		if c.TUIRunner != nil {
 			return c.TUIRunner(nil)
 		}
-		return fmt.Errorf("TUI is not available. Please rebuild with TUI support or run without --tui flag.")
+		return fmt.Errorf("TUI is not available: rebuild with TUI support or run without --tui flag")
 	}
 
 	// Load configuration
@@ -385,6 +385,22 @@ func (c *ServerCommand) flagWasSet(names ...string) bool {
 
 // applyOverrides applies CLI flag values to the configuration.
 func (c *ServerCommand) applyOverrides(cfg *config.Config) {
+	c.applyServerOverrides(cfg)
+	c.applyLoggingOverrides(cfg)
+	c.applyFeatureOverrides(cfg)
+}
+
+// parseDurationFlag parses a duration string and warns on error.
+func parseDurationFlag(name, value string) (time.Duration, bool) {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: invalid --%s value %q: %v\n", name, value, err)
+		return 0, false
+	}
+	return d, true
+}
+
+func (c *ServerCommand) applyServerOverrides(cfg *config.Config) {
 	if c.flagWasSet("server.host", "server-host") {
 		cfg.Server.Host = c.host
 	}
@@ -401,27 +417,20 @@ func (c *ServerCommand) applyOverrides(cfg *config.Config) {
 		cfg.Server.Streaming = c.streaming
 	}
 	if c.readTimeout != "" {
-		if duration, err := time.ParseDuration(c.readTimeout); err == nil {
-			cfg.Server.ReadTimeout = duration
-		} else {
-			fmt.Fprintf(os.Stderr, "WARNING: invalid --server.read-timeout value %q: %v\n", c.readTimeout, err)
+		if d, ok := parseDurationFlag("server.read-timeout", c.readTimeout); ok {
+			cfg.Server.ReadTimeout = d
 		}
 	}
 	if c.writeTimeout != "" {
-		if duration, err := time.ParseDuration(c.writeTimeout); err == nil {
-			cfg.Server.WriteTimeout = duration
-		} else {
-			fmt.Fprintf(os.Stderr, "WARNING: invalid --server.write-timeout value %q: %v\n", c.writeTimeout, err)
+		if d, ok := parseDurationFlag("server.write-timeout", c.writeTimeout); ok {
+			cfg.Server.WriteTimeout = d
 		}
 	}
 	if c.shutdownTimeout != "" {
-		if duration, err := time.ParseDuration(c.shutdownTimeout); err == nil {
-			cfg.Server.ShutdownTimeout = duration
-		} else {
-			fmt.Fprintf(os.Stderr, "WARNING: invalid --server.shutdown-timeout value %q: %v\n", c.shutdownTimeout, err)
+		if d, ok := parseDurationFlag("server.shutdown-timeout", c.shutdownTimeout); ok {
+			cfg.Server.ShutdownTimeout = d
 		}
 	}
-
 	if c.flagWasSet("server.tls.enabled", "server-tls-enabled") {
 		cfg.Server.TLS.Enabled = c.tlsEnable
 	}
@@ -431,7 +440,9 @@ func (c *ServerCommand) applyOverrides(cfg *config.Config) {
 	if c.tlsKey != "" {
 		cfg.Server.TLS.KeyFile = c.tlsKey
 	}
+}
 
+func (c *ServerCommand) applyLoggingOverrides(cfg *config.Config) {
 	if c.debugFlag {
 		cfg.Logging.Level = "debug" //nolint:goconst
 	} else if c.logLevel != "" {
@@ -443,7 +454,14 @@ func (c *ServerCommand) applyOverrides(cfg *config.Config) {
 	if c.logOutput != "" {
 		cfg.Logging.Output = c.logOutput
 	}
+}
 
+func (c *ServerCommand) applyFeatureOverrides(cfg *config.Config) {
+	c.applyMetricsAndMockOverrides(cfg)
+	c.applyInfraOverrides(cfg)
+}
+
+func (c *ServerCommand) applyMetricsAndMockOverrides(cfg *config.Config) {
 	if c.flagWasSet("metrics.enabled", "metrics-enabled") {
 		cfg.Metrics.Enabled = c.metricsEnabled
 	}
@@ -456,49 +474,45 @@ func (c *ServerCommand) applyOverrides(cfg *config.Config) {
 	if c.metricsPath != "" {
 		cfg.Metrics.Path = c.metricsPath
 	}
-
 	if c.mockMode != "" {
 		cfg.Mock.DefaultMode = c.mockMode
 	}
 	if c.scenariosDir != "" {
 		cfg.Mock.ScenariosDir = c.scenariosDir
 	}
-
 	if c.flagWasSet("chaos.enabled", "chaos-enabled") {
 		cfg.Chaos.Enabled = c.chaosEnabled
 	}
 	if c.chaosErrorRate != 0 {
 		cfg.Chaos.ErrorRate = c.chaosErrorRate
 	}
+}
 
+func (c *ServerCommand) applyInfraOverrides(cfg *config.Config) {
 	if c.flagWasSet("storage.enabled", "storage-enabled") {
 		cfg.Storage.Enabled = c.storageEnabled
 	}
 	if c.storageDir != "" {
 		cfg.Storage.RequestsDir = c.storageDir
 	}
-
 	if c.flagWasSet("rate-limit.enabled", "rate-limit-enabled") {
 		cfg.RateLimit.Enabled = c.rateLimitEnabled
 	}
 	if c.rateLimitRPS != 0 {
 		cfg.RateLimit.RequestsPerSecond = c.rateLimitRPS
 	}
-
 	if c.flagWasSet("health.enabled", "health-enabled") {
 		cfg.Health.Enabled = c.healthEnabled
 	}
 	if c.healthPort != 0 {
 		cfg.Health.Port = c.healthPort
 	}
-
 	if c.flagWasSet("plugin.enabled", "plugin-enabled") {
 		cfg.Plugin.Enabled = c.pluginEnabled
 	}
 	if c.pluginDir != "" {
 		cfg.Plugin.Dir = c.pluginDir
 	}
-
 	if c.flagWasSet("pprof.enabled", "pprof-enabled") {
 		cfg.Pprof.Enabled = c.pprofEnabled
 	}

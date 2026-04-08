@@ -182,7 +182,7 @@ func TestKeyBasedShardedTokenBucketLimiter_Wait(t *testing.T) {
 
 	// Next Wait should block briefly
 	start := time.Now()
-	err := limiter.Wait(GlobalKey, context.Background())
+	err := limiter.Wait(context.Background(), GlobalKey)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -207,7 +207,7 @@ func TestKeyBasedShardedTokenBucketLimiter_WaitWithCancel(t *testing.T) {
 	defer cancel()
 
 	// Wait should be canceled by context timeout
-	err := limiter.Wait(GlobalKey, ctx)
+	err := limiter.Wait(ctx, GlobalKey)
 	if err == nil {
 		t.Fatal("Wait should return error due to context timeout")
 	}

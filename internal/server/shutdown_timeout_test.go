@@ -396,7 +396,7 @@ func TestShutdownTimeout_ConcurrentShutdown(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			stopCtx := context.WithValue(context.Background(), "test", "value")
+			stopCtx := context.WithValue(context.Background(), wrongContextKey("test"), "value")
 			if err := srv.Stop(stopCtx); err != nil {
 				errors <- err
 			}

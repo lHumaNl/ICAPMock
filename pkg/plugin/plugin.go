@@ -73,8 +73,8 @@ func (f ProcessorPluginFunc) Close() error {
 	return nil
 }
 
-// PluginInfo contains metadata about a plugin.
-type PluginInfo struct {
+// Info contains metadata about a plugin.
+type Info struct {
 	// Name is the unique identifier for the plugin.
 	Name string
 	// Description is a human-readable description.
@@ -87,8 +87,8 @@ type PluginInfo struct {
 	Path string
 }
 
-// PluginWithError wraps a plugin with its associated error (if any).
-type PluginWithError struct {
+// WithError wraps a plugin with its associated error (if any).
+type WithError struct {
 	Plugin ProcessorPlugin
 	Error  error
 }
@@ -133,7 +133,7 @@ func Get(name string) (ProcessorPlugin, bool) {
 // List returns all registered plugins from the global registry.
 //
 // This function is safe for concurrent use.
-func List() []PluginInfo {
+func List() []Info {
 	return globalRegistry.List()
 }
 
@@ -197,8 +197,8 @@ func (p *pluginProcessor) Process(ctx context.Context, req *icap.Request) (*icap
 		}
 	}
 
-	// No plugin handled the request
-	return nil, nil
+	// No plugin handled the request — nil response signals the chain to try the next processor.
+	return nil, nil //nolint:nilnil // nil,nil is the documented contract for "not handled, pass to next processor"
 }
 
 // Name implements the Processor interface.
@@ -237,7 +237,7 @@ func (p *chainedPluginProcessor) Process(ctx context.Context, req *icap.Request)
 			return resp, nil
 		}
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil,nil is the documented contract for "not handled, pass to next processor"
 }
 
 // Name implements the Processor interface.
@@ -245,17 +245,17 @@ func (p *chainedPluginProcessor) Name() string {
 	return "ChainedPluginProcessor"
 }
 
-// Ensure Registry implements PluginRegistry interface.
-var _ PluginRegistry = (*Registry)(nil)
+// Ensure Registry implements Registrar interface.
+var _ Registrar = (*Registry)(nil)
 
-// PluginRegistry defines the interface for plugin registries.
-type PluginRegistry interface {
+// Registrar defines the interface for plugin registries.
+type Registrar interface {
 	// Register adds a plugin to the registry.
 	Register(name string, p ProcessorPlugin) error
 	// Get retrieves a plugin by name.
 	Get(name string) (ProcessorPlugin, bool)
 	// List returns information about all registered plugins.
-	List() []PluginInfo
+	List() []Info
 	// Unregister removes a plugin from the registry.
 	Unregister(name string) (ProcessorPlugin, bool)
 	// Clear removes all plugins from the registry.
@@ -269,7 +269,7 @@ type PluginRegistry interface {
 // Registry provides a thread-safe plugin registry implementation.
 type Registry struct {
 	plugins map[string]ProcessorPlugin
-	info    map[string]PluginInfo
+	info    map[string]Info
 	order   []string
 	mu      sync.RWMutex
 }
@@ -278,7 +278,7 @@ type Registry struct {
 func NewRegistry() *Registry {
 	return &Registry{
 		plugins: make(map[string]ProcessorPlugin),
-		info:    make(map[string]PluginInfo),
+		info:    make(map[string]Info),
 		order:   make([]string, 0),
 	}
 }
@@ -301,7 +301,7 @@ func (r *Registry) Register(name string, p ProcessorPlugin) error {
 	}
 
 	r.plugins[name] = p
-	r.info[name] = PluginInfo{
+	r.info[name] = Info{
 		Name:        name,
 		Description: fmt.Sprintf("Plugin: %s", name),
 		Version:     "1.0.0",
@@ -321,11 +321,11 @@ func (r *Registry) Get(name string) (ProcessorPlugin, bool) {
 }
 
 // List returns information about all registered plugins.
-func (r *Registry) List() []PluginInfo {
+func (r *Registry) List() []Info {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]PluginInfo, 0, len(r.order))
+	result := make([]Info, 0, len(r.order))
 	for _, name := range r.order {
 		if info, exists := r.info[name]; exists {
 			result = append(result, info)
@@ -364,7 +364,7 @@ func (r *Registry) Clear() {
 	defer r.mu.Unlock()
 
 	r.plugins = make(map[string]ProcessorPlugin)
-	r.info = make(map[string]PluginInfo)
+	r.info = make(map[string]Info)
 	r.order = make([]string, 0)
 }
 
@@ -404,8 +404,8 @@ func (r *Registry) CloseAll() error {
 	return nil
 }
 
-// SetPluginInfo sets custom metadata for a registered plugin.
-func (r *Registry) SetPluginInfo(name string, info PluginInfo) error {
+// SetInfo sets custom metadata for a registered plugin.
+func (r *Registry) SetInfo(name string, info Info) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

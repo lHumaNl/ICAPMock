@@ -41,10 +41,8 @@ func BuildICAPRequest(method, uri string, headers map[string]string, body []byte
 		Header: make(icap.Header),
 	}
 
-	if headers != nil {
-		for k, v := range headers {
-			req.SetHeader(k, v)
-		}
+	for k, v := range headers {
+		req.SetHeader(k, v)
 	}
 
 	if body != nil {
@@ -82,10 +80,8 @@ func BuildICAPRequestWithHTTP(method, uri, httpMethod, httpURL string, httpHeade
 		Header: make(icap.Header),
 	}
 
-	if httpHeaders != nil {
-		for k, v := range httpHeaders {
-			httpReq.Header.Set(k, v)
-		}
+	for k, v := range httpHeaders {
+		httpReq.Header.Set(k, v)
 	}
 
 	if httpBody != nil {
@@ -121,10 +117,8 @@ func BuildICAPRequestWithHTTP(method, uri, httpMethod, httpURL string, httpHeade
 func BuildICAPResponse(statusCode int, headers map[string]string, body []byte) *icap.Response {
 	resp := icap.NewResponse(statusCode)
 
-	if headers != nil {
-		for k, v := range headers {
-			resp.SetHeader(k, v)
-		}
+	for k, v := range headers {
+		resp.SetHeader(k, v)
 	}
 
 	if body != nil {
@@ -156,10 +150,8 @@ func BuildICAPResponseWithHTTP(statusCode, httpStatusCode int, httpHeaders map[s
 		Header: make(icap.Header),
 	}
 
-	if httpHeaders != nil {
-		for k, v := range httpHeaders {
-			httpResp.Header.Set(k, v)
-		}
+	for k, v := range httpHeaders {
+		httpResp.Header.Set(k, v)
 	}
 
 	if httpBody != nil {
@@ -293,7 +285,7 @@ func assertHTTPMessage(t *testing.T, got, want *icap.HTTPMessage, prefix string)
 //   - Headers
 //   - Body
 //   - Encapsulated HTTP message (if present)
-func AssertICAPRequest(t *testing.T, got, want *icap.Request) {
+func AssertICAPRequest(t *testing.T, got, want *icap.Request) { //nolint:gocyclo // test assertion checks each request field
 	t.Helper()
 
 	if got.Method != want.Method {
@@ -363,9 +355,9 @@ func AssertICAPRequest(t *testing.T, got, want *icap.Request) {
 //
 // Example:
 //
-//	ctx := WithTimeout(t, context.Background(), 5*time.Second)
+//	ctx := WithTimeout(context.Background(), t, 5*time.Second)
 //	defer ctx.Cancel()
-func WithTimeout(t *testing.T, ctx context.Context, timeout time.Duration) context.Context {
+func WithTimeout(ctx context.Context, t *testing.T, timeout time.Duration) context.Context {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -507,7 +499,8 @@ func ParseRawICAPResponse(t *testing.T, raw string) *icap.Response {
 func GetFreePort(t *testing.T) int {
 	t.Helper()
 
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Failed to get free port: %v", err)
 	}
@@ -527,7 +520,8 @@ func GetFreePort(t *testing.T) int {
 func GetLocalIP(t *testing.T) string {
 	t.Helper()
 
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+	dialer := net.Dialer{}
+	conn, err := dialer.DialContext(context.Background(), "udp", "8.8.8.8:80")
 	if err != nil {
 		t.Fatalf("Failed to get local IP: %v", err)
 	}

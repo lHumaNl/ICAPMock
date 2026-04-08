@@ -359,7 +359,7 @@ func (r *Response) String() string {
 const MaxResponseBodySize = 100 * 1024 * 1024
 
 // ReadResponse reads and parses an ICAP response from an io.Reader.
-func ReadResponse(r io.Reader) (*Response, error) {
+func ReadResponse(r io.Reader) (*Response, error) { //nolint:gocyclo // ICAP response parsing is inherently sequential
 	data, err := io.ReadAll(io.LimitReader(r, MaxResponseBodySize))
 	if err != nil {
 		return nil, err

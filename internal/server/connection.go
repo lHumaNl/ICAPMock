@@ -505,8 +505,8 @@ func (c *Connection) IsIdle() bool {
 // It implements the io.Reader interface.
 func (c *Connection) Read(b []byte) (n int, err error) {
 	if c.config.ReadTimeout > 0 {
-		if err := c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout)); err != nil {
-			return 0, err
+		if dlErr := c.conn.SetReadDeadline(time.Now().Add(c.config.ReadTimeout)); dlErr != nil {
+			return 0, dlErr
 		}
 	}
 	n, err = c.reader.Read(b)
@@ -520,8 +520,8 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 // It implements the io.Writer interface.
 func (c *Connection) Write(b []byte) (n int, err error) {
 	if c.config.WriteTimeout > 0 {
-		if err := c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout)); err != nil {
-			return 0, err
+		if dlErr := c.conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout)); dlErr != nil {
+			return 0, dlErr
 		}
 	}
 	n, err = c.writer.Write(b)
@@ -601,13 +601,13 @@ func (c *Connection) SetState(state ConnectionState) {
 
 // Reader returns the pooled buffered reader for the connection.
 // Use this for reading ICAP requests.
-func (c *Connection) Reader() *pooledBuffer {
+func (c *Connection) Reader() BufferedReader {
 	return c.reader
 }
 
 // Writer returns the pooled buffered writer for the connection.
 // Use this for writing ICAP responses.
-func (c *Connection) Writer() *bufferedWriter {
+func (c *Connection) Writer() BufferedWriter {
 	return c.writer
 }
 

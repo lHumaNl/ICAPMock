@@ -208,8 +208,8 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("expected 2 plugins, got %d", len(all))
 	}
 
-	// Test SetPluginInfo
-	err := reg.SetPluginInfo("reg-1", plugin.PluginInfo{
+	// Test SetInfo
+	err := reg.SetInfo("reg-1", plugin.Info{
 		Name:        "reg-1",
 		Description: "Test plugin 1",
 		Version:     "1.2.3",
@@ -219,8 +219,8 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Test SetPluginInfo for non-existing plugin
-	err = reg.SetPluginInfo("non-existing", plugin.PluginInfo{})
+	// Test SetInfo for non-existing plugin
+	err = reg.SetInfo("non-existing", plugin.Info{})
 	if err == nil {
 		t.Fatal("expected error for non-existing plugin")
 	}

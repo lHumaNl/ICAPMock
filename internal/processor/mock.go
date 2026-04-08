@@ -56,7 +56,7 @@ func NewMockProcessor(registry storage.ScenarioRegistry, log *logger.Logger) *Mo
 //
 // If no scenario matches, it returns an ErrNoMatch error.
 // If the scenario specifies an error, it returns that error.
-func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) { //nolint:gocyclo // request processing: match, select response, apply delay, build response
 	// Check context before processing
 	if err := ctx.Err(); err != nil {
 		return nil, err

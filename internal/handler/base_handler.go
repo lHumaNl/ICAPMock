@@ -84,18 +84,15 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 
 	start := time.Now()
 
-	// Check for context cancellation first
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	// Record request start
 	if h.getMetrics() != nil {
 		h.getMetrics().IncRequestsInFlight(h.method)
 		defer h.getMetrics().DecRequestsInFlight(h.method)
 	}
 
-	// Check for nil processor
 	if h.getProcessor() == nil {
 		if h.getMetrics() != nil {
 			h.getMetrics().RecordError("nil_processor")
@@ -103,155 +100,148 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 		return nil, ErrNilProcessor
 	}
 
-	// Handle preview mode (RFC 3507 Section 4.6)
 	if req.IsPreviewMode() {
-		if h.logger != nil {
-			h.logger.DebugContext(ctx, fmt.Sprintf("processing %s request in preview mode", h.method),
-				"request_id", util.RequestIDFromContext(ctx),
-				"preview_bytes", req.Preview,
-			)
-		}
-
-		// Check preview rate limit
-		if h.previewRateLimiter != nil {
-			exceeded, remaining, resetIn := h.previewRateLimiter.CheckLimit(req)
-			if exceeded {
-				// Return 429 Too Many Requests with appropriate headers
-				resp := icap.NewResponse(icap.StatusServiceUnavailable)
-				resp.SetHeader("Retry-After", fmt.Sprintf("%d", int(resetIn.Seconds())))
-				resp.SetHeader("X-RateLimit-Limit", fmt.Sprintf("%d", h.previewRateLimiter.config.MaxRequests))
-				resp.SetHeader("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
-				resp.SetHeader("X-RateLimit-Reset", fmt.Sprintf("%d", int(resetIn.Seconds())))
-
-				if h.logger != nil {
-					h.logger.WarnContext(ctx, "preview rate limit exceeded, returning 429",
-						"request_id", util.RequestIDFromContext(ctx),
-						"remaining", remaining,
-						"reset_in_seconds", resetIn.Seconds(),
-					)
-				}
-				return resp, nil
-			}
-		}
-
-		// Record preview metrics
-		if h.getMetrics() != nil {
-			h.getMetrics().RecordPreviewRequest(h.method, true)
-		}
-
-		// Process the preview
-		resp, err := h.getProcessor().Process(ctx, req)
-
-		// Check for context cancellation after processing
-		if err == nil && ctx.Err() != nil {
-			reason, ctxErr := util.CheckCancellation(ctx)
-			if h.logger != nil {
-				h.logger.WarnContext(ctx, "preview request context canceled after processing",
-					"request_id", util.RequestIDFromContext(ctx),
-					"reason", reason,
-					"error", ctxErr,
-				)
-			}
-			if h.getMetrics() != nil {
-				h.getMetrics().RecordRequestContextCancellation(h.method, string(reason))
-				h.getMetrics().RecordRequestCancellation(h.method)
-			}
-			return nil, ctxErr
-		}
-
-		// For preview mode: return 204 if no modification needed
-		// If processor returned no response or response indicates no modification, return 204
-		if err == nil && resp != nil {
-			if resp.StatusCode == icap.StatusNoContentNeeded {
-				// Processor already returned 204, use as-is
-				if h.logger != nil {
-					h.logger.DebugContext(ctx, "preview request returned 204 No Content Needed",
-						"request_id", util.RequestIDFromContext(ctx),
-					)
-				}
-				return resp, nil
-			}
-
-			// Check if the processor modified anything
-			// If no body was added/modified and status is 200, we should return 204
-			if !h.isModifiedResponse(resp) {
-				// Return 204 (No Content Needed) for unmodified preview
-				if h.logger != nil {
-					h.logger.DebugContext(ctx, "preview body unmodified, returning 204",
-						"request_id", util.RequestIDFromContext(ctx),
-					)
-				}
-				return icap.NewResponse(icap.StatusNoContentNeeded), nil
-			}
-
-			// Return 200 with modified preview body
-			if h.logger != nil {
-				h.logger.DebugContext(ctx, "preview body modified, returning 200",
-					"request_id", util.RequestIDFromContext(ctx),
-				)
-			}
-			return resp, nil
-		}
-
-		// Record preview metrics
-		duration := time.Since(start)
-		if h.getMetrics() != nil {
-			h.getMetrics().RecordRequest(h.method)
-			h.getMetrics().RecordRequestDuration(h.method, duration)
-
-			if err != nil {
-				h.getMetrics().RecordError("preview_processing_error")
-			}
-
-			if resp != nil && len(resp.Body) > 0 {
-				h.getMetrics().RecordResponseSize(h.method, int64(len(resp.Body)))
-			}
-		}
-
-		return resp, err
+		return h.handlePreview(ctx, req, start)
 	}
 
-	// Record non-preview metrics
+	return h.handleNonPreview(ctx, req, start)
+}
+
+// handlePreview processes preview mode requests (RFC 3507 Section 4.6).
+func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, start time.Time) (*icap.Response, error) {
+	if h.logger != nil {
+		h.logger.DebugContext(ctx, fmt.Sprintf("processing %s request in preview mode", h.method),
+			"request_id", util.RequestIDFromContext(ctx),
+			"preview_bytes", req.Preview,
+		)
+	}
+
+	// Check preview rate limit
+	if h.previewRateLimiter != nil {
+		if resp := h.checkPreviewRateLimit(ctx, req); resp != nil {
+			return resp, nil
+		}
+	}
+
+	if h.getMetrics() != nil {
+		h.getMetrics().RecordPreviewRequest(h.method, true)
+	}
+
+	resp, err := h.getProcessor().Process(ctx, req)
+
+	if cancelErr := h.checkPostProcessCancellation(ctx, err); cancelErr != nil {
+		return nil, cancelErr
+	}
+
+	if err == nil && resp != nil {
+		return h.resolvePreviewResponse(ctx, resp)
+	}
+
+	h.recordRequestMetrics(start, resp, err, "preview_processing_error")
+	return resp, err
+}
+
+// checkPreviewRateLimit checks preview rate limit and returns a 429 response if exceeded, or nil if OK.
+func (h *baseHandler) checkPreviewRateLimit(ctx context.Context, req *icap.Request) *icap.Response {
+	exceeded, remaining, resetIn := h.previewRateLimiter.CheckLimit(req)
+	if !exceeded {
+		return nil
+	}
+	resp := icap.NewResponse(icap.StatusServiceUnavailable)
+	resp.SetHeader("Retry-After", fmt.Sprintf("%d", int(resetIn.Seconds())))
+	resp.SetHeader("X-RateLimit-Limit", fmt.Sprintf("%d", h.previewRateLimiter.config.MaxRequests))
+	resp.SetHeader("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
+	resp.SetHeader("X-RateLimit-Reset", fmt.Sprintf("%d", int(resetIn.Seconds())))
+
+	if h.logger != nil {
+		h.logger.WarnContext(ctx, "preview rate limit exceeded, returning 429",
+			"request_id", util.RequestIDFromContext(ctx),
+			"remaining", remaining,
+			"reset_in_seconds", resetIn.Seconds(),
+		)
+	}
+	return resp
+}
+
+// resolvePreviewResponse determines the appropriate response for a preview request.
+func (h *baseHandler) resolvePreviewResponse(ctx context.Context, resp *icap.Response) (*icap.Response, error) {
+	if resp.StatusCode == icap.StatusNoContentNeeded {
+		if h.logger != nil {
+			h.logger.DebugContext(ctx, "preview request returned 204 No Content Needed",
+				"request_id", util.RequestIDFromContext(ctx),
+			)
+		}
+		return resp, nil
+	}
+
+	if !h.isModifiedResponse(resp) {
+		if h.logger != nil {
+			h.logger.DebugContext(ctx, "preview body unmodified, returning 204",
+				"request_id", util.RequestIDFromContext(ctx),
+			)
+		}
+		return icap.NewResponse(icap.StatusNoContentNeeded), nil
+	}
+
+	if h.logger != nil {
+		h.logger.DebugContext(ctx, "preview body modified, returning 200",
+			"request_id", util.RequestIDFromContext(ctx),
+		)
+	}
+	return resp, nil
+}
+
+// handleNonPreview processes non-preview requests.
+func (h *baseHandler) handleNonPreview(ctx context.Context, req *icap.Request, start time.Time) (*icap.Response, error) {
 	if h.getMetrics() != nil {
 		h.getMetrics().RecordPreviewRequest(h.method, false)
 	}
 
-	// Process the request
 	resp, err := h.getProcessor().Process(ctx, req)
 
-	// Check for context cancellation AFTER processor.Process
-	if err == nil && ctx.Err() != nil {
-		reason, ctxErr := util.CheckCancellation(ctx)
-		if h.logger != nil {
-			h.logger.WarnContext(ctx, "request context canceled after processing",
-				"request_id", util.RequestIDFromContext(ctx),
-				"reason", reason,
-				"error", ctxErr,
-			)
-		}
-		if h.getMetrics() != nil {
-			h.getMetrics().RecordRequestContextCancellation(h.method, string(reason))
-			h.getMetrics().RecordRequestCancellation(h.method)
-		}
-		return nil, ctxErr
+	if cancelErr := h.checkPostProcessCancellation(ctx, err); cancelErr != nil {
+		return nil, cancelErr
 	}
 
-	// Record metrics
-	duration := time.Since(start)
-	if h.getMetrics() != nil {
-		h.getMetrics().RecordRequest(h.method)
-		h.getMetrics().RecordRequestDuration(h.method, duration)
-
-		if err != nil {
-			h.getMetrics().RecordError("processing_error")
-		}
-
-		if resp != nil && len(resp.Body) > 0 {
-			h.getMetrics().RecordResponseSize(h.method, int64(len(resp.Body)))
-		}
-	}
-
+	h.recordRequestMetrics(start, resp, err, "processing_error")
 	return resp, err
+}
+
+// checkPostProcessCancellation checks if context was canceled after processing.
+// Returns a cancellation error if canceled, nil if not.
+func (h *baseHandler) checkPostProcessCancellation(ctx context.Context, procErr error) error {
+	if procErr != nil || ctx.Err() == nil {
+		return nil //nolint:nilerr // procErr is handled by caller; we only add cancellation error when procErr is nil
+	}
+	reason, ctxErr := util.CheckCancellation(ctx)
+	if h.logger != nil {
+		h.logger.WarnContext(ctx, "request context canceled after processing",
+			"request_id", util.RequestIDFromContext(ctx),
+			"reason", reason,
+			"error", ctxErr,
+		)
+	}
+	if h.getMetrics() != nil {
+		h.getMetrics().RecordRequestContextCancellation(h.method, string(reason))
+		h.getMetrics().RecordRequestCancellation(h.method)
+	}
+	return ctxErr
+}
+
+// recordRequestMetrics records request duration, error, and response size metrics.
+func (h *baseHandler) recordRequestMetrics(start time.Time, resp *icap.Response, err error, errorLabel string) {
+	if h.getMetrics() == nil {
+		return
+	}
+	duration := time.Since(start)
+	h.getMetrics().RecordRequest(h.method)
+	h.getMetrics().RecordRequestDuration(h.method, duration)
+	if err != nil {
+		h.getMetrics().RecordError(errorLabel)
+	}
+	if resp != nil && len(resp.Body) > 0 {
+		h.getMetrics().RecordResponseSize(h.method, int64(len(resp.Body)))
+	}
 }
 
 // isModifiedResponse checks if the response contains any modifications.

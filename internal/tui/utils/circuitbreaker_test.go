@@ -150,8 +150,8 @@ func TestCircuitBreaker_FailImmediatelyWhenOpen(t *testing.T) {
 		return nil
 	})
 
-	if !errors.Is(err, CircuitOpenError) {
-		t.Errorf("expected CircuitOpenError, got %v", err)
+	if !errors.Is(err, ErrCircuitOpen) {
+		t.Errorf("expected ErrCircuitOpen, got %v", err)
 	}
 
 	if executed {
@@ -222,7 +222,7 @@ func TestCircuitBreaker_ConcurrentCalls(t *testing.T) {
 	close(errChan)
 
 	for err := range errChan {
-		if err != nil && !errors.Is(err, CircuitOpenError) && err.Error() != "simulated error" {
+		if err != nil && !errors.Is(err, ErrCircuitOpen) && err.Error() != "simulated error" {
 			t.Errorf("unexpected error: %v", err)
 		}
 	}

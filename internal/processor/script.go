@@ -175,7 +175,7 @@ func (p *ScriptProcessor) Process(ctx context.Context, req *icap.Request) (*icap
 }
 
 // executeScript executes a JavaScript script and returns the ICAP response.
-func (p *ScriptProcessor) executeScript(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) {
+func (p *ScriptProcessor) executeScript(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) { //nolint:gocyclo // script execution pipeline: validate, sandbox, setup, monitor, execute, check limits
 	// Step 1: Static validation BEFORE execution (defense in depth)
 	if err := p.validateScript(script); err != nil {
 		if p.logger != nil {

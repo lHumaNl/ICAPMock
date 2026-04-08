@@ -462,11 +462,11 @@ func TestRouter_Serve_ExtractPath(t *testing.T) {
 	}
 }
 
-// TestHandlerFunc tests the handler.HandlerFunc type used via router.HandleFunc.
+// TestHandlerFunc tests the handler.Func type used via router.HandleFunc.
 func TestHandlerFunc(t *testing.T) {
 	called := false
 
-	hf := handler.HandlerFunc(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+	hf := handler.Func(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		called = true
 		return icap.NewResponse(icap.StatusOK), nil
 	})

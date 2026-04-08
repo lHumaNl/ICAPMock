@@ -482,7 +482,7 @@ func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, b
 }
 
 // matches проверяет соответствует ли сценарий запросу.
-func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
+func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	// Check ICAP method
 	if s.Match.Method != "" && s.Match.Method != req.Method {
 		return false

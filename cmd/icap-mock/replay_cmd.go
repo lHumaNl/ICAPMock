@@ -142,7 +142,7 @@ func (c *ReplayCommand) Run(ctx context.Context) error {
 	}()
 
 	// Prepare replay options
-	opts := replay.ReplayOptions{
+	opts := replay.Options{
 		Filter:    filter,
 		Speed:     c.speed,
 		Loop:      c.loop,

@@ -302,7 +302,7 @@ func detectV2Format(data []byte) (isV2 bool, names []string, err error) {
 
 // validateAndCompile validates a scenario and compiles regex patterns.
 // It returns detailed ScenarioError instances with suggestions for fixes.
-func (r *scenarioRegistry) validateAndCompile(s *Scenario) error {
+func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocyclo // validation requires checking each field independently
 	// Validate scenario name
 	if s.Name == "" {
 		return NewScenarioValidationError(
@@ -318,9 +318,7 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error {
 	// Compile path pattern
 	if s.Match.Path != "" {
 		pattern := s.Match.Path
-		if strings.HasPrefix(pattern, "re:") {
-			pattern = strings.TrimPrefix(pattern, "re:")
-		}
+		pattern = strings.TrimPrefix(pattern, "re:")
 		// Always compile as regex for backward compatibility
 		// (v1 paths are always regex, v2 paths with re: prefix are regex,
 		//  v2 paths without re: are exact but we compile them as ^exact$ for prefix match)
@@ -431,7 +429,7 @@ func (r *scenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 }
 
 // matches checks if a scenario matches the given request.
-func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
+func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	// Check ICAP method
 	if s.Match.Method != "" && s.Match.Method != req.Method {
 		return false

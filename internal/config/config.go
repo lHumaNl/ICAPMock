@@ -11,6 +11,28 @@ import (
 
 const defaultHost = "0.0.0.0"
 
+// durationField maps a raw JSON string to a target time.Duration pointer for parsing.
+type durationField struct {
+	raw    string
+	target *time.Duration
+	name   string
+}
+
+// parseDurationFields parses multiple duration string fields into their targets.
+// Empty strings are skipped; invalid durations return a descriptive error.
+func parseDurationFields(fields ...durationField) error {
+	for _, f := range fields {
+		if f.raw != "" {
+			d, err := time.ParseDuration(f.raw)
+			if err != nil {
+				return fmt.Errorf("invalid %s: %w", f.name, err)
+			}
+			*f.target = d
+		}
+	}
+	return nil
+}
+
 // CircuitBreakerGlobalConfig contains global circuit breaker configuration.
 // Circuit breakers provide automatic failure isolation for external dependencies.
 type CircuitBreakerGlobalConfig struct {
@@ -63,23 +85,10 @@ func (c *CircuitBreakerComponentConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Parse duration strings
-	if temp.OpenTimeout != "" {
-		d, err := time.ParseDuration(temp.OpenTimeout)
-		if err != nil {
-			return fmt.Errorf("invalid open_timeout: %w", err)
-		}
-		c.OpenTimeout = d
-	}
-	if temp.RollingWindow != "" {
-		d, err := time.ParseDuration(temp.RollingWindow)
-		if err != nil {
-			return fmt.Errorf("invalid rolling_window: %w", err)
-		}
-		c.RollingWindow = d
-	}
-
-	return nil
+	return parseDurationFields(
+		durationField{raw: temp.OpenTimeout, target: &c.OpenTimeout, name: "open_timeout"},
+		durationField{raw: temp.RollingWindow, target: &c.RollingWindow, name: "rolling_window"},
+	)
 }
 
 // DefaultsConfig contains shared default settings inherited by all servers.
@@ -776,23 +785,10 @@ func (c *DiskMonitorConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	if temp.CheckInterval != "" {
-		d, err := time.ParseDuration(temp.CheckInterval)
-		if err != nil {
-			return fmt.Errorf("invalid check_interval: %w", err)
-		}
-		c.CheckInterval = d
-	}
-
-	if temp.CacheInterval != "" {
-		d, err := time.ParseDuration(temp.CacheInterval)
-		if err != nil {
-			return fmt.Errorf("invalid cache_interval: %w", err)
-		}
-		c.CacheInterval = d
-	}
-
-	return nil
+	return parseDurationFields(
+		durationField{raw: temp.CheckInterval, target: &c.CheckInterval, name: "check_interval"},
+		durationField{raw: temp.CacheInterval, target: &c.CacheInterval, name: "cache_interval"},
+	)
 }
 
 // RateLimitConfig contains rate limiting configuration.

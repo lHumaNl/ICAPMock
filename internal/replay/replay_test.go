@@ -50,7 +50,7 @@ func TestReplayerStart(t *testing.T) {
 	var callbackMu sync.Mutex
 	callbackCount := 0
 
-	opts := ReplayOptions{
+	opts := Options{
 		Speed: 0, // No delay for fast test
 		Callback: func(_ *icap.Request, _ *icap.Response, _ error) {
 			callbackMu.Lock()
@@ -97,7 +97,7 @@ func TestReplayerSpeed(t *testing.T) {
 	// Test with speed 0 (no delay)
 	// Speed=0 means maximum speed (no timing delays between requests)
 	start := time.Now()
-	opts := ReplayOptions{Speed: 0}
+	opts := Options{Speed: 0}
 	err = replayer.Start(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -155,7 +155,7 @@ func TestReplayerFilter(t *testing.T) {
 	}
 
 	// Filter for REQMOD only
-	opts := ReplayOptions{
+	opts := Options{
 		Speed: 0,
 		Filter: storage.RequestFilter{
 			Method: "REQMOD",
@@ -208,7 +208,7 @@ func TestReplayerCallback(t *testing.T) {
 	}
 	var mu sync.Mutex
 
-	opts := ReplayOptions{
+	opts := Options{
 		Speed: 0,
 		Callback: func(req *icap.Request, _ *icap.Response, err error) {
 			mu.Lock()
@@ -252,7 +252,7 @@ func TestReplayerLoop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	opts := ReplayOptions{
+	opts := Options{
 		Speed: 0,
 		Loop:  true,
 		Callback: func(_ *icap.Request, _ *icap.Response, _ error) {
@@ -464,7 +464,7 @@ func TestReplayerMetrics(t *testing.T) {
 		t.Fatalf("NewReplayer failed: %v", err)
 	}
 
-	opts := ReplayOptions{Speed: 0}
+	opts := Options{Speed: 0}
 	err = replayer.Start(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -498,7 +498,7 @@ func TestReplayerStop(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		opts := ReplayOptions{Speed: 1.0} // Normal speed to allow time to stop
+		opts := Options{Speed: 1.0} // Normal speed to allow time to stop
 		_ = replayer.Start(ctx, opts)
 	}()
 
@@ -536,7 +536,7 @@ func TestReplayerContextCancellation(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		opts := ReplayOptions{Speed: 1.0}
+		opts := Options{Speed: 1.0}
 		err := replayer.Start(ctx, opts)
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("Expected context.Canceled error, got: %v", err)
@@ -571,7 +571,7 @@ func TestReplayerAlreadyRunning(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		opts := ReplayOptions{Speed: 1.0}
+		opts := Options{Speed: 1.0}
 		_ = replayer.Start(ctx, opts)
 	}()
 
@@ -579,7 +579,7 @@ func TestReplayerAlreadyRunning(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Try to start again - should fail
-	err = replayer.Start(ctx, ReplayOptions{})
+	err = replayer.Start(ctx, Options{})
 	if err == nil {
 		t.Error("Expected error when starting replay while already running")
 	}
@@ -605,7 +605,7 @@ func TestReplayerProgress(t *testing.T) {
 	var progressReports []struct{ current, total int }
 	var mu sync.Mutex
 
-	opts := ReplayOptions{
+	opts := Options{
 		Speed: 0,
 		OnProgress: func(current, total int) {
 			mu.Lock()

@@ -108,8 +108,8 @@ func (rl *RateLimiter) refillLocked() {
 	}
 }
 
-// ServerClient provides HTTP client for server integration.
-type ServerClient struct {
+// Client provides HTTP client for server integration.
+type Client struct {
 	httpClient     *http.Client
 	rateLimiter    *RateLimiter
 	circuitBreaker *utils.CircuitBreaker
@@ -118,20 +118,23 @@ type ServerClient struct {
 }
 
 // doRequestWithRetry executes an HTTP request with exponential backoff retry.
-func (c *ServerClient) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
+func (c *Client) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if err := c.rateLimiter.Acquire(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit error: %w", err)
 	}
 
 	var resp *http.Response
 	err := c.circuitBreaker.Execute(ctx, func() error {
-		var err error
-		resp, err = utils.DoWithRetryHTTP(ctx, c.retryConfig, c.httpClient, req)
-		return err
+		var retryErr error
+		resp, retryErr = utils.DoWithRetryHTTP(ctx, c.retryConfig, c.httpClient, req) //nolint:bodyclose // resp.Body is closed on error below and by the caller on success
+		return retryErr
 	})
 
 	if err != nil {
-		if errors.Is(err, utils.CircuitOpenError) {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close() //nolint:errcheck
+		}
+		if errors.Is(err, utils.ErrCircuitOpen) {
 			return nil, fmt.Errorf("circuit breaker is open: %w", err)
 		}
 		return nil, err
@@ -140,8 +143,8 @@ func (c *ServerClient) doRequestWithRetry(ctx context.Context, req *http.Request
 	return resp, nil
 }
 
-// NewServerClient creates a new server client with connection pooling.
-func NewServerClient(host string, port int) *ServerClient {
+// NewClient creates a new server client with connection pooling.
+func NewClient(host string, port int) *Client {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
@@ -150,7 +153,7 @@ func NewServerClient(host string, port int) *ServerClient {
 		MaxConnsPerHost:     20,
 	}
 
-	return &ServerClient{
+	return &Client{
 		baseURL: fmt.Sprintf("http://%s:%d", host, port),
 		httpClient: &http.Client{
 			Timeout:   10 * time.Second,
@@ -163,7 +166,7 @@ func NewServerClient(host string, port int) *ServerClient {
 }
 
 // GetMetrics fetches metrics from the server.
-func (c *ServerClient) GetMetrics(ctx context.Context) (*state.MetricsSnapshot, error) {
+func (c *Client) GetMetrics(ctx context.Context) (*state.MetricsSnapshot, error) {
 	url := fmt.Sprintf("%s/metrics", c.baseURL)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
@@ -202,7 +205,7 @@ func (c *ServerClient) GetMetrics(ctx context.Context) (*state.MetricsSnapshot, 
 // parseMetrics parses Prometheus metrics format from response body.
 //
 //nolint:unparam
-func (c *ServerClient) parseMetrics(body string) (*state.MetricsSnapshot, error) {
+func (c *Client) parseMetrics(body string) (*state.MetricsSnapshot, error) {
 	snapshot := &state.MetricsSnapshot{
 		Timestamp:     time.Now(),
 		RPS:           0,
@@ -330,7 +333,7 @@ func parseHistogramMetric(line string) (value float64, quantile string) {
 }
 
 // GetLogs fetches recent logs from the server.
-func (c *ServerClient) GetLogs(ctx context.Context, limit int) ([]*state.LogEntry, error) {
+func (c *Client) GetLogs(ctx context.Context, limit int) ([]*state.LogEntry, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("invalid limit: %d, must be positive", limit)
 	}
@@ -371,7 +374,7 @@ func (c *ServerClient) GetLogs(ctx context.Context, limit int) ([]*state.LogEntr
 }
 
 // CheckHealth checks the server health status.
-func (c *ServerClient) CheckHealth(ctx context.Context) (*state.ServerStatusInfo, error) {
+func (c *Client) CheckHealth(ctx context.Context) (*state.ServerStatusInfo, error) {
 	url := fmt.Sprintf("%s/health", c.baseURL)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {

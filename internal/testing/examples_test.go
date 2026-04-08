@@ -97,7 +97,7 @@ func TestExampleUnitResponseWithHTTP(t *testing.T) {
 
 // TestExampleUnitWithTimeout demonstrates using timeout helpers.
 func TestExampleUnitWithTimeout(t *testing.T) {
-	ctx := WithTimeout(t, context.Background(), 5*time.Second)
+	ctx := WithTimeout(context.Background(), t, 5*time.Second)
 
 	select {
 	case <-ctx.Done():
@@ -454,7 +454,7 @@ func TestExampleAssertion(t *testing.T) {
 
 // TestExampleTimeout demonstrates timeout testing.
 func TestExampleTimeout(t *testing.T) {
-	ctx := WithTimeout(t, context.Background(), 100*time.Millisecond)
+	ctx := WithTimeout(context.Background(), t, 100*time.Millisecond)
 
 	done := make(chan struct{})
 	go func() {

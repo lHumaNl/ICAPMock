@@ -142,7 +142,7 @@ func (m *PerMethodMiddleware) Wait(ctx context.Context, req *icap.Request) error
 		}
 
 		// Wait for token
-		if err := m.perMethodLimiter.Wait(methodKey, ctx); err != nil {
+		if err := m.perMethodLimiter.Wait(ctx, methodKey); err != nil {
 			return err
 		}
 
@@ -157,7 +157,7 @@ func (m *PerMethodMiddleware) Wait(ctx context.Context, req *icap.Request) error
 			}
 
 			// Wait for client+method token
-			if err := m.perMethodLimiter.Wait(clientMethodKey, ctx); err != nil {
+			if err := m.perMethodLimiter.Wait(ctx, clientMethodKey); err != nil {
 				return err
 			}
 		}

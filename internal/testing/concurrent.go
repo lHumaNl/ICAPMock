@@ -147,8 +147,8 @@ func RunConcurrentWithTimeout(t *testing.T, n int, timeout time.Duration, fn fun
 //	go func() { /* ... */ cancel1() }()
 //	go func() { /* ... */ cancel2() }()
 //
-//	WaitForAll(t, ctx, cancel1, cancel2)
-func WaitForAll(t *testing.T, ctx context.Context, goroutines ...context.CancelFunc) {
+//	WaitForAll(ctx, t, cancel1, cancel2)
+func WaitForAll(ctx context.Context, t *testing.T, goroutines ...context.CancelFunc) {
 	t.Helper()
 
 	if len(goroutines) == 0 {

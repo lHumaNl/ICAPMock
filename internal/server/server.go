@@ -387,7 +387,7 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 
 	// Start accepting connections in a goroutine
 	s.wg.Add(1)
-	go s.acceptLoop()
+	go s.acceptLoop() //nolint:contextcheck // acceptLoop uses s.serverCtx stored from Start's ctx parameter
 
 	// Start goroutine leak monitoring
 	s.wg.Add(1)
@@ -494,7 +494,7 @@ func (s *ICAPServer) acceptLoop() {
 //   - The server shuts down (stopChan closed)
 //   - The request timeout is exceeded
 //   - The connection is closed
-func (s *ICAPServer) handleConnection(conn *Connection) {
+func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // connection lifecycle requires sequential checks for idle, parse, route, write, close
 	// Create connection-scoped context that cancels on server shutdown
 	// This ensures all in-flight requests are canceled during graceful shutdown
 	connCtx, connCancel := context.WithCancel(s.serverCtx)

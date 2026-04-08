@@ -438,8 +438,8 @@ func (fs *FileStorage) GetRequest(_ context.Context, id string) (*StoredRequest,
 	}
 
 	for _, path := range matches {
-		sr, err := fs.readRequestFile(path)
-		if err != nil {
+		sr, readErr := fs.readRequestFile(path)
+		if readErr != nil {
 			continue
 		}
 		if sr.ID == id {
@@ -470,7 +470,7 @@ func (fs *FileStorage) GetRequest(_ context.Context, id string) (*StoredRequest,
 }
 
 // ListRequests retrieves requests matching the given filter.
-func (fs *FileStorage) ListRequests(_ context.Context, filter RequestFilter) ([]*StoredRequest, error) {
+func (fs *FileStorage) ListRequests(_ context.Context, filter RequestFilter) ([]*StoredRequest, error) { //nolint:gocyclo // file format dispatch and filtering requires sequential checks
 	if !fs.config.Enabled {
 		return nil, ErrStorageDisabled
 	}
@@ -483,7 +483,7 @@ func (fs *FileStorage) ListRequests(_ context.Context, filter RequestFilter) ([]
 	}
 
 	// Build glob patterns for both old and new formats
-	var patterns []string = []string{
+	patterns := []string{
 		filepath.Join(fs.config.RequestsDir, "*.json"),
 		filepath.Join(fs.config.RequestsDir, "*.jsonl"),
 	}

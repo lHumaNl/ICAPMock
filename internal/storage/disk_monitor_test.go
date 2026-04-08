@@ -319,9 +319,7 @@ func TestDiskMonitor_GetUsage(t *testing.T) {
 	}
 
 	usage := dm.GetUsage()
-	if usage.Total == 0 {
-		// Should have some default values
-	}
+	_ = usage.Total // Verify GetUsage returns without panic
 
 	dm.Stop()
 }

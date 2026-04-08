@@ -95,98 +95,8 @@ func (c *ValidateCommand) Run(_ context.Context) error {
 	allPassed := true
 
 	for _, filePath := range yamlFiles {
-		fmt.Printf("\nFile: %s\n", filePath)
-
-		data, err := os.ReadFile(filePath) //nolint:gosec // path is validated
-		if err != nil {
-			fmt.Printf("  [FAIL] cannot read file: %v\n", err)
+		if !validateFile(filePath, seenNames) {
 			allPassed = false
-			continue
-		}
-
-		var sf storage.ScenarioFile
-		if err := yaml.Unmarshal(data, &sf); err != nil {
-			fmt.Printf("  [FAIL] YAML parse error: %v\n", err)
-			allPassed = false
-			continue
-		}
-
-		if len(sf.Scenarios) == 0 {
-			fmt.Printf("  (no scenarios defined)\n")
-			continue
-		}
-
-		for i := range sf.Scenarios {
-			s := &sf.Scenarios[i]
-			scenarioLabel := s.Name
-			if scenarioLabel == "" {
-				scenarioLabel = fmt.Sprintf("<unnamed #%d>", i+1)
-			}
-
-			var errs []string
-
-			// Check name is non-empty.
-			if s.Name == "" {
-				errs = append(errs, "name is empty")
-			} else {
-				// Check name uniqueness across all files.
-				if prev, exists := seenNames[s.Name]; exists {
-					errs = append(errs, fmt.Sprintf("duplicate name %q (first seen in %s)", s.Name, prev))
-				} else {
-					seenNames[s.Name] = filePath
-				}
-			}
-
-			// Compile path_pattern regex.
-			if s.Match.Path != "" {
-				if _, err := regexp.Compile(s.Match.Path); err != nil {
-					errs = append(errs, fmt.Sprintf("invalid path_pattern regex %q: %v", s.Match.Path, err))
-				}
-			}
-
-			// Compile body_pattern regex.
-			if s.Match.BodyPattern != "" {
-				if _, err := regexp.Compile(s.Match.BodyPattern); err != nil {
-					errs = append(errs, fmt.Sprintf("invalid body_pattern regex %q: %v", s.Match.BodyPattern, err))
-				}
-			}
-
-			// Check BodyFile exists (resolved relative to the scenario file's directory).
-			if s.Response.BodyFile != "" {
-				bodyFilePath := s.Response.BodyFile
-				if !filepath.IsAbs(bodyFilePath) {
-					bodyFilePath = filepath.Join(filepath.Dir(filePath), bodyFilePath)
-				}
-				if _, err := os.Stat(bodyFilePath); err != nil {
-					errs = append(errs, fmt.Sprintf("body_file %q not found: %v", s.Response.BodyFile, err))
-				}
-			}
-
-			// Check priority is non-negative.
-			if s.Priority < 0 {
-				errs = append(errs, fmt.Sprintf("priority %d is negative", s.Priority))
-			}
-
-			// Check ICAPStatus is valid (100-599).
-			// A zero value is treated as 204 by the runtime, but we flag it as
-			// unset so operators are aware.
-			status := s.Response.ICAPStatus
-			if status == 0 {
-				// Warn but don't fail: runtime defaults to 204.
-				errs = append(errs, "icap_status is 0 (will default to 204 at runtime; consider setting it explicitly)")
-			} else if status < 100 || status > 599 {
-				errs = append(errs, fmt.Sprintf("icap_status %d is out of valid range 100-599", status))
-			}
-
-			if len(errs) == 0 {
-				fmt.Printf("  [OK]   %s\n", scenarioLabel)
-			} else {
-				allPassed = false
-				fmt.Printf("  [FAIL] %s\n", scenarioLabel)
-				for _, e := range errs {
-					fmt.Printf("           - %s\n", e)
-				}
-			}
 		}
 	}
 
@@ -196,4 +106,97 @@ func (c *ValidateCommand) Run(_ context.Context) error {
 		return nil
 	}
 	return fmt.Errorf("one or more scenarios failed validation")
+}
+
+// validateFile validates all scenarios in a single YAML file. Returns true if all passed.
+func validateFile(filePath string, seenNames map[string]string) bool {
+	fmt.Printf("\nFile: %s\n", filePath)
+
+	data, err := os.ReadFile(filePath) //nolint:gosec // path is validated
+	if err != nil {
+		fmt.Printf("  [FAIL] cannot read file: %v\n", err)
+		return false
+	}
+
+	var sf storage.ScenarioFile
+	if err := yaml.Unmarshal(data, &sf); err != nil {
+		fmt.Printf("  [FAIL] YAML parse error: %v\n", err)
+		return false
+	}
+
+	if len(sf.Scenarios) == 0 {
+		fmt.Printf("  (no scenarios defined)\n")
+		return true
+	}
+
+	allPassed := true
+	for i := range sf.Scenarios {
+		s := &sf.Scenarios[i]
+		scenarioLabel := s.Name
+		if scenarioLabel == "" {
+			scenarioLabel = fmt.Sprintf("<unnamed #%d>", i+1)
+		}
+
+		errs := validateScenario(s, filePath, seenNames)
+		if len(errs) == 0 {
+			fmt.Printf("  [OK]   %s\n", scenarioLabel)
+		} else {
+			allPassed = false
+			fmt.Printf("  [FAIL] %s\n", scenarioLabel)
+			for _, e := range errs {
+				fmt.Printf("           - %s\n", e)
+			}
+		}
+	}
+	return allPassed
+}
+
+// validateScenario validates a single scenario and returns a list of errors.
+func validateScenario(s *storage.Scenario, filePath string, seenNames map[string]string) []string {
+	var errs []string
+
+	if s.Name == "" {
+		errs = append(errs, "name is empty")
+	} else {
+		if prev, exists := seenNames[s.Name]; exists {
+			errs = append(errs, fmt.Sprintf("duplicate name %q (first seen in %s)", s.Name, prev))
+		} else {
+			seenNames[s.Name] = filePath
+		}
+	}
+
+	if s.Match.Path != "" {
+		if _, err := regexp.Compile(s.Match.Path); err != nil {
+			errs = append(errs, fmt.Sprintf("invalid path_pattern regex %q: %v", s.Match.Path, err))
+		}
+	}
+
+	if s.Match.BodyPattern != "" {
+		if _, err := regexp.Compile(s.Match.BodyPattern); err != nil {
+			errs = append(errs, fmt.Sprintf("invalid body_pattern regex %q: %v", s.Match.BodyPattern, err))
+		}
+	}
+
+	if s.Response.BodyFile != "" {
+		bodyFilePath := s.Response.BodyFile
+		if !filepath.IsAbs(bodyFilePath) {
+			bodyFilePath = filepath.Join(filepath.Dir(filePath), bodyFilePath)
+		}
+		if _, err := os.Stat(bodyFilePath); err != nil {
+			errs = append(errs, fmt.Sprintf("body_file %q not found: %v", s.Response.BodyFile, err))
+		}
+	}
+
+	if s.Priority < 0 {
+		errs = append(errs, fmt.Sprintf("priority %d is negative", s.Priority))
+	}
+
+	status := s.Response.ICAPStatus
+	if status == 0 {
+		errs = append(errs, "icap_status is 0 (will default to 204 at runtime; consider setting it explicitly)")
+	} else if status < 100 || status > 599 {
+		errs = append(errs, fmt.Sprintf("icap_status %d is out of valid range 100-599", status))
+	}
+
+	return errs
 }

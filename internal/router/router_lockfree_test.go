@@ -212,10 +212,7 @@ func TestLockFreeRouter_ConcurrentReadWrite(t *testing.T) {
 			defer wg.Done()
 			path := fmt.Sprintf("/path%d", idx%100)
 			req := buildTestRequest(icap.MethodREQMOD, fmt.Sprintf("icap://localhost:1344%s", path))
-			_, err := r.Serve(context.Background(), req)
-			if err != nil {
-				// Some lookups may fail if route not yet registered
-			}
+			_, _ = r.Serve(context.Background(), req)
 		}(i)
 	}
 

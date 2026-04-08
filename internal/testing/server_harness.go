@@ -215,7 +215,8 @@ func (h *ServerHarness) SendRequest(req *icap.Request) (*icap.Response, error) {
 	addr := h.addr
 	h.mu.Unlock()
 
-	conn, err := net.Dial("tcp", addr)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -224,8 +225,8 @@ func (h *ServerHarness) SendRequest(req *icap.Request) (*icap.Response, error) {
 	// Set a read deadline to avoid hanging
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
-	if _, err := req.WriteTo(conn); err != nil {
-		return nil, fmt.Errorf("failed to write request: %w", err)
+	if _, writeErr := req.WriteTo(conn); writeErr != nil {
+		return nil, fmt.Errorf("failed to write request: %w", writeErr)
 	}
 
 	// Parse only the status line from the response instead of using
@@ -267,7 +268,8 @@ func (h *ServerHarness) SendRawRequest(rawRequest string) (*icap.Response, error
 	addr := h.addr
 	h.mu.Unlock()
 
-	conn, err := net.Dial("tcp", addr)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -275,8 +277,8 @@ func (h *ServerHarness) SendRawRequest(rawRequest string) (*icap.Response, error
 
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 
-	if _, err := conn.Write([]byte(rawRequest)); err != nil {
-		return nil, fmt.Errorf("failed to write request: %w", err)
+	if _, writeErr := conn.Write([]byte(rawRequest)); writeErr != nil {
+		return nil, fmt.Errorf("failed to write request: %w", writeErr)
 	}
 
 	reader := bufio.NewReader(conn)
@@ -373,7 +375,7 @@ func (h *ServerHarness) Restart(ctx context.Context) error {
 	h.stopped = false
 	h.mu.Unlock()
 
-	if err := h.Start(); err != nil {
+	if err := h.Start(); err != nil { //nolint:contextcheck // Start uses fresh context.Background() as the server's root context
 		return fmt.Errorf("failed to start during restart: %w", err)
 	}
 
@@ -391,7 +393,7 @@ func (h *ServerHarness) Restart(ctx context.Context) error {
 //	resp, err := harness.Handle(ctx, req)
 type MemoryServerHarness struct {
 	t       testing.TB
-	handler handler.HandlerFunc
+	handler handler.Func
 }
 
 // NewMemoryServerHarness creates a new memory server harness.
@@ -426,7 +428,7 @@ func NewMemoryServerHarness(t testing.TB) *MemoryServerHarness {
 //	harness.SetHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 //	    return icap.NewResponse(200), nil
 //	})
-func (h *MemoryServerHarness) SetHandler(hf handler.HandlerFunc) {
+func (h *MemoryServerHarness) SetHandler(hf handler.Func) {
 	h.handler = hf
 }
 

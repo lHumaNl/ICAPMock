@@ -49,10 +49,14 @@ func (c *AssertCommand) Description() string {
 func (c *AssertCommand) Parse(args []string) error { return c.fs.Parse(args) }
 func (c *AssertCommand) Usage()                    { c.fs.Usage() }
 
-func (c *AssertCommand) Run(_ context.Context) error {
+func (c *AssertCommand) Run(ctx context.Context) error { //nolint:gocyclo // assertion runner checks multiple independent metrics
 	// Fetch metrics
 	client := &http.Client{Timeout: c.timeout}
-	resp, err := client.Get(c.metricsURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.metricsURL, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("creating metrics request: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetching metrics from %s: %w", c.metricsURL, err)
 	}

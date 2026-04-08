@@ -149,19 +149,19 @@ func (m *LogViewerModel) Update(msg tea.Msg) (*LogViewerModel, tea.Cmd) {
 
 			case "up", "k":
 				// Scroll up
-				m.viewport.LineUp(1)
+				m.viewport.ScrollUp(1)
 
 			case "down", "j":
 				// Scroll down
-				m.viewport.LineDown(1)
+				m.viewport.ScrollDown(1)
 
 			case "pgup":
 				// Page up
-				m.viewport.HalfViewUp()
+				m.viewport.HalfPageUp()
 
 			case "pgdown":
 				// Page down
-				m.viewport.HalfViewDown()
+				m.viewport.HalfPageDown()
 
 			case "home", "g":
 				// Go to top

@@ -183,32 +183,7 @@ func NewKeyBasedShardedTokenBucketLimiterWithTTL(rate float64, burst int, ttl ti
 //	    // Rate limited
 //	}
 func (l *KeyBasedShardedTokenBucketLimiter) Allow(key Key) bool {
-	shard := l.getShard(key)
-
-	// Fast path: read lock only to find existing entry
-	shard.mu.RLock()
-	entry, exists := shard.limiters[key]
-	shard.mu.RUnlock()
-
-	if !exists {
-		// Slow path: write lock to create new entry
-		shard.mu.Lock()
-		entry, exists = shard.limiters[key]
-		if !exists {
-			rate := l.rate.Load().(float64) //nolint:errcheck
-			burst := int(l.burst.Load())
-			entry = &limiterEntry{
-				limiter: NewTokenBucketLimiter(rate, burst),
-			}
-			entry.lastAccess.Store(time.Now().UnixNano())
-			shard.limiters[key] = entry
-		}
-		shard.mu.Unlock()
-	}
-
-	// Update lastAccess atomically — no lock needed
-	entry.lastAccess.Store(time.Now().UnixNano())
-
+	entry := l.getOrCreateEntry(key)
 	return entry.limiter.Allow()
 }
 
@@ -227,11 +202,11 @@ func (l *KeyBasedShardedTokenBucketLimiter) Allow(key Key) bool {
 //	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 //	defer cancel()
 //
-//	err := limiter.Wait(ClientKey("192.168.1.100"), ctx)
+//	err := limiter.Wait(ctx, ClientKey("192.168.1.100"))
 //	if err != nil {
 //	    // Context canceled or timeout
 //	}
-func (l *KeyBasedShardedTokenBucketLimiter) Wait(key Key, ctx context.Context) error {
+func (l *KeyBasedShardedTokenBucketLimiter) Wait(ctx context.Context, key Key) error {
 	// Start with 1ms ticker, will exponentially increase up to 100ms
 	ticker := time.NewTicker(1 * time.Millisecond)
 	defer ticker.Stop()
@@ -277,17 +252,24 @@ func (l *KeyBasedShardedTokenBucketLimiter) Wait(key Key, ctx context.Context) e
 //	    reservation.Cancel() // Release the reservation
 //	}
 func (l *KeyBasedShardedTokenBucketLimiter) Reserve(key Key) Reservation {
-	shard := l.getShard(key)
+	entry := l.getOrCreateEntry(key)
+	return entry.limiter.Reserve()
+}
+
+// getOrCreateEntry retrieves an existing limiter entry for the key, or creates one
+// using double-checked locking to minimize write-lock contention.
+func (l *KeyBasedShardedTokenBucketLimiter) getOrCreateEntry(key Key) *limiterEntry {
+	s := l.getShard(key)
 
 	// Fast path: read lock only to find existing entry
-	shard.mu.RLock()
-	entry, exists := shard.limiters[key]
-	shard.mu.RUnlock()
+	s.mu.RLock()
+	entry, exists := s.limiters[key]
+	s.mu.RUnlock()
 
 	if !exists {
 		// Slow path: write lock to create new entry
-		shard.mu.Lock()
-		entry, exists = shard.limiters[key]
+		s.mu.Lock()
+		entry, exists = s.limiters[key]
 		if !exists {
 			rate := l.rate.Load().(float64) //nolint:errcheck
 			burst := int(l.burst.Load())
@@ -295,15 +277,15 @@ func (l *KeyBasedShardedTokenBucketLimiter) Reserve(key Key) Reservation {
 				limiter: NewTokenBucketLimiter(rate, burst),
 			}
 			entry.lastAccess.Store(time.Now().UnixNano())
-			shard.limiters[key] = entry
+			s.limiters[key] = entry
 		}
-		shard.mu.Unlock()
+		s.mu.Unlock()
 	}
 
 	// Update lastAccess atomically — no lock needed
 	entry.lastAccess.Store(time.Now().UnixNano())
 
-	return entry.limiter.Reserve()
+	return entry
 }
 
 // getShard returns the shard for a given key using hash-based distribution.

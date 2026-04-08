@@ -20,7 +20,7 @@ import (
 // Thread-safety: All methods are safe for concurrent use.
 type PreviewRateLimiter struct {
 	ctx     context.Context
-	clients map[string]*clientTracker
+	clients map[string]*ClientTracker
 	metrics *metrics.Collector
 	logger  *slog.Logger
 	cancel  context.CancelFunc
@@ -55,8 +55,8 @@ type PreviewRateLimiterConfig struct {
 	CleanupInterval time.Duration
 }
 
-// clientTracker tracks request timestamps for a single client.
-type clientTracker struct {
+// ClientTracker tracks request timestamps and remaining quota for a single client.
+type ClientTracker struct {
 	lastAccess time.Time
 	clientID   string
 	requests   []time.Time
@@ -107,7 +107,7 @@ func NewPreviewRateLimiter(
 
 	limiter := &PreviewRateLimiter{
 		config:  config,
-		clients: make(map[string]*clientTracker),
+		clients: make(map[string]*ClientTracker),
 		metrics: mc,
 		logger:  logger,
 		ctx:     ctx,
@@ -221,7 +221,7 @@ func (l *PreviewRateLimiter) extractClientID(req *icap.Request) string {
 }
 
 // getOrCreateTrackerLocked is like getOrCreateTracker but assumes the lock is already held.
-func (l *PreviewRateLimiter) getOrCreateTrackerLocked(clientID string) *clientTracker {
+func (l *PreviewRateLimiter) getOrCreateTrackerLocked(clientID string) *ClientTracker {
 	// Check if tracker exists
 	if tracker, exists := l.clients[clientID]; exists {
 		return tracker
@@ -233,7 +233,7 @@ func (l *PreviewRateLimiter) getOrCreateTrackerLocked(clientID string) *clientTr
 	}
 
 	// Create new tracker
-	tracker := &clientTracker{
+	tracker := &ClientTracker{
 		clientID:   clientID,
 		requests:   make([]time.Time, 0, l.config.MaxRequests),
 		lastAccess: time.Now(),
@@ -272,7 +272,7 @@ func (l *PreviewRateLimiter) evictOldestClient() {
 }
 
 // cleanupExpiredRequestsLocked is like cleanupExpiredRequests but assumes the lock is already held.
-func (l *PreviewRateLimiter) cleanupExpiredRequestsLocked(tracker *clientTracker, windowStart time.Time) {
+func (l *PreviewRateLimiter) cleanupExpiredRequestsLocked(tracker *ClientTracker, windowStart time.Time) {
 	// Find the first request within the window
 	index := 0
 	for i, reqTime := range tracker.requests {
@@ -378,7 +378,7 @@ func (l *PreviewRateLimiter) GetClientCount() int {
 // This method is thread-safe.
 //
 // Returns nil if the client is not being tracked.
-func (l *PreviewRateLimiter) GetClientInfo(clientID string) *clientTracker {
+func (l *PreviewRateLimiter) GetClientInfo(clientID string) *ClientTracker {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.clients[clientID]

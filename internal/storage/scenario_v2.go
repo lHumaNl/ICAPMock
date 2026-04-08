@@ -148,7 +148,7 @@ func ParseMatch(s string) (*MatchValue, error) {
 // ConvertV2ToScenarios converts a v2 scenario file to v1 Scenario slice.
 // It applies defaults, merges headers, assigns priorities.
 // The orderedNames parameter provides scenario names in file order for priority assignment.
-func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scenario, error) {
+func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scenario, error) { //nolint:gocyclo // v2-to-v1 conversion resolves defaults, merges headers, builds match rules
 	if file == nil {
 		return nil, fmt.Errorf("nil ScenarioFileV2")
 	}

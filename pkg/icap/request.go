@@ -133,6 +133,31 @@ func (e Encapsulated) HasResBody() bool {
 	return e.ResBody != encapNotSet
 }
 
+// lazyLoadBody loads a body from a reader exactly once using sync.Once, storing
+// the result in the provided body slice and error pointers. The errFmt parameter
+// is used to wrap any read error (e.g., "loading body: %w").
+func lazyLoadBody(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]byte, loaded *bool, bodyErr *error, errFmt string) ([]byte, error) { //nolint:gocritic // ptrToRefParam: pointer needed to read from caller's io.Reader field
+	once.Do(func() {
+		if *reader == nil {
+			return
+		}
+		data, err := io.ReadAll(*reader)
+		mu.Lock()
+		if err != nil {
+			*bodyErr = fmt.Errorf(errFmt, err)
+			*body = nil
+		} else {
+			*body = data
+			*loaded = true
+		}
+		mu.Unlock()
+	})
+
+	mu.RLock()
+	defer mu.RUnlock()
+	return *body, *bodyErr
+}
+
 // HTTPMessage represents an embedded HTTP request or response.
 // HTTP message bodies are lazy-loaded from BodyReader when GetBody() is called.
 // The body-related methods (GetBody, HasBody, IsBodyLoaded, SetLoadedBody) are
@@ -164,25 +189,7 @@ type HTTPMessage struct {
 // For O(1) memory usage with large bodies, use BodyReader directly instead,
 // but note that direct BodyReader access bypasses thread-safety.
 func (m *HTTPMessage) GetBody() ([]byte, error) {
-	m.bodyOnce.Do(func() {
-		if m.BodyReader == nil {
-			return
-		}
-		body, err := io.ReadAll(m.BodyReader)
-		m.mu.Lock()
-		if err != nil {
-			m.bodyErr = fmt.Errorf("loading body: %w", err)
-			m.Body = nil // Clear body on error to match expected behavior
-		} else {
-			m.Body = body
-			m.bodyLoaded = true
-		}
-		m.mu.Unlock()
-	})
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.Body, m.bodyErr
+	return lazyLoadBody(&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, "loading body: %w")
 }
 
 // HasBody returns true if the message has a body available.
@@ -305,25 +312,7 @@ type Request struct {
 // Note: The ICAP body is typically fully buffered during parsing, so this method
 // usually returns immediately without I/O.
 func (r *Request) GetBody() ([]byte, error) {
-	r.bodyOnce.Do(func() {
-		if r.BodyReader == nil {
-			return
-		}
-		body, err := io.ReadAll(r.BodyReader)
-		r.mu.Lock()
-		if err != nil {
-			r.bodyErr = fmt.Errorf("loading ICAP body: %w", err)
-			r.Body = nil // Clear body on error to match expected behavior
-		} else {
-			r.Body = body
-			r.bodyLoaded = true
-		}
-		r.mu.Unlock()
-	})
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.Body, r.bodyErr
+	return lazyLoadBody(&r.bodyOnce, &r.mu, &r.BodyReader, &r.Body, &r.bodyLoaded, &r.bodyErr, "loading ICAP body: %w")
 }
 
 // IsBodyLoaded returns true if the body has been loaded into memory.
@@ -370,7 +359,7 @@ func NewRequest(method, uri string) (*Request, error) {
 }
 
 // ParseRequest reads and parses an ICAP request from a bufio.Reader.
-func ParseRequest(r *bufio.Reader) (*Request, error) {
+func ParseRequest(r *bufio.Reader) (*Request, error) { //nolint:gocyclo // ICAP request parsing is inherently sequential
 	// Read request line
 	line, err := r.ReadString('\n')
 	if err != nil {
@@ -435,8 +424,8 @@ func ParseRequest(r *bufio.Reader) (*Request, error) {
 		}
 
 		// Parse embedded HTTP message if present
-		if err := req.parseEncapsulatedMessage(r); err != nil {
-			return nil, fmt.Errorf("parsing encapsulated message: %w", err)
+		if parseErr := req.parseEncapsulatedMessage(r); parseErr != nil {
+			return nil, fmt.Errorf("parsing encapsulated message: %w", parseErr)
 		}
 	}
 

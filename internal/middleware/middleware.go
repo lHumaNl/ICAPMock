@@ -62,7 +62,7 @@ func (cfg CircuitBreakerConfig) toCircuitBreakerConfig() circuitbreaker.Config {
 // If rate limit is exceeded, returns ICAP 429 (Too Many Requests).
 func RateLimiterMiddleware(limiter ratelimit.Limiter) handler.Middleware {
 	return func(next handler.Handler) handler.Handler {
-		return handler.WrapHandler(handler.HandlerFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		return handler.WrapHandler(handler.Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 			if !limiter.Allow() {
 				resp := icap.NewResponse(429)
 				resp.SetHeader("X-RateLimit-Remaining", "0")
@@ -78,7 +78,7 @@ func RateLimiterMiddleware(limiter ratelimit.Limiter) handler.Middleware {
 // If a panic occurs, it logs the error and returns a 500 Internal Server Error response.
 func PanicRecoveryMiddleware(logger *slog.Logger) handler.Middleware {
 	return func(next handler.Handler) handler.Handler {
-		return handler.WrapHandler(handler.HandlerFunc(func(ctx context.Context, req *icap.Request) (resp *icap.Response, err error) {
+		return handler.WrapHandler(handler.Func(func(ctx context.Context, req *icap.Request) (resp *icap.Response, err error) {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("panic recovered in handler",
@@ -176,7 +176,7 @@ func StorageMiddlewareWithPool(store storage.Storage, logger *slog.Logger, cfg S
 
 // Wrap returns a handler.Middleware function that wraps handlers with storage functionality.
 func (m *StorageMiddleware) Wrap(next handler.Handler) handler.Handler {
-	return handler.WrapHandler(handler.HandlerFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	return handler.WrapHandler(handler.Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 		start := time.Now()
 		resp, err := next.Handle(ctx, req)
 

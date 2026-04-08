@@ -70,18 +70,18 @@ func (c *Client) Do(ctx context.Context, targetURL string, req *icap.Request) (*
 
 	// Set deadlines based on context
 	if deadline, ok := ctx.Deadline(); ok {
-		if err := conn.SetDeadline(deadline); err != nil {
-			return nil, fmt.Errorf("setting deadline: %w", err)
+		if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
+			return nil, fmt.Errorf("setting deadline: %w", deadlineErr)
 		}
 	} else {
-		if err := conn.SetDeadline(time.Now().Add(c.Timeout)); err != nil {
-			return nil, fmt.Errorf("setting deadline: %w", err)
+		if deadlineErr := conn.SetDeadline(time.Now().Add(c.Timeout)); deadlineErr != nil {
+			return nil, fmt.Errorf("setting deadline: %w", deadlineErr)
 		}
 	}
 
 	// Write the request
-	if _, err := req.WriteTo(conn); err != nil {
-		return nil, fmt.Errorf("writing request: %w", err)
+	if _, writeErr := req.WriteTo(conn); writeErr != nil {
+		return nil, fmt.Errorf("writing request: %w", writeErr)
 	}
 
 	// Read the response

@@ -15,11 +15,11 @@ import (
 	"github.com/icap-mock/icap-mock/internal/config"
 )
 
-// TestNewHealthChecker tests creating a new health checker.
-func TestNewHealthChecker(t *testing.T) {
-	checker := NewHealthChecker()
+// TestNewChecker tests creating a new health checker.
+func TestNewChecker(t *testing.T) {
+	checker := NewChecker()
 	if checker == nil {
-		t.Fatal("NewHealthChecker() returned nil")
+		t.Fatal("NewChecker() returned nil")
 	}
 
 	// Initially, both should be not ready
@@ -32,9 +32,9 @@ func TestNewHealthChecker(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetICAPReady tests setting ICAP ready status.
-func TestHealthChecker_SetICAPReady(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_SetICAPReady tests setting ICAP ready status.
+func TestChecker_SetICAPReady(t *testing.T) {
+	checker := NewChecker()
 
 	// Set ready
 	checker.SetICAPReady(true)
@@ -49,9 +49,9 @@ func TestHealthChecker_SetICAPReady(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetStorageReady tests setting storage ready status.
-func TestHealthChecker_SetStorageReady(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_SetStorageReady tests setting storage ready status.
+func TestChecker_SetStorageReady(t *testing.T) {
+	checker := NewChecker()
 
 	// Set ready
 	checker.SetStorageReady(true)
@@ -66,9 +66,9 @@ func TestHealthChecker_SetStorageReady(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetScenariosCount tests setting scenarios count.
-func TestHealthChecker_SetScenariosCount(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_SetScenariosCount tests setting scenarios count.
+func TestChecker_SetScenariosCount(t *testing.T) {
+	checker := NewChecker()
 
 	checker.SetScenariosCount(15)
 	status := checker.GetStatus()
@@ -83,9 +83,9 @@ func TestHealthChecker_SetScenariosCount(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetStorageError tests setting storage error.
-func TestHealthChecker_SetStorageError(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_SetStorageError tests setting storage error.
+func TestChecker_SetStorageError(t *testing.T) {
+	checker := NewChecker()
 
 	// Set error
 	checker.SetStorageError("disk full")
@@ -102,9 +102,9 @@ func TestHealthChecker_SetStorageError(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_SetICAPError tests setting ICAP error.
-func TestHealthChecker_SetICAPError(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_SetICAPError tests setting ICAP error.
+func TestChecker_SetICAPError(t *testing.T) {
+	checker := NewChecker()
 
 	// Set error
 	checker.SetICAPError("binding failed")
@@ -121,9 +121,9 @@ func TestHealthChecker_SetICAPError(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_IsReady tests overall readiness.
-func TestHealthChecker_IsReady(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_IsReady tests overall readiness.
+func TestChecker_IsReady(t *testing.T) {
+	checker := NewChecker()
 
 	// Initially not ready
 	if checker.IsReady() {
@@ -155,9 +155,9 @@ func TestHealthChecker_IsReady(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_ConcurrentAccess tests thread safety.
-func TestHealthChecker_ConcurrentAccess(_ *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_ConcurrentAccess tests thread safety.
+func TestChecker_ConcurrentAccess(_ *testing.T) {
+	checker := NewChecker()
 	var wg sync.WaitGroup
 
 	// Concurrent writes
@@ -181,8 +181,8 @@ func TestHealthChecker_ConcurrentAccess(_ *testing.T) {
 	// If we get here without race condition, test passes
 }
 
-// TestNewHealthServer tests creating a new health server.
-func TestNewHealthServer(t *testing.T) {
+// TestNewServer tests creating a new health server.
+func TestNewServer(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -190,25 +190,25 @@ func TestNewHealthServer(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 	if server == nil {
-		t.Fatal("NewHealthServer() returned nil")
+		t.Fatal("NewServer() returned nil")
 	}
 }
 
-// TestNewHealthServer_NilConfig tests that nil config returns error.
-func TestNewHealthServer_NilConfig(t *testing.T) {
-	_, err := NewHealthServer(nil)
+// TestNewServer_NilConfig tests that nil config returns error.
+func TestNewServer_NilConfig(t *testing.T) {
+	_, err := NewServer(nil)
 	if err == nil {
-		t.Error("NewHealthServer(nil) should return error")
+		t.Error("NewServer(nil) should return error")
 	}
 }
 
-// TestHealthServer_GetChecker tests getting the checker.
-func TestHealthServer_GetChecker(t *testing.T) {
+// TestServer_GetChecker tests getting the checker.
+func TestServer_GetChecker(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -216,9 +216,9 @@ func TestHealthServer_GetChecker(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	checker := server.Checker()
@@ -227,8 +227,8 @@ func TestHealthServer_GetChecker(t *testing.T) {
 	}
 }
 
-// TestHealthServer_HealthEndpoint tests the /health endpoint.
-func TestHealthServer_HealthEndpoint(t *testing.T) {
+// TestServer_HealthEndpoint tests the /health endpoint.
+func TestServer_HealthEndpoint(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -236,9 +236,9 @@ func TestHealthServer_HealthEndpoint(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	// Create test request
@@ -257,7 +257,7 @@ func TestHealthServer_HealthEndpoint(t *testing.T) {
 	}
 
 	// Parse response
-	var resp HealthResponse
+	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -271,8 +271,8 @@ func TestHealthServer_HealthEndpoint(t *testing.T) {
 	}
 }
 
-// TestHealthServer_ReadyEndpoint_Ready tests the /ready endpoint when ready.
-func TestHealthServer_ReadyEndpoint_Ready(t *testing.T) {
+// TestServer_ReadyEndpoint_Ready tests the /ready endpoint when ready.
+func TestServer_ReadyEndpoint_Ready(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -280,9 +280,9 @@ func TestHealthServer_ReadyEndpoint_Ready(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	// Mark as ready
@@ -323,8 +323,8 @@ func TestHealthServer_ReadyEndpoint_Ready(t *testing.T) {
 	}
 }
 
-// TestHealthServer_ReadyEndpoint_NotReady tests the /ready endpoint when not ready.
-func TestHealthServer_ReadyEndpoint_NotReady(t *testing.T) {
+// TestServer_ReadyEndpoint_NotReady tests the /ready endpoint when not ready.
+func TestServer_ReadyEndpoint_NotReady(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -332,9 +332,9 @@ func TestHealthServer_ReadyEndpoint_NotReady(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	// Don't mark as ready - test default state
@@ -368,8 +368,8 @@ func TestHealthServer_ReadyEndpoint_NotReady(t *testing.T) {
 	}
 }
 
-// TestHealthServer_ReadyEndpoint_WithErrors tests the /ready endpoint with errors.
-func TestHealthServer_ReadyEndpoint_WithErrors(t *testing.T) {
+// TestServer_ReadyEndpoint_WithErrors tests the /ready endpoint with errors.
+func TestServer_ReadyEndpoint_WithErrors(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -377,9 +377,9 @@ func TestHealthServer_ReadyEndpoint_WithErrors(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	// Mark with errors
@@ -420,8 +420,8 @@ func TestHealthServer_ReadyEndpoint_WithErrors(t *testing.T) {
 	}
 }
 
-// TestHealthServer_StartStop tests starting and stopping the server.
-func TestHealthServer_StartStop(t *testing.T) {
+// TestServer_StartStop tests starting and stopping the server.
+func TestServer_StartStop(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       18080, // Use non-standard port to avoid conflicts
@@ -429,9 +429,9 @@ func TestHealthServer_StartStop(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	ctx := context.Background()
@@ -475,8 +475,8 @@ func TestHealthServer_StartStop(t *testing.T) {
 	}
 }
 
-// TestHealthServer_StopWithoutStart tests stopping without starting.
-func TestHealthServer_StopWithoutStart(t *testing.T) {
+// TestServer_StopWithoutStart tests stopping without starting.
+func TestServer_StopWithoutStart(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -484,9 +484,9 @@ func TestHealthServer_StopWithoutStart(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -498,8 +498,8 @@ func TestHealthServer_StopWithoutStart(t *testing.T) {
 	}
 }
 
-// TestHealthServer_Disabled tests that disabled server doesn't start.
-func TestHealthServer_Disabled(t *testing.T) {
+// TestServer_Disabled tests that disabled server doesn't start.
+func TestServer_Disabled(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    false,
 		Port:       8080,
@@ -507,9 +507,9 @@ func TestHealthServer_Disabled(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	ctx := context.Background()
@@ -530,8 +530,8 @@ func TestHealthServer_Disabled(t *testing.T) {
 	}
 }
 
-// TestHealthServer_CustomPaths tests custom health and ready paths.
-func TestHealthServer_CustomPaths(t *testing.T) {
+// TestServer_CustomPaths tests custom health and ready paths.
+func TestServer_CustomPaths(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       18081,
@@ -539,9 +539,9 @@ func TestHealthServer_CustomPaths(t *testing.T) {
 		ReadyPath:  "/readyz",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	ctx := context.Background()
@@ -579,9 +579,9 @@ func TestHealthServer_CustomPaths(t *testing.T) {
 	}
 }
 
-// TestHealthChecker_GetStatus tests getting full status.
-func TestHealthChecker_GetStatus(t *testing.T) {
-	checker := NewHealthChecker()
+// TestChecker_GetStatus tests getting full status.
+func TestChecker_GetStatus(t *testing.T) {
+	checker := NewChecker()
 
 	checker.SetICAPReady(true)
 	checker.SetStorageReady(true)
@@ -602,8 +602,8 @@ func TestHealthChecker_GetStatus(t *testing.T) {
 	}
 }
 
-// TestHealthServer_MethodNotAllowed tests that non-GET methods are rejected.
-func TestHealthServer_MethodNotAllowed(t *testing.T) {
+// TestServer_MethodNotAllowed tests that non-GET methods are rejected.
+func TestServer_MethodNotAllowed(t *testing.T) {
 	cfg := &config.HealthConfig{
 		Enabled:    true,
 		Port:       8080,
@@ -611,9 +611,9 @@ func TestHealthServer_MethodNotAllowed(t *testing.T) {
 		ReadyPath:  "/ready",
 	}
 
-	server, err := NewHealthServer(cfg)
+	server, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("NewHealthServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}

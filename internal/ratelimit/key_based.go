@@ -62,7 +62,7 @@ func (l *GlobalKeyBasedLimiter) Allow() bool {
 // Returns:
 //   - error if context is canceled, nil otherwise
 func (l *GlobalKeyBasedLimiter) Wait(ctx context.Context) error {
-	return l.inner.Wait(l.key, ctx)
+	return l.inner.Wait(ctx, l.key)
 }
 
 // Reserve returns a Reservation for one token.

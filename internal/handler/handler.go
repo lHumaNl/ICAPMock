@@ -33,25 +33,25 @@ type Handler interface {
 	Method() string
 }
 
-// HandlerFunc is an adapter type that allows using ordinary functions as Handlers.
+// Func is an adapter type that allows using ordinary functions as Handlers.
 // This is useful for simple handlers, middleware, or testing.
 //
 // Example:
 //
-//	hf := handler.HandlerFunc(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+//	hf := handler.Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 //	    return icap.NewResponse(204), nil
-//	}, "REQMOD")
-type HandlerFunc func(ctx context.Context, req *icap.Request) (*icap.Response, error)
+//	})
+type Func func(ctx context.Context, req *icap.Request) (*icap.Response, error)
 
-// Handle implements the Handler interface for HandlerFunc.
+// Handle implements the Handler interface for Func.
 // It simply calls the underlying function.
-func (hf HandlerFunc) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+func (hf Func) Handle(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 	return hf(ctx, req)
 }
 
 // methodHandler wraps a HandlerFunc with a method string.
 type methodHandler struct {
-	HandlerFunc
+	Func
 	method string
 }
 
@@ -60,16 +60,16 @@ func (h *methodHandler) Method() string {
 	return h.method
 }
 
-// WrapHandler wraps a HandlerFunc with a method name to create a full Handler.
+// WrapHandler wraps a Func with a method name to create a full Handler.
 // This is a convenience function for creating handlers from functions.
 //
 // Example:
 //
 //	h := handler.WrapHandler(myHandlerFunc, "REQMOD")
-func WrapHandler(hf HandlerFunc, method string) Handler {
+func WrapHandler(hf Func, method string) Handler {
 	return &methodHandler{
-		HandlerFunc: hf,
-		method:      method,
+		Func:   hf,
+		method: method,
 	}
 }
 

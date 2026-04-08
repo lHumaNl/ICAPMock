@@ -103,7 +103,7 @@ func (r *Router) HandleFunc(path string, fn func(ctx context.Context, req *icap.
 	if fn == nil {
 		return fmt.Errorf("handler function cannot be nil")
 	}
-	return r.Handle(path, handler.WrapHandler(handler.HandlerFunc(fn), ""))
+	return r.Handle(path, handler.WrapHandler(handler.Func(fn), ""))
 }
 
 // Serve route the request to the appropriate handler.

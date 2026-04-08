@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-var CircuitOpenError = errors.New("circuit breaker is open")
+// ErrCircuitOpen is returned when the circuit breaker is in open state.
+var ErrCircuitOpen = errors.New("circuit breaker is open")
 
 type CircuitState int
 
@@ -81,7 +82,7 @@ func (cb *CircuitBreaker) Execute(_ context.Context, fn func() error) error {
 			}
 			cb.mu.Unlock()
 		} else {
-			return CircuitOpenError
+			return ErrCircuitOpen
 		}
 	}
 

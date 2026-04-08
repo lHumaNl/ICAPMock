@@ -234,8 +234,8 @@ func (c *ConfigClient) SaveConfig(ctx context.Context, content, filePath string)
 
 // ValidateConfig validates the configuration without saving.
 func (c *ConfigClient) ValidateConfig(ctx context.Context, content string) (valid bool, message string, err error) {
-	if err := validateConfigInput(content, ""); err != nil {
-		return false, err.Error(), fmt.Errorf("config validation failed: %w", err)
+	if validationErr := validateConfigInput(content, ""); validationErr != nil {
+		return false, validationErr.Error(), fmt.Errorf("config validation failed: %w", validationErr)
 	}
 
 	url := fmt.Sprintf("%s/api/config/validate", c.baseURL)

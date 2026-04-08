@@ -196,10 +196,6 @@ func shouldRetryError(err error) bool {
 		if strings.Contains(netErr.Error(), "EOF") {
 			return true
 		}
-
-		if netErr.Temporary() {
-			return true
-		}
 	}
 
 	if strings.Contains(err.Error(), "dial tcp") {

@@ -138,9 +138,9 @@ func (l *PerClientRateLimiter) Allow(clientIP string) (allowed, ok bool) {
 	defer l.mu.Unlock()
 
 	// Double-check after acquiring write lock
-	if state, exists := l.cache[clientIP]; exists {
-		allowed = state.limiter.Allow()
-		l.moveToHead(state)
+	if existing, exists := l.cache[clientIP]; exists {
+		allowed = existing.limiter.Allow()
+		l.moveToHead(existing)
 		return allowed, true
 	}
 

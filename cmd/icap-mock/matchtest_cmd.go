@@ -63,54 +63,95 @@ func (c *MatchTestCommand) Parse(args []string) error { return c.fs.Parse(args) 
 func (c *MatchTestCommand) Usage()                    { c.fs.Usage() }
 
 func (c *MatchTestCommand) Run(_ context.Context) error {
-	// Build URI
-	uri := c.uri
-	if uri == "" && c.path != "" {
-		uri = "icap://localhost" + c.path
-	}
+	uri := c.resolveURI()
 	if uri == "" {
 		return fmt.Errorf("either --uri or --path is required")
 	}
 
-	// Load scenarios from directory
+	scenarios, err := c.loadScenarios()
+	if err != nil {
+		return err
+	}
+
+	req, err := c.buildRequest(uri)
+	if err != nil {
+		return err
+	}
+
+	c.printRequestSummary(uri)
+
+	fmt.Fprintf(os.Stdout, "Scenarios (%d loaded):\n\n", len(scenarios)) //nolint:errcheck
+
+	matched := false
+	for _, s := range scenarios {
+		result := explainMatch(s, req)
+		if result.matched {
+			printMatchResult(s, result, c.verbose)
+			matched = true
+			break
+		} else if c.verbose {
+			printSkipResult(s, result)
+		}
+	}
+
+	if !matched {
+		fmt.Fprintln(os.Stdout, "  No scenario matched.") //nolint:errcheck
+		if !c.verbose {
+			fmt.Fprintln(os.Stdout, "  Tip: use --verbose to see why each scenario was skipped.") //nolint:errcheck
+		}
+		return fmt.Errorf("no matching scenario found")
+	}
+
+	return nil
+}
+
+func (c *MatchTestCommand) resolveURI() string {
+	if c.uri != "" {
+		return c.uri
+	}
+	if c.path != "" {
+		return "icap://localhost" + c.path
+	}
+	return ""
+}
+
+func (c *MatchTestCommand) loadScenarios() ([]*storage.Scenario, error) {
 	registry := storage.NewScenarioRegistry()
 	entries, err := os.ReadDir(c.scenariosDir)
 	if err != nil {
-		return fmt.Errorf("reading scenarios directory %s: %w", c.scenariosDir, err)
+		return nil, fmt.Errorf("reading scenarios directory %s: %w", c.scenariosDir, err)
 	}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || (!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml")) {
 			continue
 		}
-		if err := registry.Load(filepath.Join(c.scenariosDir, name)); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", name, err)
+		if loadErr := registry.Load(filepath.Join(c.scenariosDir, name)); loadErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", name, loadErr)
 		}
 	}
-
 	scenarios := registry.List()
 	if len(scenarios) == 0 {
-		return fmt.Errorf("no scenarios found in %s", c.scenariosDir)
+		return nil, fmt.Errorf("no scenarios found in %s", c.scenariosDir)
 	}
+	return scenarios, nil
+}
 
-	// Build request
+func (c *MatchTestCommand) buildRequest(uri string) (*icap.Request, error) {
 	req, err := icap.NewRequest(c.method, uri)
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
-
 	for _, h := range c.headers {
 		parts := strings.SplitN(h, ":", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("invalid header format %q (expected Key:Value)", h)
+			return nil, fmt.Errorf("invalid header format %q (expected Key:Value)", h)
 		}
 		req.SetHeader(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
-
 	if c.clientIP != "" {
 		req.ClientIP = c.clientIP
 	}
-
 	if c.httpMethod != "" || c.body != "" {
 		httpMethod := c.httpMethod
 		if httpMethod == "" {
@@ -125,8 +166,10 @@ func (c *MatchTestCommand) Run(_ context.Context) error {
 			req.HTTPRequest.Body = []byte(c.body)
 		}
 	}
+	return req, nil
+}
 
-	// Print request summary
+func (c *MatchTestCommand) printRequestSummary(uri string) {
 	fmt.Fprintf(os.Stdout, "Request: %s %s\n", c.method, uri) //nolint:errcheck
 	if c.httpMethod != "" {
 		fmt.Fprintf(os.Stdout, "  HTTP method: %s\n", c.httpMethod) //nolint:errcheck
@@ -145,53 +188,36 @@ func (c *MatchTestCommand) Run(_ context.Context) error {
 		fmt.Fprintf(os.Stdout, "  Header: %s\n", h) //nolint:errcheck
 	}
 	fmt.Fprintln(os.Stdout) //nolint:errcheck
+}
 
-	// Test each scenario
-	fmt.Fprintf(os.Stdout, "Scenarios (%d loaded):\n\n", len(scenarios)) //nolint:errcheck
-
-	matched := false
-	for _, s := range scenarios {
-		result := explainMatch(s, req)
-		if result.matched {
-			fmt.Fprintf(os.Stdout, "  >>> MATCH: %s (priority: %d)\n", s.Name, s.Priority) //nolint:errcheck
-			fmt.Fprintf(os.Stdout, "      Response: ICAP %d", s.Response.ICAPStatus)       //nolint:errcheck
-			if s.Response.HTTPStatus != 0 {
-				fmt.Fprintf(os.Stdout, ", HTTP %d", s.Response.HTTPStatus) //nolint:errcheck
-			}
-			if s.Response.Delay > 0 {
-				fmt.Fprintf(os.Stdout, ", delay %s", s.Response.Delay) //nolint:errcheck
-			}
-			fmt.Fprintln(os.Stdout) //nolint:errcheck
-			if c.verbose {
-				for _, check := range result.checks {
-					fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
-				}
-			}
-			fmt.Fprintln(os.Stdout) //nolint:errcheck
-			matched = true
-			break // first match wins (sorted by priority)
-		} else if c.verbose {
-			fmt.Fprintf(os.Stdout, "  --- SKIP: %s (priority: %d)\n", s.Name, s.Priority) //nolint:errcheck
-			for _, check := range result.checks {
-				if strings.HasPrefix(check, "FAIL") {
-					fmt.Fprintf(os.Stdout, "      [FAIL] %s\n", check[5:]) //nolint:errcheck
-				} else {
-					fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
-				}
-			}
-			fmt.Fprintln(os.Stdout) //nolint:errcheck
+func printMatchResult(s *storage.Scenario, result matchResult, verbose bool) {
+	fmt.Fprintf(os.Stdout, "  >>> MATCH: %s (priority: %d)\n", s.Name, s.Priority) //nolint:errcheck
+	fmt.Fprintf(os.Stdout, "      Response: ICAP %d", s.Response.ICAPStatus)       //nolint:errcheck
+	if s.Response.HTTPStatus != 0 {
+		fmt.Fprintf(os.Stdout, ", HTTP %d", s.Response.HTTPStatus) //nolint:errcheck
+	}
+	if s.Response.Delay > 0 {
+		fmt.Fprintf(os.Stdout, ", delay %s", s.Response.Delay) //nolint:errcheck
+	}
+	fmt.Fprintln(os.Stdout) //nolint:errcheck
+	if verbose {
+		for _, check := range result.checks {
+			fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
 		}
 	}
+	fmt.Fprintln(os.Stdout) //nolint:errcheck
+}
 
-	if !matched {
-		fmt.Fprintln(os.Stdout, "  No scenario matched.") //nolint:errcheck
-		if !c.verbose {
-			fmt.Fprintln(os.Stdout, "  Tip: use --verbose to see why each scenario was skipped.") //nolint:errcheck
+func printSkipResult(s *storage.Scenario, result matchResult) {
+	fmt.Fprintf(os.Stdout, "  --- SKIP: %s (priority: %d)\n", s.Name, s.Priority) //nolint:errcheck
+	for _, check := range result.checks {
+		if strings.HasPrefix(check, "FAIL") {
+			fmt.Fprintf(os.Stdout, "      [FAIL] %s\n", check[5:]) //nolint:errcheck
+		} else {
+			fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
 		}
-		return fmt.Errorf("no matching scenario found")
 	}
-
-	return nil
+	fmt.Fprintln(os.Stdout) //nolint:errcheck
 }
 
 type matchResult struct {
@@ -200,89 +226,127 @@ type matchResult struct {
 }
 
 func explainMatch(s *storage.Scenario, req *icap.Request) matchResult {
-	var checks []string
-	path := extractPathFromURI(req.URI)
+	e := &matchExplainer{scenario: s, req: req, path: extractPathFromURI(req.URI)}
+	return e.run()
+}
 
-	// Check ICAP method
-	if s.Match.Method != "" {
-		if s.Match.Method == req.Method {
-			checks = append(checks, fmt.Sprintf("icap_method=%s matches", s.Match.Method))
-		} else {
-			checks = append(checks, fmt.Sprintf("FAIL icap_method: want %s, got %s", s.Match.Method, req.Method))
-			return matchResult{matched: false, checks: checks}
-		}
+// matchExplainer accumulates match checks and short-circuits on first failure.
+type matchExplainer struct {
+	scenario *storage.Scenario
+	req      *icap.Request
+	path     string
+	checks   []string
+	failed   bool
+}
+
+func (e *matchExplainer) pass(msg string) { e.checks = append(e.checks, msg) }
+func (e *matchExplainer) fail(msg string) {
+	e.checks = append(e.checks, "FAIL "+msg)
+	e.failed = true
+}
+
+func (e *matchExplainer) run() matchResult {
+	e.checkMethod()
+	if !e.failed {
+		e.checkPath()
 	}
-
-	// Check path pattern
-	if s.Match.Path != "" {
-		if s.CompiledPath() != nil && s.CompiledPath().MatchString(path) {
-			checks = append(checks, fmt.Sprintf("path_pattern=%s matches %q", s.Match.Path, path))
-		} else {
-			checks = append(checks, fmt.Sprintf("FAIL path_pattern: %s does not match %q", s.Match.Path, path))
-			return matchResult{matched: false, checks: checks}
-		}
+	if !e.failed {
+		e.checkHeaders()
 	}
+	if !e.failed {
+		e.checkHTTPMethod()
+	}
+	if !e.failed {
+		e.checkBodyPattern()
+	}
+	if !e.failed {
+		e.checkClientIP()
+	}
+	return matchResult{matched: !e.failed, checks: e.checks}
+}
 
-	// Check headers
-	for key, value := range s.Match.Headers {
-		h, ok := req.Header.Get(key)
+func (e *matchExplainer) checkMethod() {
+	if e.scenario.Match.Method == "" {
+		return
+	}
+	if e.scenario.Match.Method == e.req.Method {
+		e.pass(fmt.Sprintf("icap_method=%s matches", e.scenario.Match.Method))
+	} else {
+		e.fail(fmt.Sprintf("icap_method: want %s, got %s", e.scenario.Match.Method, e.req.Method))
+	}
+}
+
+func (e *matchExplainer) checkPath() {
+	if e.scenario.Match.Path == "" {
+		return
+	}
+	if e.scenario.CompiledPath() != nil && e.scenario.CompiledPath().MatchString(e.path) {
+		e.pass(fmt.Sprintf("path_pattern=%s matches %q", e.scenario.Match.Path, e.path))
+	} else {
+		e.fail(fmt.Sprintf("path_pattern: %s does not match %q", e.scenario.Match.Path, e.path))
+	}
+}
+
+func (e *matchExplainer) checkHeaders() {
+	for key, value := range e.scenario.Match.Headers {
+		h, ok := e.req.Header.Get(key)
 		if ok && h == value {
-			checks = append(checks, fmt.Sprintf("header %s=%s matches", key, value))
+			e.pass(fmt.Sprintf("header %s=%s matches", key, value))
 		} else {
 			got := "<not set>"
 			if ok {
 				got = h
 			}
-			checks = append(checks, fmt.Sprintf("FAIL header %s: want %q, got %q", key, value, got))
-			return matchResult{matched: false, checks: checks}
+			e.fail(fmt.Sprintf("header %s: want %q, got %q", key, value, got))
+			return
 		}
 	}
+}
 
-	// Check HTTP method
-	if s.Match.HTTPMethod != "" {
-		if req.HTTPRequest != nil && req.HTTPRequest.Method == s.Match.HTTPMethod {
-			checks = append(checks, fmt.Sprintf("http_method=%s matches", s.Match.HTTPMethod))
-		} else {
-			got := "<no HTTP request>"
-			if req.HTTPRequest != nil {
-				got = req.HTTPRequest.Method
-			}
-			checks = append(checks, fmt.Sprintf("FAIL http_method: want %s, got %s", s.Match.HTTPMethod, got))
-			return matchResult{matched: false, checks: checks}
-		}
+func (e *matchExplainer) checkHTTPMethod() {
+	if e.scenario.Match.HTTPMethod == "" {
+		return
 	}
-
-	// Check body pattern
-	if s.Match.BodyPattern != "" {
-		if req.HTTPRequest != nil && s.CompiledBody() != nil {
-			body, _ := req.HTTPRequest.GetBody()
-			if s.CompiledBody().MatchString(string(body)) {
-				checks = append(checks, fmt.Sprintf("body_pattern=%s matches", s.Match.BodyPattern))
-			} else {
-				preview := string(body)
-				if len(preview) > 40 {
-					preview = preview[:40] + "..."
-				}
-				checks = append(checks, fmt.Sprintf("FAIL body_pattern: %s does not match %q", s.Match.BodyPattern, preview))
-				return matchResult{matched: false, checks: checks}
-			}
-		} else {
-			checks = append(checks, "FAIL body_pattern: no HTTP body to match against")
-			return matchResult{matched: false, checks: checks}
+	if e.req.HTTPRequest != nil && e.req.HTTPRequest.Method == e.scenario.Match.HTTPMethod {
+		e.pass(fmt.Sprintf("http_method=%s matches", e.scenario.Match.HTTPMethod))
+	} else {
+		got := "<no HTTP request>"
+		if e.req.HTTPRequest != nil {
+			got = e.req.HTTPRequest.Method
 		}
+		e.fail(fmt.Sprintf("http_method: want %s, got %s", e.scenario.Match.HTTPMethod, got))
 	}
+}
 
-	// Check client IP
-	if s.Match.ClientIP != "" {
-		if s.Match.ClientIP == req.ClientIP {
-			checks = append(checks, fmt.Sprintf("client_ip=%s matches", s.Match.ClientIP))
-		} else {
-			checks = append(checks, fmt.Sprintf("FAIL client_ip: want %s, got %s", s.Match.ClientIP, req.ClientIP))
-			return matchResult{matched: false, checks: checks}
+func (e *matchExplainer) checkBodyPattern() {
+	if e.scenario.Match.BodyPattern == "" {
+		return
+	}
+	if e.req.HTTPRequest == nil || e.scenario.CompiledBody() == nil {
+		e.fail("body_pattern: no HTTP body to match against")
+		return
+	}
+	body, _ := e.req.HTTPRequest.GetBody()
+	if e.scenario.CompiledBody().MatchString(string(body)) {
+		e.pass(fmt.Sprintf("body_pattern=%s matches", e.scenario.Match.BodyPattern))
+	} else {
+		preview := string(body)
+		if len(preview) > 40 {
+			preview = preview[:40] + "..."
 		}
+		e.fail(fmt.Sprintf("body_pattern: %s does not match %q", e.scenario.Match.BodyPattern, preview))
 	}
+}
 
-	return matchResult{matched: true, checks: checks}
+func (e *matchExplainer) checkClientIP() {
+	if e.scenario.Match.ClientIP == "" {
+		return
+	}
+	if e.scenario.Match.ClientIP == e.req.ClientIP {
+		e.pass(fmt.Sprintf("client_ip=%s matches", e.scenario.Match.ClientIP))
+	} else {
+		e.fail(fmt.Sprintf("client_ip: want %s, got %s", e.scenario.Match.ClientIP, e.req.ClientIP))
+	}
 }
 
 func extractPathFromURI(uri string) string {

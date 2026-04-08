@@ -99,26 +99,8 @@ func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 	// Apply defaults to servers: if defaults has values but server entry doesn't,
 	// the merge happens at runtime via ServerEntryConfig.ToServerConfig()
 	// Here we just ensure defaults have sane values
-	if cfg.Defaults.Host == "" && len(cfg.Servers) > 0 {
-		cfg.Defaults.Host = defaultHost
-	}
-	if cfg.Defaults.ReadTimeout == 0 && len(cfg.Servers) > 0 {
-		cfg.Defaults.ReadTimeout = 30 * time.Second
-	}
-	if cfg.Defaults.WriteTimeout == 0 && len(cfg.Servers) > 0 {
-		cfg.Defaults.WriteTimeout = 30 * time.Second
-	}
-	if cfg.Defaults.MaxConnections == 0 && len(cfg.Servers) > 0 {
-		cfg.Defaults.MaxConnections = 15000
-	}
-	if cfg.Defaults.MaxBodySize == 0 && len(cfg.Servers) > 0 {
-		cfg.Defaults.MaxBodySize = 10 * 1024 * 1024
-	}
-	if cfg.Defaults.IdleTimeout == 0 && len(cfg.Servers) > 0 {
-		cfg.Defaults.IdleTimeout = 60 * time.Second
-	}
-	if cfg.Defaults.ShutdownTimeout == 0 && len(cfg.Servers) > 0 {
-		cfg.Defaults.ShutdownTimeout = 30 * time.Second
+	if len(cfg.Servers) > 0 {
+		applyServerDefaults(&cfg.Defaults)
 	}
 
 	l.recordMetrics(true, time.Since(startTime))
@@ -139,6 +121,31 @@ func (l *Loader) recordMetrics(success bool, duration time.Duration) {
 	l.metrics.RecordConfigReload(status)
 	l.metrics.RecordConfigReloadDuration(duration)
 	l.metrics.SetConfigLastReloadStatus(success)
+}
+
+// applyServerDefaults fills in sane defaults for multi-server mode.
+func applyServerDefaults(defaults *DefaultsConfig) {
+	if defaults.Host == "" {
+		defaults.Host = defaultHost
+	}
+	if defaults.ReadTimeout == 0 {
+		defaults.ReadTimeout = 30 * time.Second
+	}
+	if defaults.WriteTimeout == 0 {
+		defaults.WriteTimeout = 30 * time.Second
+	}
+	if defaults.MaxConnections == 0 {
+		defaults.MaxConnections = 15000
+	}
+	if defaults.MaxBodySize == 0 {
+		defaults.MaxBodySize = 10 * 1024 * 1024
+	}
+	if defaults.IdleTimeout == 0 {
+		defaults.IdleTimeout = 60 * time.Second
+	}
+	if defaults.ShutdownTimeout == 0 {
+		defaults.ShutdownTimeout = 30 * time.Second
+	}
 }
 
 // LoadFromFile loads configuration from a YAML or JSON file.
@@ -177,306 +184,163 @@ func (l *Loader) LoadFromFile(path string) (*Config, error) {
 // Environment variables follow the pattern: ICAP_<SECTION>_<KEY>
 // For example: ICAP_SERVER_PORT, ICAP_LOGGING_LEVEL.
 func (l *Loader) LoadFromEnv(cfg *Config) error {
-	// Server configuration
-	if v := os.Getenv(l.envPrefix + "SERVER_HOST"); v != "" {
-		cfg.Server.Host = v
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_PORT"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Server.Port = i
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_PORT", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_READ_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadTimeout = d
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_READ_TIMEOUT", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_WRITE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.WriteTimeout = d
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_WRITE_TIMEOUT", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_MAX_CONNECTIONS"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Server.MaxConnections = i
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_MAX_CONNECTIONS", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_MAX_BODY_SIZE"); v != "" {
-		if i, err := ParseByteSize(v); err == nil {
-			cfg.Server.MaxBodySize = i
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_MAX_BODY_SIZE", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_STREAMING"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Server.Streaming = b
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_STREAMING", v, err)
-		}
-	}
-
-	// TLS configuration
-	if v := os.Getenv(l.envPrefix + "SERVER_TLS_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Server.TLS.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"SERVER_TLS_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_TLS_CERT_FILE"); v != "" {
-		cfg.Server.TLS.CertFile = v
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_TLS_KEY_FILE"); v != "" {
-		cfg.Server.TLS.KeyFile = v
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_TLS_CLIENT_CA_FILE"); v != "" {
-		cfg.Server.TLS.ClientCAFile = v
-	}
-	if v := os.Getenv(l.envPrefix + "SERVER_TLS_CLIENT_AUTH"); v != "" {
-		cfg.Server.TLS.ClientAuth = v
-	}
-
-	// Logging configuration
-	if v := os.Getenv(l.envPrefix + "LOGGING_LEVEL"); v != "" {
-		cfg.Logging.Level = v
-	}
-	if v := os.Getenv(l.envPrefix + "LOGGING_FORMAT"); v != "" {
-		cfg.Logging.Format = v
-	}
-	if v := os.Getenv(l.envPrefix + "LOGGING_OUTPUT"); v != "" {
-		cfg.Logging.Output = v
-	}
-	if v := os.Getenv(l.envPrefix + "LOGGING_MAX_SIZE"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Logging.MaxSize = i
-		} else {
-			warnEnvParse(l.envPrefix+"LOGGING_MAX_SIZE", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "LOGGING_MAX_BACKUPS"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Logging.MaxBackups = i
-		} else {
-			warnEnvParse(l.envPrefix+"LOGGING_MAX_BACKUPS", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "LOGGING_MAX_AGE"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Logging.MaxAge = i
-		} else {
-			warnEnvParse(l.envPrefix+"LOGGING_MAX_AGE", v, err)
-		}
-	}
-
-	// Metrics configuration
-	if v := os.Getenv(l.envPrefix + "METRICS_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Metrics.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"METRICS_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "METRICS_HOST"); v != "" {
-		cfg.Metrics.Host = v
-	}
-	if v := os.Getenv(l.envPrefix + "METRICS_PORT"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Metrics.Port = i
-		} else {
-			warnEnvParse(l.envPrefix+"METRICS_PORT", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "METRICS_PATH"); v != "" {
-		cfg.Metrics.Path = v
-	}
-
-	// Mock configuration
-	if v := os.Getenv(l.envPrefix + "MOCK_DEFAULT_MODE"); v != "" {
-		cfg.Mock.DefaultMode = v
-	}
-	if v := os.Getenv(l.envPrefix + "MOCK_SCENARIOS_DIR"); v != "" {
-		cfg.Mock.ScenariosDir = v
-	}
-	if v := os.Getenv(l.envPrefix + "MOCK_DEFAULT_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Mock.DefaultTimeout = d
-		} else {
-			warnEnvParse(l.envPrefix+"MOCK_DEFAULT_TIMEOUT", v, err)
-		}
-	}
-
-	// Chaos configuration
-	if v := os.Getenv(l.envPrefix + "CHAOS_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Chaos.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"CHAOS_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "CHAOS_ERROR_RATE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Chaos.ErrorRate = f
-		} else {
-			warnEnvParse(l.envPrefix+"CHAOS_ERROR_RATE", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "CHAOS_TIMEOUT_RATE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Chaos.TimeoutRate = f
-		} else {
-			warnEnvParse(l.envPrefix+"CHAOS_TIMEOUT_RATE", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "CHAOS_MIN_LATENCY_MS"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Chaos.MinLatencyMs = i
-		} else {
-			warnEnvParse(l.envPrefix+"CHAOS_MIN_LATENCY_MS", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "CHAOS_MAX_LATENCY_MS"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Chaos.MaxLatencyMs = i
-		} else {
-			warnEnvParse(l.envPrefix+"CHAOS_MAX_LATENCY_MS", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "CHAOS_CONNECTION_DROP_RATE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Chaos.ConnectionDropRate = f
-		} else {
-			warnEnvParse(l.envPrefix+"CHAOS_CONNECTION_DROP_RATE", v, err)
-		}
-	}
-
-	// Storage configuration
-	if v := os.Getenv(l.envPrefix + "STORAGE_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Storage.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"STORAGE_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "STORAGE_REQUESTS_DIR"); v != "" {
-		cfg.Storage.RequestsDir = v
-	}
-	if v := os.Getenv(l.envPrefix + "STORAGE_MAX_FILE_SIZE"); v != "" {
-		if i, err := ParseByteSize(v); err == nil {
-			cfg.Storage.MaxFileSize = i
-		} else {
-			warnEnvParse(l.envPrefix+"STORAGE_MAX_FILE_SIZE", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "STORAGE_ROTATE_AFTER"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Storage.RotateAfter = i
-		} else {
-			warnEnvParse(l.envPrefix+"STORAGE_ROTATE_AFTER", v, err)
-		}
-	}
-
-	// Rate limit configuration
-	if v := os.Getenv(l.envPrefix + "RATE_LIMIT_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.RateLimit.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"RATE_LIMIT_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "RATE_LIMIT_RPS"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.RateLimit.RequestsPerSecond = f
-		} else {
-			warnEnvParse(l.envPrefix+"RATE_LIMIT_RPS", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "RATE_LIMIT_REQUESTS_PER_SECOND"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.RateLimit.RequestsPerSecond = f
-		} else {
-			warnEnvParse(l.envPrefix+"RATE_LIMIT_REQUESTS_PER_SECOND", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "RATE_LIMIT_BURST"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.RateLimit.Burst = i
-		} else {
-			warnEnvParse(l.envPrefix+"RATE_LIMIT_BURST", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "RATE_LIMIT_ALGORITHM"); v != "" {
-		cfg.RateLimit.Algorithm = v
-	}
-
-	// Health configuration
-	if v := os.Getenv(l.envPrefix + "HEALTH_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Health.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"HEALTH_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "HEALTH_PORT"); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			cfg.Health.Port = i
-		} else {
-			warnEnvParse(l.envPrefix+"HEALTH_PORT", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "HEALTH_PATH"); v != "" {
-		cfg.Health.HealthPath = v
-	}
-	if v := os.Getenv(l.envPrefix + "HEALTH_HEALTH_PATH"); v != "" {
-		cfg.Health.HealthPath = v
-	}
-	if v := os.Getenv(l.envPrefix + "HEALTH_READY_PATH"); v != "" {
-		cfg.Health.ReadyPath = v
-	}
-	if v := os.Getenv(l.envPrefix + "API_TOKEN"); v != "" {
-		cfg.Health.APIToken = v
-	}
-
-	// Replay configuration
-	if v := os.Getenv(l.envPrefix + "REPLAY_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Replay.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"REPLAY_ENABLED", v, err)
-		}
-	}
-	if v := os.Getenv(l.envPrefix + "REPLAY_REQUESTS_DIR"); v != "" {
-		cfg.Replay.RequestsDir = v
-	}
-	if v := os.Getenv(l.envPrefix + "REPLAY_SPEED"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Replay.Speed = f
-		} else {
-			warnEnvParse(l.envPrefix+"REPLAY_SPEED", v, err)
-		}
-	}
-
-	// Pprof configuration
-	if v := os.Getenv(l.envPrefix + "PPROF_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Pprof.Enabled = b
-		} else {
-			warnEnvParse(l.envPrefix+"PPROF_ENABLED", v, err)
-		}
-	}
-
-	// Listener overrides are not supported via environment variables
-	// (use config file for multi-listener setup)
-
+	l.loadServerEnv(cfg)
+	l.loadTLSEnv(cfg)
+	l.loadLoggingEnv(cfg)
+	l.loadMetricsEnv(cfg)
+	l.loadMockEnv(cfg)
+	l.loadChaosEnv(cfg)
+	l.loadStorageEnv(cfg)
+	l.loadRateLimitEnv(cfg)
+	l.loadHealthEnv(cfg)
+	l.loadReplayEnv(cfg)
+	l.loadPprofEnv(cfg)
 	return nil
+}
+
+// envStr reads an environment variable and sets dst if non-empty.
+func (l *Loader) envStr(key string, dst *string) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		*dst = v
+	}
+}
+
+// envInt reads an environment variable, parses as int, sets dst if valid.
+func (l *Loader) envInt(key string, dst *int) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			*dst = i
+		} else {
+			warnEnvParse(l.envPrefix+key, v, err)
+		}
+	}
+}
+
+// envInt64ByteSize reads an environment variable, parses as byte size, sets dst if valid.
+func (l *Loader) envInt64ByteSize(key string, dst *int64) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		if i, err := ParseByteSize(v); err == nil {
+			*dst = i
+		} else {
+			warnEnvParse(l.envPrefix+key, v, err)
+		}
+	}
+}
+
+// envBool reads an environment variable, parses as bool, sets dst if valid.
+func (l *Loader) envBool(key string, dst *bool) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			*dst = b
+		} else {
+			warnEnvParse(l.envPrefix+key, v, err)
+		}
+	}
+}
+
+// envFloat64 reads an environment variable, parses as float64, sets dst if valid.
+func (l *Loader) envFloat64(key string, dst *float64) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			*dst = f
+		} else {
+			warnEnvParse(l.envPrefix+key, v, err)
+		}
+	}
+}
+
+// envDuration reads an environment variable, parses as duration, sets dst if valid.
+func (l *Loader) envDuration(key string, dst *time.Duration) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			*dst = d
+		} else {
+			warnEnvParse(l.envPrefix+key, v, err)
+		}
+	}
+}
+
+func (l *Loader) loadServerEnv(cfg *Config) {
+	l.envStr("SERVER_HOST", &cfg.Server.Host)
+	l.envInt("SERVER_PORT", &cfg.Server.Port)
+	l.envDuration("SERVER_READ_TIMEOUT", &cfg.Server.ReadTimeout)
+	l.envDuration("SERVER_WRITE_TIMEOUT", &cfg.Server.WriteTimeout)
+	l.envInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
+	l.envInt64ByteSize("SERVER_MAX_BODY_SIZE", &cfg.Server.MaxBodySize)
+	l.envBool("SERVER_STREAMING", &cfg.Server.Streaming)
+}
+
+func (l *Loader) loadTLSEnv(cfg *Config) {
+	l.envBool("SERVER_TLS_ENABLED", &cfg.Server.TLS.Enabled)
+	l.envStr("SERVER_TLS_CERT_FILE", &cfg.Server.TLS.CertFile)
+	l.envStr("SERVER_TLS_KEY_FILE", &cfg.Server.TLS.KeyFile)
+	l.envStr("SERVER_TLS_CLIENT_CA_FILE", &cfg.Server.TLS.ClientCAFile)
+	l.envStr("SERVER_TLS_CLIENT_AUTH", &cfg.Server.TLS.ClientAuth)
+}
+
+func (l *Loader) loadLoggingEnv(cfg *Config) {
+	l.envStr("LOGGING_LEVEL", &cfg.Logging.Level)
+	l.envStr("LOGGING_FORMAT", &cfg.Logging.Format)
+	l.envStr("LOGGING_OUTPUT", &cfg.Logging.Output)
+	l.envInt("LOGGING_MAX_SIZE", &cfg.Logging.MaxSize)
+	l.envInt("LOGGING_MAX_BACKUPS", &cfg.Logging.MaxBackups)
+	l.envInt("LOGGING_MAX_AGE", &cfg.Logging.MaxAge)
+}
+
+func (l *Loader) loadMetricsEnv(cfg *Config) {
+	l.envBool("METRICS_ENABLED", &cfg.Metrics.Enabled)
+	l.envStr("METRICS_HOST", &cfg.Metrics.Host)
+	l.envInt("METRICS_PORT", &cfg.Metrics.Port)
+	l.envStr("METRICS_PATH", &cfg.Metrics.Path)
+}
+
+func (l *Loader) loadMockEnv(cfg *Config) {
+	l.envStr("MOCK_DEFAULT_MODE", &cfg.Mock.DefaultMode)
+	l.envStr("MOCK_SCENARIOS_DIR", &cfg.Mock.ScenariosDir)
+	l.envDuration("MOCK_DEFAULT_TIMEOUT", &cfg.Mock.DefaultTimeout)
+}
+
+func (l *Loader) loadChaosEnv(cfg *Config) {
+	l.envBool("CHAOS_ENABLED", &cfg.Chaos.Enabled)
+	l.envFloat64("CHAOS_ERROR_RATE", &cfg.Chaos.ErrorRate)
+	l.envFloat64("CHAOS_TIMEOUT_RATE", &cfg.Chaos.TimeoutRate)
+	l.envInt("CHAOS_MIN_LATENCY_MS", &cfg.Chaos.MinLatencyMs)
+	l.envInt("CHAOS_MAX_LATENCY_MS", &cfg.Chaos.MaxLatencyMs)
+	l.envFloat64("CHAOS_CONNECTION_DROP_RATE", &cfg.Chaos.ConnectionDropRate)
+}
+
+func (l *Loader) loadStorageEnv(cfg *Config) {
+	l.envBool("STORAGE_ENABLED", &cfg.Storage.Enabled)
+	l.envStr("STORAGE_REQUESTS_DIR", &cfg.Storage.RequestsDir)
+	l.envInt64ByteSize("STORAGE_MAX_FILE_SIZE", &cfg.Storage.MaxFileSize)
+	l.envInt("STORAGE_ROTATE_AFTER", &cfg.Storage.RotateAfter)
+}
+
+func (l *Loader) loadRateLimitEnv(cfg *Config) {
+	l.envBool("RATE_LIMIT_ENABLED", &cfg.RateLimit.Enabled)
+	l.envFloat64("RATE_LIMIT_RPS", &cfg.RateLimit.RequestsPerSecond)
+	l.envFloat64("RATE_LIMIT_REQUESTS_PER_SECOND", &cfg.RateLimit.RequestsPerSecond)
+	l.envInt("RATE_LIMIT_BURST", &cfg.RateLimit.Burst)
+	l.envStr("RATE_LIMIT_ALGORITHM", &cfg.RateLimit.Algorithm)
+}
+
+func (l *Loader) loadHealthEnv(cfg *Config) {
+	l.envBool("HEALTH_ENABLED", &cfg.Health.Enabled)
+	l.envInt("HEALTH_PORT", &cfg.Health.Port)
+	l.envStr("HEALTH_PATH", &cfg.Health.HealthPath)
+	l.envStr("HEALTH_HEALTH_PATH", &cfg.Health.HealthPath)
+	l.envStr("HEALTH_READY_PATH", &cfg.Health.ReadyPath)
+	l.envStr("API_TOKEN", &cfg.Health.APIToken)
+}
+
+func (l *Loader) loadReplayEnv(cfg *Config) {
+	l.envBool("REPLAY_ENABLED", &cfg.Replay.Enabled)
+	l.envStr("REPLAY_REQUESTS_DIR", &cfg.Replay.RequestsDir)
+	l.envFloat64("REPLAY_SPEED", &cfg.Replay.Speed)
+}
+
+func (l *Loader) loadPprofEnv(cfg *Config) {
+	l.envBool("PPROF_ENABLED", &cfg.Pprof.Enabled)
 }
 
 // mergeConfigs merges source config into destination config.
@@ -488,162 +352,134 @@ func (l *Loader) LoadFromEnv(cfg *Config) error {
 // indistinguishable from "not set". This means a config file that omits
 // a boolean field will set it to false, overriding any default of true.
 func (l *Loader) mergeConfigs(dst, src *Config) {
-	// Server
-	if src.Server.Host != "" {
-		dst.Server.Host = src.Server.Host
+	mergeServerConfig(dst, src)
+	mergeLoggingConfig(dst, src)
+	mergeMetricsConfig(dst, src)
+	mergeMockConfig(dst, src)
+	mergeChaosConfig(dst, src)
+	mergeStorageConfig(dst, src)
+	mergeRateLimitConfig(dst, src)
+	mergeHealthConfig(dst, src)
+	mergeReplayConfig(dst, src)
+	mergePluginConfig(dst, src)
+	dst.Pprof.Enabled = src.Pprof.Enabled
+}
+
+// mergeStr sets dst to src if src is non-empty.
+func mergeStr(dst *string, src string) {
+	if src != "" {
+		*dst = src
 	}
-	if src.Server.Port != 0 {
-		dst.Server.Port = src.Server.Port
+}
+
+// mergeInt sets dst to src if src is non-zero.
+func mergeInt(dst *int, src int) {
+	if src != 0 {
+		*dst = src
 	}
-	if src.Server.ReadTimeout != 0 {
-		dst.Server.ReadTimeout = src.Server.ReadTimeout
+}
+
+// mergeInt64 sets dst to src if src is non-zero.
+func mergeInt64(dst *int64, src int64) {
+	if src != 0 {
+		*dst = src
 	}
-	if src.Server.WriteTimeout != 0 {
-		dst.Server.WriteTimeout = src.Server.WriteTimeout
+}
+
+// mergeFloat64 sets dst to src if src is non-zero.
+func mergeFloat64(dst *float64, src float64) {
+	if src != 0 {
+		*dst = src
 	}
-	if src.Server.MaxConnections != 0 {
-		dst.Server.MaxConnections = src.Server.MaxConnections
+}
+
+// mergeDuration sets dst to src if src is non-zero.
+func mergeDuration(dst *time.Duration, src time.Duration) {
+	if src != 0 {
+		*dst = src
 	}
-	if src.Server.MaxBodySize != 0 {
-		dst.Server.MaxBodySize = src.Server.MaxBodySize
-	}
-	// Streaming is a bool, need to check if it was explicitly set
-	// For simplicity, we always merge if source was loaded from file
+}
+
+func mergeServerConfig(dst, src *Config) {
+	mergeStr(&dst.Server.Host, src.Server.Host)
+	mergeInt(&dst.Server.Port, src.Server.Port)
+	mergeDuration(&dst.Server.ReadTimeout, src.Server.ReadTimeout)
+	mergeDuration(&dst.Server.WriteTimeout, src.Server.WriteTimeout)
+	mergeInt(&dst.Server.MaxConnections, src.Server.MaxConnections)
+	mergeInt64(&dst.Server.MaxBodySize, src.Server.MaxBodySize)
 	dst.Server.Streaming = src.Server.Streaming
 
 	// TLS
-	if src.Server.TLS.CertFile != "" {
-		dst.Server.TLS.CertFile = src.Server.TLS.CertFile
-	}
-	if src.Server.TLS.KeyFile != "" {
-		dst.Server.TLS.KeyFile = src.Server.TLS.KeyFile
-	}
+	mergeStr(&dst.Server.TLS.CertFile, src.Server.TLS.CertFile)
+	mergeStr(&dst.Server.TLS.KeyFile, src.Server.TLS.KeyFile)
 	dst.Server.TLS.Enabled = src.Server.TLS.Enabled
-	if src.Server.TLS.ClientCAFile != "" {
-		dst.Server.TLS.ClientCAFile = src.Server.TLS.ClientCAFile
-	}
-	if src.Server.TLS.ClientAuth != "" {
-		dst.Server.TLS.ClientAuth = src.Server.TLS.ClientAuth
-	}
+	mergeStr(&dst.Server.TLS.ClientCAFile, src.Server.TLS.ClientCAFile)
+	mergeStr(&dst.Server.TLS.ClientAuth, src.Server.TLS.ClientAuth)
+}
 
-	// Logging
-	if src.Logging.Level != "" {
-		dst.Logging.Level = src.Logging.Level
-	}
-	if src.Logging.Format != "" {
-		dst.Logging.Format = src.Logging.Format
-	}
-	if src.Logging.Output != "" {
-		dst.Logging.Output = src.Logging.Output
-	}
-	if src.Logging.MaxSize != 0 {
-		dst.Logging.MaxSize = src.Logging.MaxSize
-	}
-	if src.Logging.MaxBackups != 0 {
-		dst.Logging.MaxBackups = src.Logging.MaxBackups
-	}
-	if src.Logging.MaxAge != 0 {
-		dst.Logging.MaxAge = src.Logging.MaxAge
-	}
+func mergeLoggingConfig(dst, src *Config) {
+	mergeStr(&dst.Logging.Level, src.Logging.Level)
+	mergeStr(&dst.Logging.Format, src.Logging.Format)
+	mergeStr(&dst.Logging.Output, src.Logging.Output)
+	mergeInt(&dst.Logging.MaxSize, src.Logging.MaxSize)
+	mergeInt(&dst.Logging.MaxBackups, src.Logging.MaxBackups)
+	mergeInt(&dst.Logging.MaxAge, src.Logging.MaxAge)
+}
 
-	// Metrics
+func mergeMetricsConfig(dst, src *Config) {
 	dst.Metrics.Enabled = src.Metrics.Enabled
-	if src.Metrics.Host != "" {
-		dst.Metrics.Host = src.Metrics.Host
-	}
-	if src.Metrics.Port != 0 {
-		dst.Metrics.Port = src.Metrics.Port
-	}
-	if src.Metrics.Path != "" {
-		dst.Metrics.Path = src.Metrics.Path
-	}
+	mergeStr(&dst.Metrics.Host, src.Metrics.Host)
+	mergeInt(&dst.Metrics.Port, src.Metrics.Port)
+	mergeStr(&dst.Metrics.Path, src.Metrics.Path)
+}
 
-	// Mock
-	if src.Mock.DefaultMode != "" {
-		dst.Mock.DefaultMode = src.Mock.DefaultMode
-	}
-	if src.Mock.ScenariosDir != "" {
-		dst.Mock.ScenariosDir = src.Mock.ScenariosDir
-	}
-	if src.Mock.DefaultTimeout != 0 {
-		dst.Mock.DefaultTimeout = src.Mock.DefaultTimeout
-	}
+func mergeMockConfig(dst, src *Config) {
+	mergeStr(&dst.Mock.DefaultMode, src.Mock.DefaultMode)
+	mergeStr(&dst.Mock.ScenariosDir, src.Mock.ScenariosDir)
+	mergeDuration(&dst.Mock.DefaultTimeout, src.Mock.DefaultTimeout)
+}
 
-	// Chaos
+func mergeChaosConfig(dst, src *Config) {
 	dst.Chaos.Enabled = src.Chaos.Enabled
-	if src.Chaos.ErrorRate != 0 {
-		dst.Chaos.ErrorRate = src.Chaos.ErrorRate
-	}
-	if src.Chaos.TimeoutRate != 0 {
-		dst.Chaos.TimeoutRate = src.Chaos.TimeoutRate
-	}
-	if src.Chaos.MinLatencyMs != 0 {
-		dst.Chaos.MinLatencyMs = src.Chaos.MinLatencyMs
-	}
-	if src.Chaos.MaxLatencyMs != 0 {
-		dst.Chaos.MaxLatencyMs = src.Chaos.MaxLatencyMs
-	}
-	if src.Chaos.LatencyRate != 0 {
-		dst.Chaos.LatencyRate = src.Chaos.LatencyRate
-	}
-	if src.Chaos.ConnectionDropRate != 0 {
-		dst.Chaos.ConnectionDropRate = src.Chaos.ConnectionDropRate
-	}
+	mergeFloat64(&dst.Chaos.ErrorRate, src.Chaos.ErrorRate)
+	mergeFloat64(&dst.Chaos.TimeoutRate, src.Chaos.TimeoutRate)
+	mergeInt(&dst.Chaos.MinLatencyMs, src.Chaos.MinLatencyMs)
+	mergeInt(&dst.Chaos.MaxLatencyMs, src.Chaos.MaxLatencyMs)
+	mergeFloat64(&dst.Chaos.LatencyRate, src.Chaos.LatencyRate)
+	mergeFloat64(&dst.Chaos.ConnectionDropRate, src.Chaos.ConnectionDropRate)
+}
 
-	// Storage
+func mergeStorageConfig(dst, src *Config) {
 	dst.Storage.Enabled = src.Storage.Enabled
-	if src.Storage.RequestsDir != "" {
-		dst.Storage.RequestsDir = src.Storage.RequestsDir
-	}
-	if src.Storage.MaxFileSize != 0 {
-		dst.Storage.MaxFileSize = src.Storage.MaxFileSize
-	}
-	if src.Storage.RotateAfter != 0 {
-		dst.Storage.RotateAfter = src.Storage.RotateAfter
-	}
+	mergeStr(&dst.Storage.RequestsDir, src.Storage.RequestsDir)
+	mergeInt64(&dst.Storage.MaxFileSize, src.Storage.MaxFileSize)
+	mergeInt(&dst.Storage.RotateAfter, src.Storage.RotateAfter)
+}
 
-	// RateLimit
+func mergeRateLimitConfig(dst, src *Config) {
 	dst.RateLimit.Enabled = src.RateLimit.Enabled
-	if src.RateLimit.RequestsPerSecond != 0 {
-		dst.RateLimit.RequestsPerSecond = src.RateLimit.RequestsPerSecond
-	}
-	if src.RateLimit.Burst != 0 {
-		dst.RateLimit.Burst = src.RateLimit.Burst
-	}
-	if src.RateLimit.Algorithm != "" {
-		dst.RateLimit.Algorithm = src.RateLimit.Algorithm
-	}
+	mergeFloat64(&dst.RateLimit.RequestsPerSecond, src.RateLimit.RequestsPerSecond)
+	mergeInt(&dst.RateLimit.Burst, src.RateLimit.Burst)
+	mergeStr(&dst.RateLimit.Algorithm, src.RateLimit.Algorithm)
+}
 
-	// Health
+func mergeHealthConfig(dst, src *Config) {
 	dst.Health.Enabled = src.Health.Enabled
-	if src.Health.Port != 0 {
-		dst.Health.Port = src.Health.Port
-	}
-	if src.Health.HealthPath != "" {
-		dst.Health.HealthPath = src.Health.HealthPath
-	}
-	if src.Health.ReadyPath != "" {
-		dst.Health.ReadyPath = src.Health.ReadyPath
-	}
+	mergeInt(&dst.Health.Port, src.Health.Port)
+	mergeStr(&dst.Health.HealthPath, src.Health.HealthPath)
+	mergeStr(&dst.Health.ReadyPath, src.Health.ReadyPath)
+}
 
-	// Replay
+func mergeReplayConfig(dst, src *Config) {
 	dst.Replay.Enabled = src.Replay.Enabled
-	if src.Replay.RequestsDir != "" {
-		dst.Replay.RequestsDir = src.Replay.RequestsDir
-	}
-	if src.Replay.Speed != 0 {
-		dst.Replay.Speed = src.Replay.Speed
-	}
+	mergeStr(&dst.Replay.RequestsDir, src.Replay.RequestsDir)
+	mergeFloat64(&dst.Replay.Speed, src.Replay.Speed)
+}
 
-	// Plugin
+func mergePluginConfig(dst, src *Config) {
 	dst.Plugin.Enabled = src.Plugin.Enabled
-	if src.Plugin.Dir != "" {
-		dst.Plugin.Dir = src.Plugin.Dir
-	}
+	mergeStr(&dst.Plugin.Dir, src.Plugin.Dir)
 	if len(src.Plugin.Names) > 0 {
 		dst.Plugin.Names = src.Plugin.Names
 	}
-
-	// Pprof
-	dst.Pprof.Enabled = src.Pprof.Enabled
 }

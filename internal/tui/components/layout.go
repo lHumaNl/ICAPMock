@@ -132,16 +132,7 @@ func (m *LayoutModel) renderVertical() string {
 			Border(m.border).
 			Padding(m.padding)
 
-		// Truncate content if needed
 		content := section.Content
-		if lipgloss.Height(content) > heights[i] {
-			// Simple truncation - in production, use viewport
-			lines := lipgloss.Height(content)
-			if lines > heights[i] {
-				// Take last heights[i] lines
-				// This is simplified - use viewport for proper scrolling
-			}
-		}
 
 		renderedSections = append(renderedSections, style.Render(content))
 	}

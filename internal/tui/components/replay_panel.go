@@ -512,10 +512,10 @@ func (m *ReplayPanelModel) renderResultsView() string {
 	}
 
 	// Define success and failure styles
-	successStyle := SubtitleStyle.Copy().
+	successStyle := SubtitleStyle.
 		Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "46"}).
 		Bold(true)
-	failureStyle := SubtitleStyle.Copy().
+	failureStyle := SubtitleStyle.
 		Foreground(lipgloss.AdaptiveColor{Light: "124", Dark: "196"}).
 		Bold(true)
 
