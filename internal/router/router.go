@@ -37,8 +37,8 @@ type Route struct {
 // frequently accessed routes.
 type Router struct {
 	cache  *RouteCache
-	routes sync.Map
 	logger *slog.Logger
+	routes sync.Map
 }
 
 // NewRouter creates a new Router with an empty route table.

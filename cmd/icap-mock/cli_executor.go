@@ -703,43 +703,27 @@ func createProcessorChain(
 	}
 }
 
-// registerHandlers registers all ICAP handlers with the router.
-func registerHandlers(
-	rtr *router.Router,
-	proc processor.Processor,
-	collector *metrics.Collector,
+// buildMiddlewareChain creates the middleware chain function.
+// Order: Panic Recovery -> Rate Limiter -> Storage -> Handler.
+func buildMiddlewareChain(
+	log *logger.Logger,
 	limiter ratelimit.Limiter,
 	storageMiddleware *middleware.StorageMiddleware,
 	cfg *config.Config,
-	log *logger.Logger,
-	registry storage.ScenarioRegistry,
-) error {
-	// PanicRecoveryMiddleware provides protection against panics in handlers.
-	// It recovers from panics, logs the error with request context, and returns
-	// a 500 Internal Server Error response to prevent server crashes.
-	// This is the first middleware in the chain, ensuring all downstream panics are caught.
+) func(handler.Handler) handler.Handler {
 	panicRecovery := middleware.PanicRecoveryMiddleware(log.Logger)
 
-	// RateLimiterMiddleware checks rate limit before processing requests.
-	// If rate limit is exceeded, returns ICAP 429 (Too Many Requests).
-	// Applied before the handler to prevent processing over limit requests.
 	var rateLimitMiddleware handler.Middleware
 	if limiter != nil && cfg.RateLimit.Enabled {
 		rateLimitMiddleware = middleware.RateLimiterMiddleware(limiter)
 	}
 
-	// StorageMiddleware saves requests to storage asynchronously.
-	// Applied after handler execution to capture response status.
-	// Uses worker pool to prevent goroutine explosion.
 	var storageMW handler.Middleware
 	if storageMiddleware != nil {
 		storageMW = storageMiddleware.Wrap
 	}
 
-	// Build middleware chain: Panic Recovery -> Rate Limiter -> Storage -> Handler
-	// Order is important: Rate limiter should be before storage to prevent
-	// saving rate-limited requests.
-	applyMiddleware := func(h handler.Handler) handler.Handler {
+	return func(h handler.Handler) handler.Handler {
 		wrapped := panicRecovery(h)
 		if rateLimitMiddleware != nil {
 			wrapped = rateLimitMiddleware(wrapped)
@@ -749,9 +733,16 @@ func registerHandlers(
 		}
 		return wrapped
 	}
+}
 
-	// Create preview rate limiter for preview mode requests
-	// This prevents DoS attacks by limiting preview requests per client
+// createHandlers creates REQMOD, RESPMOD, and OPTIONS handlers with middleware applied.
+func createHandlers(
+	proc processor.Processor,
+	collector *metrics.Collector,
+	cfg *config.Config,
+	log *logger.Logger,
+	applyMiddleware func(handler.Handler) handler.Handler,
+) (wrappedReqmod, wrappedRespmod, wrappedOptions handler.Handler) {
 	var previewRateLimiter *handler.PreviewRateLimiter
 	if cfg.Preview.Enabled {
 		previewRateLimiter = handler.NewPreviewRateLimiter(
@@ -766,7 +757,6 @@ func registerHandlers(
 		)
 	}
 
-	// Create handlers
 	reqmodHandler := handler.NewReqmodHandler(proc, collector, log.Logger, previewRateLimiter)
 	respmodHandler := handler.NewRespmodHandler(proc, collector, log.Logger, previewRateLimiter)
 	optionsHandler := handler.NewOptionsHandler(handler.OptionsHandlerConfig{
@@ -777,23 +767,32 @@ func registerHandlers(
 		OptionsTTL:     3600 * time.Second,
 	})
 
-	wrappedReqmod := applyMiddleware(reqmodHandler)
-	wrappedRespmod := applyMiddleware(respmodHandler)
-	wrappedOptions := applyMiddleware(optionsHandler)
+	return applyMiddleware(reqmodHandler), applyMiddleware(respmodHandler), applyMiddleware(optionsHandler)
+}
+
+// registerHandlers registers all ICAP handlers with the router.
+func registerHandlers(
+	rtr *router.Router,
+	proc processor.Processor,
+	collector *metrics.Collector,
+	limiter ratelimit.Limiter,
+	storageMiddleware *middleware.StorageMiddleware,
+	cfg *config.Config,
+	log *logger.Logger,
+	registry storage.ScenarioRegistry,
+) error {
+	applyMiddleware := buildMiddlewareChain(log, limiter, storageMiddleware, cfg)
+	wrappedReqmod, wrappedRespmod, wrappedOptions := createHandlers(proc, collector, cfg, log, applyMiddleware)
 
 	// Register default endpoints
 	defaultEndpoints := []string{"/reqmod", "/respmod", "/options"}
+	handlers := map[string]handler.Handler{
+		"/reqmod":  wrappedReqmod,
+		"/respmod": wrappedRespmod,
+		"/options": wrappedOptions,
+	}
 	for _, ep := range defaultEndpoints {
-		var h handler.Handler
-		switch ep {
-		case "/reqmod":
-			h = wrappedReqmod
-		case "/respmod":
-			h = wrappedRespmod
-		case "/options":
-			h = wrappedOptions
-		}
-		if err := rtr.Handle(ep, h); err != nil {
+		if err := rtr.Handle(ep, handlers[ep]); err != nil {
 			return fmt.Errorf("registering handler for %s: %w", ep, err)
 		}
 	}
@@ -810,7 +809,6 @@ func registerHandlers(
 				continue
 			}
 			registered[ep] = true
-			// Route custom endpoints to REQMOD or RESPMOD handler based on scenario method
 			h := wrappedRespmod
 			if s.Match.Method == "REQMOD" {
 				h = wrappedReqmod
