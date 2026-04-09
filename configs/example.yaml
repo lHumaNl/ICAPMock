@@ -593,22 +593,3 @@ plugin:
 #
 # servers:
 #   # Each key is a logical server name (used in logs and metrics labels).
-#
-#   kata:
-#     port: 1344                           # Required. Type: int
-#     scenarios_dir: "./configs/scenarios/kata"  # Type: string
-#     service_id: "kata-icap"              # ICAP Service-ID header. Type: string
-#     # Per-server overrides (optional — falls back to defaults above):
-#     # host: "127.0.0.1"
-#     # max_connections: 5000
-#     # read_timeout: 60s
-#     #
-#     # Inline scenarios (v2 format, higher priority than file-based scenarios):
-#     # scenarios:
-#     #   quick-pass:
-#     #     status: 204
-#
-#   ptsandbox:
-#     port: 1488
-#     scenarios_dir: "./configs/scenarios/ptsandbox"
-#     service_id: "ptsandbox-icap"

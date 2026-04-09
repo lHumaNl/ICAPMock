@@ -50,12 +50,12 @@ icap:
   # Multi-server settings (used when mode == "multi")
   # Each entry becomes a named server in the config.
   # servers:
-  #   kata:
+  #   server1:
   #     port: 1344
-  #     scenariosDir: /app/configs/scenarios/kata
-  #   ptsandbox:
+  #     scenariosDir: /app/configs/scenarios/server1
+  #   server2:
   #     port: 1488
-  #     scenariosDir: /app/configs/scenarios/ptsandbox
+  #     scenariosDir: /app/configs/scenarios/server2
   servers: {}
 
   # -- Directory path inside the container where scenario YAML files are stored
@@ -157,7 +157,7 @@ service:
   metricsPort: 9090
   # -- Extra ports for multi-server mode
   # extraPorts:
-  #   - name: ptsandbox
+  #   - name: server2
   #     port: 1488
   #     targetPort: 1488
   #     protocol: TCP

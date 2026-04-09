@@ -282,7 +282,7 @@ func TestConvertV2ToScenarios_Basic(t *testing.T) {
 			Endpoint: "/scan-file",
 			Status:   204,
 			Headers: map[string]string{
-				"service": "PT Sandbox ICAP Server",
+				"service": "Mock ICAP Server",
 				"istag":   `"492710"`,
 			},
 		},
