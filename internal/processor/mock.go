@@ -78,7 +78,7 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 
 	// Log matched scenario
 	if p.logger != nil {
-		p.logger.Info("scenario matched",
+		p.logger.Debug("scenario matched",
 			"request_id", util.RequestIDFromContext(ctx),
 			"scenario", scenario.Name,
 			"method", req.Method,

@@ -363,6 +363,20 @@ func (l *Loader) mergeConfigs(dst, src *Config) {
 	mergeReplayConfig(dst, src)
 	mergePluginConfig(dst, src)
 	dst.Pprof.Enabled = src.Pprof.Enabled
+	mergeMultiServerConfig(dst, src)
+}
+
+func mergeMultiServerConfig(dst, src *Config) {
+	if len(src.Servers) > 0 {
+		dst.Servers = src.Servers
+	}
+	mergeStr(&dst.Defaults.Host, src.Defaults.Host)
+	mergeDuration(&dst.Defaults.ReadTimeout, src.Defaults.ReadTimeout)
+	mergeDuration(&dst.Defaults.WriteTimeout, src.Defaults.WriteTimeout)
+	mergeInt(&dst.Defaults.MaxConnections, src.Defaults.MaxConnections)
+	mergeInt64(&dst.Defaults.MaxBodySize, src.Defaults.MaxBodySize)
+	mergeDuration(&dst.Defaults.IdleTimeout, src.Defaults.IdleTimeout)
+	mergeDuration(&dst.Defaults.ShutdownTimeout, src.Defaults.ShutdownTimeout)
 }
 
 // mergeStr sets dst to src if src is non-empty.

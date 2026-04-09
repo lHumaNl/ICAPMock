@@ -325,7 +325,8 @@ func startAllServers(
 		proc, _ := createProcessorChain(cfg, registry, log)
 
 		rtr := router.NewRouter()
-		if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log); err != nil {
+		rtr.SetLogger(log.Logger)
+		if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, registry); err != nil {
 			return nil, nil, fmt.Errorf("registering handlers for %s: %w", entry.name, err)
 		}
 
@@ -350,6 +351,14 @@ func startAllServers(
 			return nil, nil, fmt.Errorf("starting server %s: %w", entry.name, err)
 		}
 		allServers = append(allServers, srv)
+	}
+
+	// Reset goroutine baselines after all servers have started,
+	// so that goroutines from other servers are not counted as leaks.
+	if len(allServers) > 1 {
+		for _, srv := range allServers {
+			srv.ResetGoroutineBaseline()
+		}
 	}
 
 	return allServers, firstRegistry, nil
@@ -703,6 +712,7 @@ func registerHandlers(
 	storageMiddleware *middleware.StorageMiddleware,
 	cfg *config.Config,
 	log *logger.Logger,
+	registry storage.ScenarioRegistry,
 ) error {
 	// PanicRecoveryMiddleware provides protection against panics in handlers.
 	// It recovers from panics, logs the error with request context, and returns
@@ -756,22 +766,9 @@ func registerHandlers(
 		)
 	}
 
-	// Register REQMOD handler with middleware chain
-	// Wraps handler with panic recovery, rate limiting, and storage
+	// Create handlers
 	reqmodHandler := handler.NewReqmodHandler(proc, collector, log.Logger, previewRateLimiter)
-	if err := rtr.Handle("/reqmod", applyMiddleware(reqmodHandler)); err != nil {
-		return fmt.Errorf("registering REQMOD handler: %w", err)
-	}
-
-	// Register RESPMOD handler with middleware chain
-	// Ensures response modification is protected and logged
 	respmodHandler := handler.NewRespmodHandler(proc, collector, log.Logger, previewRateLimiter)
-	if err := rtr.Handle("/respmod", applyMiddleware(respmodHandler)); err != nil {
-		return fmt.Errorf("registering RESPMOD handler: %w", err)
-	}
-
-	// Register OPTIONS handler with middleware chain
-	// OPTIONS is lightweight but benefits from rate limiting
 	optionsHandler := handler.NewOptionsHandler(handler.OptionsHandlerConfig{
 		ServiceTag:     "\"icap-mock-dev\"",
 		ServiceID:      cfg.Mock.ServiceID,
@@ -779,8 +776,50 @@ func registerHandlers(
 		MaxConnections: cfg.Server.MaxConnections,
 		OptionsTTL:     3600 * time.Second,
 	})
-	if err := rtr.Handle("/options", applyMiddleware(optionsHandler)); err != nil {
-		return fmt.Errorf("registering OPTIONS handler: %w", err)
+
+	wrappedReqmod := applyMiddleware(reqmodHandler)
+	wrappedRespmod := applyMiddleware(respmodHandler)
+	wrappedOptions := applyMiddleware(optionsHandler)
+
+	// Register default endpoints
+	defaultEndpoints := []string{"/reqmod", "/respmod", "/options"}
+	for _, ep := range defaultEndpoints {
+		var h handler.Handler
+		switch ep {
+		case "/reqmod":
+			h = wrappedReqmod
+		case "/respmod":
+			h = wrappedRespmod
+		case "/options":
+			h = wrappedOptions
+		}
+		if err := rtr.Handle(ep, h); err != nil {
+			return fmt.Errorf("registering handler for %s: %w", ep, err)
+		}
+	}
+
+	// Register custom endpoints from scenarios
+	if registry != nil {
+		registered := make(map[string]bool)
+		for _, ep := range defaultEndpoints {
+			registered[ep] = true
+		}
+		for _, s := range registry.List() {
+			ep := s.Match.Path
+			if ep == "" || registered[ep] {
+				continue
+			}
+			registered[ep] = true
+			// Route custom endpoints to REQMOD or RESPMOD handler based on scenario method
+			h := wrappedRespmod
+			if s.Match.Method == "REQMOD" {
+				h = wrappedReqmod
+			}
+			if err := rtr.Handle(ep, h); err != nil {
+				return fmt.Errorf("registering handler for custom endpoint %s: %w", ep, err)
+			}
+			log.Info("registered custom endpoint from scenario", "endpoint", ep, "method", s.Match.Method)
+		}
 	}
 
 	return nil

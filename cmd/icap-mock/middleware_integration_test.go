@@ -51,7 +51,7 @@ func TestRegisterHandlers_RateLimiterIntegration(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, limiter, nil, cfg, log); err != nil {
+	if err := registerHandlers(rtr, proc, collector, limiter, nil, cfg, log, nil); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -109,7 +109,7 @@ func TestRegisterHandlers_StorageMiddlewareIntegration(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, nil, storageMiddleware, cfg, log); err != nil {
+	if err := registerHandlers(rtr, proc, collector, nil, storageMiddleware, cfg, log, nil); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -141,7 +141,7 @@ func TestRegisterHandlers_DisabledMiddleware(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, nil, nil, cfg, log); err != nil {
+	if err := registerHandlers(rtr, proc, collector, nil, nil, cfg, log, nil); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -199,7 +199,7 @@ func TestRegisterHandlers_AllMiddleware(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log); err != nil {
+	if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, nil); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }

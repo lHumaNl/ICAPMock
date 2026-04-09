@@ -6,6 +6,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ type Route struct {
 type Router struct {
 	cache  *RouteCache
 	routes sync.Map
+	logger *slog.Logger
 }
 
 // NewRouter creates a new Router with an empty route table.
@@ -45,6 +47,11 @@ func NewRouter() *Router {
 	return &Router{
 		cache: NewRouteCache(DefaultMaxEntries, DefaultTTL),
 	}
+}
+
+// SetLogger sets the logger for request logging.
+func (r *Router) SetLogger(logger *slog.Logger) {
+	r.logger = logger
 }
 
 // NewRouterWithCache creates a new Router with custom cache configuration.
@@ -133,8 +140,21 @@ func (r *Router) Serve(ctx context.Context, req *icap.Request) (*icap.Response, 
 	}, req)
 
 	if h == nil {
-		// No handler found, return 404
+		if r.logger != nil {
+			r.logger.Warn("ICAP service not found",
+				"method", req.Method,
+				"uri", req.URI,
+				"status", 404,
+			)
+		}
 		return icap.NewResponseError(icap.StatusNotFound, "ICAP service not found"), nil
+	}
+
+	if r.logger != nil {
+		r.logger.Info("ICAP request received",
+			"method", req.Method,
+			"uri", req.URI,
+		)
 	}
 
 	// Delegate to handler
