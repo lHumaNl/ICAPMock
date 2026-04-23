@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"strings"
 	"sync"
@@ -36,9 +37,19 @@ type Route struct {
 // It includes an LRU cache for route lookups to reduce latency for
 // frequently accessed routes.
 type Router struct {
-	cache  *RouteCache
-	logger *slog.Logger
-	routes sync.Map
+	cache    *RouteCache
+	logger   *slog.Logger
+	routes   sync.Map
+	patterns []patternRoute
+	pmu      sync.RWMutex
+}
+
+// patternRoute is a regex-matched route used as a fallback for scenarios whose
+// endpoint declares path-parameter captures (e.g. "/env/{id}/ok"). Patterns are
+// tried in registration order after exact-path lookup misses.
+type patternRoute struct {
+	re *regexp.Regexp
+	h  handler.Handler
 }
 
 // NewRouter creates a new Router with an empty route table.
@@ -95,6 +106,27 @@ func (r *Router) Handle(path string, h handler.Handler) error {
 	return nil
 }
 
+// HandlePattern registers a regex-matched fallback handler. If a request
+// path does not match any exact-path handler, patterns are tried in the order
+// they were registered and the first match wins.
+//
+// Patterns are intended for scenarios whose endpoint uses "{name}" captures
+// (e.g. "/env/{id}/ok" compiles to "^/env/(?P<id>[^/]+)/ok$"). Exact paths
+// should still be registered via Handle for best performance.
+func (r *Router) HandlePattern(re *regexp.Regexp, h handler.Handler) error {
+	if re == nil {
+		return fmt.Errorf("pattern cannot be nil")
+	}
+	if h == nil {
+		return fmt.Errorf("handler cannot be nil")
+	}
+	r.pmu.Lock()
+	r.patterns = append(r.patterns, patternRoute{re: re, h: h})
+	r.pmu.Unlock()
+	r.cache.Clear()
+	return nil
+}
+
 // HandleFunc registers a handler function for the given path.
 // This is a convenience method for registering simple handlers without
 // creating a full Handler implementation.
@@ -138,6 +170,19 @@ func (r *Router) Serve(ctx context.Context, req *icap.Request) (*icap.Response, 
 		}
 		return val.(handler.Handler), true //nolint:errcheck
 	}, req)
+
+	// Fall back to pattern matches for capture-based endpoints.
+	if h == nil {
+		path := extractPath(req.URI)
+		r.pmu.RLock()
+		for _, pr := range r.patterns {
+			if pr.re.MatchString(path) {
+				h = pr.h
+				break
+			}
+		}
+		r.pmu.RUnlock()
+	}
 
 	if h == nil {
 		if r.logger != nil {

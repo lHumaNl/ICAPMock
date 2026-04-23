@@ -11,9 +11,14 @@
 ## Features
 
 - **Multi-server mode** — run multiple independent ICAP servers in a single process, each on its own port with its own scenario set
-- **Scenario engine v2** — YAML-based scenario files with `defaults`, `when` (header matching), `set` (header overrides), and `delay` ranges
-- **Weighted responses** — probabilistic response selection within a scenario
-- **Regex header matching** — match incoming request headers against regular expressions (`re:` prefix)
+- **Scenario engine v2** — YAML-based scenario files with `defaults`, `when` / `when_http` (matching ICAP headers and the encapsulated HTTP request/response), `set` (header overrides), and `delay` ranges
+- **Two-layer response shaping** — `set:` / `body:` target the ICAP envelope, `http_set:` / `http_body:` target the encapsulated HTTP message (headers and body the origin client sees). Used together with `http_status:` to synthesize block pages with correct HTTP headers and chunked body.
+- **Weighted responses** — probabilistic response selection within a scenario (`responses:` with `weight:`)
+- **Response templates** — reusable named responses in `defaults.response_templates`, referenced via `use: <name>` from scenarios, branches, or weighted variants; `defaults.use:` acts as a file-wide fallback
+- **Branches** — `branches:` list inside a scenario for OR-style dispatch with per-branch response (inline, `use:`, or weighted); first match wins; falls through to the next scenario if none match
+- **Path captures** — endpoints like `/env/{id}/status` extract `{id}` from the URI; captured values are available as `${id}` in body/set/http_headers
+- **Multi-method / multi-endpoint per port** — `method:` and `endpoint:` accept a scalar or a list; a single ICAP listener serves them all
+- **Regex matching** — match headers, URLs, and other fields against regular expressions (`re:` prefix)
 - **Rate limiting** — sharded token-bucket rate limiter configurable per server
 - **Prometheus metrics** — expose request counts, latencies, and error rates at `/metrics`
 - **Health checks** — HTTP `/health` and `/ready` endpoints for readiness probing
@@ -129,15 +134,15 @@ Scenario files define how the mock server responds to incoming ICAP requests. Ea
 
 ```yaml
 defaults:
-  method: RESPMOD
-  endpoint: /scan
+  method: RESPMOD                 # required (here or per-scenario)
+  endpoint: /scan                 # required (here or per-scenario)
   status: 204
   headers:
     x-service: "ICAP Mock"
     x-verdict: "CLEAN"
 
 scenarios:
-  # Match by exact header value
+  # Match by exact ICAP header value
   threat-exact:
     when:
       X-Filename: "malware.exe"
@@ -146,13 +151,24 @@ scenarios:
       x-virus-id: "TROJAN"
     delay: 200ms-800ms
 
-  # Match by regex
+  # Match by regex on an ICAP header
   threat-hash:
     when:
       X-Filename: "re:[a-f0-9]{64}"
     set:
       x-verdict: "DANGEROUS"
     delay: 1s-3s
+
+  # Match on the encapsulated HTTP message (headers / URL / method).
+  # Content-Type lives inside the wrapped HTTP request, not in ICAP headers,
+  # so it goes under `when_http`, not `when`.
+  threat-dosexec:
+    when_http:
+      headers:
+        Content-Type: "re:(?i)application/x-dosexec"
+      url: "re:(?i)\\.exe(\\?|$)"
+    status: 200
+    http_status: 403
 
   # Weighted responses (probabilistic)
   flaky-service:
@@ -165,14 +181,67 @@ scenarios:
         status: 500
     delay: 100ms-300ms
 
-  # Fallback (no `when` = always matches)
+  # Fallback (no `when` / `when_http` = always matches)
   default-response:
     set:
       x-verdict: "UNKNOWN"
     delay: 50ms-150ms
 ```
 
-Scenarios are evaluated top-to-bottom; the first matching scenario wins. A scenario without a `when` block acts as a catch-all default.
+Scenarios are evaluated in priority order (file order by default); the first matching scenario
+wins. `when:` matches ICAP-envelope headers, `when_http:` matches the encapsulated HTTP message
+(its `headers`, `url`, and `method`) — combine them freely with AND semantics. A scenario without
+a `when`/`when_http` block acts as a catch-all.
+
+### Response templates, branches, path captures
+
+For larger configs, pull reusable responses into a library and reference them by name. Branches
+let one scenario dispatch to different responses by condition; path captures pull values out of
+the endpoint and make them available inside response fields as `${name}` substitutions.
+
+```yaml
+defaults:
+  method: [REQMOD, RESPMOD]
+  endpoint: [/scan, /env/{env}/scan]
+
+  # Named, reusable responses.
+  response_templates:
+    clean:
+      status: 204
+    blocked:                                   # synthesized HTTP block page
+      status: 200                              # ICAP status
+      http_status: 403                         # wrapped HTTP status
+      http_set:                                # wrapped HTTP headers
+        Content-Type: "text/html"
+      http_body: "<html>blocked in ${env}</html>"   # wrapped HTTP body; ${env} from matched endpoint
+    flaky:                                     # weighted template
+      - { weight: 70, use: blocked }
+      - { weight: 25, use: clean }
+      - { weight: 5,  status: 500 }
+
+  use: clean                                   # file-wide fallback (no scenario → 204)
+
+scenarios:
+  dispatch:
+    branches:
+      - when_http:
+          headers: { Content-Type: "re:(?i)application/x-dosexec" }
+        use: flaky                             # weighted outcome
+      - when_http:
+          headers: { Content-Type: "re:(?i)message/rfc822" }
+        use: blocked
+      - use: clean                             # branch-level catch-all
+```
+
+Mechanics:
+
+- **`response_templates:`** defines inline or weighted responses that can be reused.
+- **`use: <name>`** references a template at scenario, branch, or weighted-variant level.
+- **`defaults.use:`** is the file-wide fallback applied when no scenario matched.
+- **`set:` / `body:`** set the ICAP envelope headers and body. **`http_set:` / `http_body:` / `http_body_file:`** set the encapsulated HTTP response (what the origin client actually receives). `Content-Length` on the wrapped response is recomputed automatically from the body size unless you declare it explicitly in `http_set:` (use `"auto"` to force recompute).
+- **`branches:`** holds several `when` / `when_http` → response pairs inside one scenario; first match wins. If none match, the scenario is skipped and the registry moves to the next scenario.
+- **`endpoint:`** accepts a scalar or a list; each entry may include `{name}` captures that become regex groups in the path. Captured values are surfaced as `${name}` in `body`, `set`, and `http_headers`; use `$${` for a literal.
+- **`method:`** accepts a scalar or a list, allowing one scenario to serve REQMOD and RESPMOD on the same port without duplication.
 
 ---
 

@@ -290,6 +290,11 @@ type Request struct {
 	Header       Header
 	HTTPRequest  *HTTPMessage
 	HTTPResponse *HTTPMessage
+	// Captures holds path-parameter values extracted from the ICAP URI by the
+	// scenario matcher (e.g. "{id}" in the scenario endpoint yields
+	// Captures["id"]). Nil or empty when no endpoint capture matched. Consumers
+	// substitute "${name}" in response fields using this map.
+	Captures     map[string]string
 	RemoteAddr   string
 	URI          string
 	Proto        string

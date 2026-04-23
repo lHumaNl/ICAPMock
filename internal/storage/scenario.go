@@ -68,50 +68,186 @@ type ScenarioRegistry interface {
 
 // Scenario defines a mock response scenario.
 type Scenario struct {
-	compiledPath      *regexp.Regexp
-	compiledBody      *regexp.Regexp
-	compiledHeaders   map[string]*regexp.Regexp
-	Name              string             `yaml:"name" json:"name"`
-	Match             MatchRule          `yaml:"match" json:"match"`
-	WeightedResponses []WeightedResponse `yaml:"-" json:"-"`
-	compiledCIDRs     []*net.IPNet
-	Response          ResponseTemplate `yaml:"response" json:"response"`
-	Priority          int              `yaml:"priority" json:"priority"`
+	compiledBody        *regexp.Regexp
+	compiledHeaders     map[string]*regexp.Regexp
+	compiledHTTPHeaders map[string]*regexp.Regexp
+	compiledHTTPURL     *regexp.Regexp
+	Name                string             `yaml:"name" json:"name"`
+	Match               MatchRule          `yaml:"match" json:"match"`
+	WeightedResponses   []WeightedResponse `yaml:"-" json:"-"`
+	Branches            []Branch           `yaml:"-" json:"-"`
+	compiledCIDRs       []*net.IPNet
+	compiledPaths       []compiledEndpoint
+	Response            ResponseTemplate `yaml:"response" json:"response"`
+	Priority            int              `yaml:"priority" json:"priority"`
+}
+
+// compiledEndpoint holds a compiled endpoint pattern plus the names of any
+// path-parameter captures declared in it (e.g. "{id}" → "id").
+type compiledEndpoint struct {
+	re       *regexp.Regexp
+	raw      string
+	captures []string
+}
+
+// Branch is one conditional response branch inside a scenario. Branches are
+// evaluated in order; the first whose conditions match produces the response.
+// A Branch with no conditions acts as a catch-all inside its scenario.
+type Branch struct {
+	compiledHeaders     map[string]*regexp.Regexp
+	compiledHTTPHeaders map[string]*regexp.Regexp
+	compiledHTTPURL     *regexp.Regexp
+	WeightedResponses   []WeightedResponse
+	Match               MatchRule
+	Response            ResponseTemplate
 }
 
 // WeightedResponse is a single weighted response variant used for random selection.
 type WeightedResponse struct {
-	Headers    map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	Body       string            `yaml:"body,omitempty" json:"body,omitempty"`
-	Delay      DelayConfig       `yaml:"-" json:"-"`
-	Weight     int               `yaml:"weight" json:"weight"`
-	ICAPStatus int               `yaml:"icap_status,omitempty" json:"icap_status,omitempty"`
-	HTTPStatus int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
+	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	HTTPHeaders  map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
+	Body         string            `yaml:"body,omitempty" json:"body,omitempty"`
+	BodyFile     string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	HTTPBody     string            `yaml:"http_body,omitempty" json:"http_body,omitempty"`
+	HTTPBodyFile string            `yaml:"http_body_file,omitempty" json:"http_body_file,omitempty"`
+	Delay        DelayConfig       `yaml:"-" json:"-"`
+	Weight       int               `yaml:"weight" json:"weight"`
+	ICAPStatus   int               `yaml:"icap_status,omitempty" json:"icap_status,omitempty"`
+	HTTPStatus   int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 }
 
-// CompiledPath returns the compiled path regex, or nil if not set.
-func (s *Scenario) CompiledPath() *regexp.Regexp { return s.compiledPath }
+// SelectBranch returns the index of the first branch whose conditions match
+// the request, or -1 if no branch matches. If the scenario has no branches,
+// returns -1 as well. Branch matching ignores endpoint/method (they live at
+// scenario level); it checks only ICAP headers, HTTP headers, HTTP URL, and
+// HTTP method declared on the branch.
+func (s *Scenario) SelectBranch(req *icap.Request) int {
+	for i := range s.Branches {
+		if branchMatches(&s.Branches[i], req) {
+			return i
+		}
+	}
+	return -1
+}
+
+// branchMatches mirrors the header/HTTP checks done in the main matcher but
+// against a Branch's MatchRule and its pre-compiled regexps.
+func branchMatches(b *Branch, req *icap.Request) bool { //nolint:gocyclo // mirrors scenario-level checks which are themselves a list of AND clauses
+	for key, value := range b.Match.Headers {
+		h, ok := req.Header.Get(key)
+		if !ok {
+			return false
+		}
+		if compiled, hasRegex := b.compiledHeaders[key]; hasRegex {
+			if !compiled.MatchString(h) {
+				return false
+			}
+		} else if h != value {
+			return false
+		}
+	}
+	if b.Match.HTTPMethod != "" {
+		if req.HTTPRequest == nil || req.HTTPRequest.Method != b.Match.HTTPMethod {
+			return false
+		}
+	}
+	if len(b.Match.HTTPHeaders) > 0 {
+		if !hasEncapsulatedHTTP(req) {
+			return false
+		}
+		for key, value := range b.Match.HTTPHeaders {
+			h, ok := httpHeaderLookup(req, key)
+			if !ok {
+				return false
+			}
+			if compiled, hasRegex := b.compiledHTTPHeaders[key]; hasRegex {
+				if !compiled.MatchString(h) {
+					return false
+				}
+			} else if h != value {
+				return false
+			}
+		}
+	}
+	if b.Match.HTTPURL != "" {
+		// URL lives on the original HTTP request even in RESPMOD (the "req-hdr"
+		// part of the Encapsulated header).
+		if req.HTTPRequest == nil {
+			return false
+		}
+		if b.compiledHTTPURL != nil {
+			if !b.compiledHTTPURL.MatchString(req.HTTPRequest.URI) {
+				return false
+			}
+		} else if req.HTTPRequest.URI != b.Match.HTTPURL {
+			return false
+		}
+	}
+	return true
+}
+
+// CompiledPath returns the first compiled path regex, or nil if none. Kept for
+// backward compatibility with callers (e.g. match-test CLI); for scenarios with
+// multiple endpoints, use CompiledPaths.
+func (s *Scenario) CompiledPath() *regexp.Regexp {
+	if len(s.compiledPaths) == 0 {
+		return nil
+	}
+	return s.compiledPaths[0].re
+}
+
+// CompiledPaths returns all compiled endpoint regexps for this scenario.
+func (s *Scenario) CompiledPaths() []*regexp.Regexp {
+	out := make([]*regexp.Regexp, 0, len(s.compiledPaths))
+	for _, c := range s.compiledPaths {
+		out = append(out, c.re)
+	}
+	return out
+}
 
 // CompiledBody returns the compiled body regex, or nil if not set.
 func (s *Scenario) CompiledBody() *regexp.Regexp { return s.compiledBody }
 
 // MatchRule defines criteria for matching ICAP requests.
 type MatchRule struct {
-	// Path is a regex pattern to match the ICAP URI path.
+	// Path is a single regex pattern to match the ICAP URI path. Kept for v1
+	// scenario files; v2 files use Paths (set from the "endpoint:" YAML key).
 	// Empty string matches all paths.
 	Path string `yaml:"path_pattern,omitempty" json:"path_pattern,omitempty"`
 
-	// Method is the ICAP method to match (REQMOD, RESPMOD, OPTIONS).
-	// Empty string matches all methods.
-	Method string `yaml:"icap_method,omitempty" json:"icap_method,omitempty"`
+	// Paths is a list of endpoint patterns a scenario accepts. Each entry may
+	// be a concrete path ("/scan") or a pattern with "{name}" captures
+	// ("/env/{id}/scan"); "{name}" compiles to a regex-named capture group
+	// "[^/]+" and the captured value is available as "${name}" in response
+	// fields. If Paths is non-empty, Path is ignored.
+	Paths []string `yaml:"paths,omitempty" json:"paths,omitempty"`
+
+	// Methods is the set of ICAP methods (REQMOD, RESPMOD, OPTIONS) this
+	// scenario applies to. An empty list matches any method. In YAML the field
+	// accepts either a single string ("icap_method: REQMOD") or a sequence
+	// ("icap_method: [REQMOD, RESPMOD]") — MethodList handles both shapes.
+	// The YAML tag stays singular for backward compatibility with v1 files.
+	Methods MethodList `yaml:"icap_method,omitempty" json:"icap_method,omitempty"`
 
 	// HTTPMethod is the HTTP method to match in embedded requests.
 	// Empty string matches all HTTP methods.
 	HTTPMethod string `yaml:"http_method,omitempty" json:"http_method,omitempty"`
 
+	// HTTPURL is an exact or "re:"-prefixed regex pattern applied to the URI of the
+	// encapsulated HTTP request (e.g., "http://host/path/file.exe?q=1"). Useful for
+	// matching by filename when no identifying ICAP header is present.
+	// Empty string matches any URL.
+	HTTPURL string `yaml:"http_url,omitempty" json:"http_url,omitempty"`
+
 	// Headers contains exact match criteria for ICAP headers.
 	// All specified headers must match for the scenario to match.
+	// Values may be exact strings or "re:"-prefixed regex patterns.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+
+	// HTTPHeaders contains match criteria for headers of the encapsulated HTTP
+	// request (REQMOD) or response (RESPMOD). All specified headers must match.
+	// Values may be exact strings or "re:"-prefixed regex patterns.
+	HTTPHeaders map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
 
 	// BodyPattern is a regex pattern to match the HTTP body.
 	// Empty string matches any body (including no body).
@@ -128,17 +264,26 @@ type MatchRule struct {
 }
 
 // ResponseTemplate defines the mock response to return.
+//
+// Two layers of headers and body:
+//
+//   - Headers / Body / BodyFile — on the ICAP-envelope response.
+//   - HTTPHeaders / HTTPBody / HTTPBodyFile — on the encapsulated HTTP
+//     response (used together with HTTPStatus != 0 to synthesize a block
+//     page or similar).
 type ResponseTemplate struct {
-	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	HTTPHeaders map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
-	DelayRange  *DelayConfig      `yaml:"-" json:"-"`
-	Body        string            `yaml:"body,omitempty" json:"body,omitempty"`
-	BodyFile    string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
-	Error       string            `yaml:"error,omitempty" json:"error,omitempty"`
-	Script      string            `yaml:"script,omitempty" json:"script,omitempty"`
-	ICAPStatus  int               `yaml:"icap_status" json:"icap_status"`
-	HTTPStatus  int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
-	Delay       time.Duration     `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	HTTPHeaders  map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
+	DelayRange   *DelayConfig      `yaml:"-" json:"-"`
+	Body         string            `yaml:"body,omitempty" json:"body,omitempty"`
+	BodyFile     string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	HTTPBody     string            `yaml:"http_body,omitempty" json:"http_body,omitempty"`
+	HTTPBodyFile string            `yaml:"http_body_file,omitempty" json:"http_body_file,omitempty"`
+	Error        string            `yaml:"error,omitempty" json:"error,omitempty"`
+	Script       string            `yaml:"script,omitempty" json:"script,omitempty"`
+	ICAPStatus   int               `yaml:"icap_status" json:"icap_status"`
+	HTTPStatus   int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
+	Delay        time.Duration     `yaml:"delay,omitempty" json:"delay,omitempty"`
 }
 
 // ScenarioFile represents the YAML structure for scenario files.
@@ -315,18 +460,25 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 		)
 	}
 
-	// Compile path pattern
-	if s.Match.Path != "" {
-		pattern := s.Match.Path
-		pattern = strings.TrimPrefix(pattern, "re:")
-		// Always compile as regex for backward compatibility
-		// (v1 paths are always regex, v2 paths with re: prefix are regex,
-		//  v2 paths without re: are exact but we compile them as ^exact$ for prefix match)
-		re, err := regexp.Compile(pattern)
+	// Compile endpoint list (v2 semantics, with "{name}" captures). If Paths is
+	// set, use it; otherwise fall back to the legacy single Path field (raw
+	// regex, no capture support).
+	switch {
+	case len(s.Match.Paths) > 0:
+		s.compiledPaths = make([]compiledEndpoint, 0, len(s.Match.Paths))
+		for _, p := range s.Match.Paths {
+			ce, err := compileEndpoint(p)
+			if err != nil {
+				return NewScenarioRegexError("", s.Name, "match.endpoint", p, err)
+			}
+			s.compiledPaths = append(s.compiledPaths, ce)
+		}
+	case s.Match.Path != "":
+		re, err := regexp.Compile(s.Match.Path)
 		if err != nil {
 			return NewScenarioRegexError("", s.Name, "match.path_pattern", s.Match.Path, err)
 		}
-		s.compiledPath = re
+		s.compiledPaths = []compiledEndpoint{{re: re, raw: s.Match.Path}}
 	}
 
 	// Compile body regex
@@ -351,7 +503,7 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 
 	// Validate response body file path
 	if s.Response.BodyFile != "" {
-		if _, err := os.Stat(s.Response.BodyFile); err != nil {
+		if _, err := os.Stat(s.Response.BodyFile); err != nil { //nolint:gosec // path comes from a loaded scenario file, not end-user input
 			return NewScenarioBodyFileError(
 				"", // file path will be set by caller
 				s.Name,
@@ -377,6 +529,32 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 		s.compiledHeaders[key] = re
 	}
 
+	// Compile HTTP header patterns with re: prefix
+	for key, value := range s.Match.HTTPHeaders {
+		if !strings.HasPrefix(value, "re:") {
+			continue
+		}
+		pattern := strings.TrimPrefix(value, "re:")
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return NewScenarioRegexError("", s.Name, "match.http_headers."+key, value, err)
+		}
+		if s.compiledHTTPHeaders == nil {
+			s.compiledHTTPHeaders = make(map[string]*regexp.Regexp)
+		}
+		s.compiledHTTPHeaders[key] = re
+	}
+
+	// Compile HTTP URL pattern (regex with re: prefix)
+	if strings.HasPrefix(s.Match.HTTPURL, "re:") {
+		pattern := strings.TrimPrefix(s.Match.HTTPURL, "re:")
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return NewScenarioRegexError("", s.Name, "match.http_url", s.Match.HTTPURL, err)
+		}
+		s.compiledHTTPURL = re
+	}
+
 	// Validate and compile CIDR ranges
 	if len(s.Match.CIDRRanges) > 0 {
 		// Parse and cache CIDR ranges for performance
@@ -392,6 +570,45 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 				)
 			}
 			s.compiledCIDRs = append(s.compiledCIDRs, ipNet)
+		}
+	}
+
+	// Compile regex patterns inside branches (if any) — headers, HTTP headers
+	// and the HTTP URL. Endpoints/methods are not per-branch.
+	for idx := range s.Branches {
+		b := &s.Branches[idx]
+		for key, value := range b.Match.Headers {
+			if !strings.HasPrefix(value, "re:") {
+				continue
+			}
+			re, err := regexp.Compile(strings.TrimPrefix(value, "re:"))
+			if err != nil {
+				return NewScenarioRegexError("", s.Name, fmt.Sprintf("branches[%d].when.%s", idx, key), value, err)
+			}
+			if b.compiledHeaders == nil {
+				b.compiledHeaders = make(map[string]*regexp.Regexp)
+			}
+			b.compiledHeaders[key] = re
+		}
+		for key, value := range b.Match.HTTPHeaders {
+			if !strings.HasPrefix(value, "re:") {
+				continue
+			}
+			re, err := regexp.Compile(strings.TrimPrefix(value, "re:"))
+			if err != nil {
+				return NewScenarioRegexError("", s.Name, fmt.Sprintf("branches[%d].when_http.headers.%s", idx, key), value, err)
+			}
+			if b.compiledHTTPHeaders == nil {
+				b.compiledHTTPHeaders = make(map[string]*regexp.Regexp)
+			}
+			b.compiledHTTPHeaders[key] = re
+		}
+		if strings.HasPrefix(b.Match.HTTPURL, "re:") {
+			re, err := regexp.Compile(strings.TrimPrefix(b.Match.HTTPURL, "re:"))
+			if err != nil {
+				return NewScenarioRegexError("", s.Name, fmt.Sprintf("branches[%d].when_http.url", idx), b.Match.HTTPURL, err)
+			}
+			b.compiledHTTPURL = re
 		}
 	}
 
@@ -431,16 +648,25 @@ func (r *scenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 // matches checks if a scenario matches the given request.
 func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	// Check ICAP method
-	if s.Match.Method != "" && s.Match.Method != req.Method {
+	if !methodMatches(s.Match.Methods, req.Method) {
 		return false
 	}
 
-	// Check path pattern
-	if s.compiledPath != nil {
-		// Extract path from ICAP URI
-		path := extractPath(req.URI)
-		if !s.compiledPath.MatchString(path) {
+	// Check endpoint(s). Any one match is enough; capture names from the
+	// matched endpoint are merged onto req.Captures for use in response
+	// substitution.
+	if len(s.compiledPaths) > 0 {
+		caps, ok := matchEndpoint(s.compiledPaths, extractPath(req.URI))
+		if !ok {
 			return false
+		}
+		if len(caps) > 0 {
+			if req.Captures == nil {
+				req.Captures = make(map[string]string, len(caps))
+			}
+			for k, v := range caps {
+				req.Captures[k] = v
+			}
 		}
 	}
 
@@ -471,6 +697,43 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 		}
 	}
 
+	// Check encapsulated HTTP headers. For RESPMOD the scanned headers live in
+	// req.HTTPResponse (Content-Type, Content-Length, …); httpHeaderLookup picks
+	// the right side by ICAP method and falls back to the other side.
+	if len(s.Match.HTTPHeaders) > 0 {
+		if !hasEncapsulatedHTTP(req) {
+			return false
+		}
+		for key, value := range s.Match.HTTPHeaders {
+			h, ok := httpHeaderLookup(req, key)
+			if !ok {
+				return false
+			}
+			if compiled, hasRegex := s.compiledHTTPHeaders[key]; hasRegex {
+				if !compiled.MatchString(h) {
+					return false
+				}
+			} else if h != value {
+				return false
+			}
+		}
+	}
+
+	// Check encapsulated HTTP URL. The URL lives on the original HTTP request
+	// even for RESPMOD (req-hdr part of Encapsulated).
+	if s.Match.HTTPURL != "" {
+		if req.HTTPRequest == nil {
+			return false
+		}
+		if s.compiledHTTPURL != nil {
+			if !s.compiledHTTPURL.MatchString(req.HTTPRequest.URI) {
+				return false
+			}
+		} else if req.HTTPRequest.URI != s.Match.HTTPURL {
+			return false
+		}
+	}
+
 	// Check body pattern - load body only if pattern exists (lazy loading)
 	if s.compiledBody != nil && req.HTTPRequest != nil {
 		body, err := req.HTTPRequest.GetBody()
@@ -497,7 +760,159 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 		}
 	}
 
+	// If the scenario has branches, require at least one to match; otherwise
+	// treat the scenario as non-matching so the registry tries the next one.
+	if len(s.Branches) > 0 && s.SelectBranch(req) < 0 {
+		return false
+	}
+
 	return true
+}
+
+// endpointCapturePattern finds "{name}" placeholders in an endpoint string.
+var endpointCapturePattern = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// CompileEndpointRegex exposes the endpoint-pattern compiler for callers that
+// need the raw regex (router pattern registration). The returned regex is
+// anchored with ^…$; "{name}" placeholders become named captures.
+func CompileEndpointRegex(raw string) (*regexp.Regexp, error) {
+	ce, err := compileEndpoint(raw)
+	if err != nil {
+		return nil, err
+	}
+	return ce.re, nil
+}
+
+// compileEndpoint converts an endpoint declaration (v2 "endpoint:" value) into
+// a compiled regex plus the list of capture names. A string prefixed with
+// "re:" is treated as a raw regex; otherwise "{name}" placeholders become
+// named capture groups "(?P<name>[^/]+)" and the rest of the string is
+// regex-escaped, anchored with ^…$.
+func compileEndpoint(raw string) (compiledEndpoint, error) {
+	if raw == "" {
+		return compiledEndpoint{}, nil
+	}
+	if strings.HasPrefix(raw, "re:") {
+		re, err := regexp.Compile(strings.TrimPrefix(raw, "re:"))
+		if err != nil {
+			return compiledEndpoint{}, err
+		}
+		return compiledEndpoint{re: re, raw: raw}, nil
+	}
+	captures := make([]string, 0)
+	var b strings.Builder
+	b.WriteByte('^')
+	last := 0
+	for _, m := range endpointCapturePattern.FindAllStringSubmatchIndex(raw, -1) {
+		b.WriteString(regexp.QuoteMeta(raw[last:m[0]]))
+		name := raw[m[2]:m[3]]
+		captures = append(captures, name)
+		b.WriteString(`(?P<`)
+		b.WriteString(name)
+		b.WriteString(`>[^/]+)`)
+		last = m[1]
+	}
+	b.WriteString(regexp.QuoteMeta(raw[last:]))
+	b.WriteByte('$')
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		return compiledEndpoint{}, err
+	}
+	return compiledEndpoint{re: re, captures: captures, raw: raw}, nil
+}
+
+// matchEndpoint tries each compiled endpoint in order; on success returns the
+// captured values (may be empty if the matched endpoint has no "{name}"s).
+// Returns (nil, false) if no endpoint matched; (empty map, true) if at least
+// one endpoint matched but defined no captures. Query string and fragment are
+// stripped from reqPath before matching so endpoints written without them
+// still match real requests.
+func matchEndpoint(paths []compiledEndpoint, reqPath string) (map[string]string, bool) {
+	if q := strings.IndexByte(reqPath, '?'); q >= 0 {
+		reqPath = reqPath[:q]
+	}
+	if h := strings.IndexByte(reqPath, '#'); h >= 0 {
+		reqPath = reqPath[:h]
+	}
+	for _, p := range paths {
+		if p.re == nil {
+			continue
+		}
+		m := p.re.FindStringSubmatch(reqPath)
+		if m == nil {
+			continue
+		}
+		if len(p.captures) == 0 {
+			return map[string]string{}, true
+		}
+		caps := make(map[string]string, len(p.captures))
+		for i, name := range p.re.SubexpNames() {
+			if i == 0 || name == "" {
+				continue
+			}
+			caps[name] = m[i]
+		}
+		return caps, true
+	}
+	return nil, false
+}
+
+// httpHeaderLookup returns the value of the given header from the appropriate
+// encapsulated HTTP message for the request.
+//
+// For RESPMOD the scanned payload is the response (req.HTTPResponse) — that's
+// where headers like Content-Type / Content-Length live. The wrapped request
+// (req.HTTPRequest) is present too but only carries the original client
+// request context (URI, Host, …). For REQMOD the scanned payload is the
+// request itself.
+//
+// We try the "primary" side for the ICAP method first, then fall back to the
+// other side — so users can still match on Host/User-Agent/cookies of the
+// client request even in a RESPMOD scenario.
+func httpHeaderLookup(req *icap.Request, key string) (string, bool) {
+	if req.Method == "RESPMOD" {
+		if req.HTTPResponse != nil {
+			if v, ok := req.HTTPResponse.Header.Get(key); ok {
+				return v, true
+			}
+		}
+		if req.HTTPRequest != nil {
+			return req.HTTPRequest.Header.Get(key)
+		}
+		return "", false
+	}
+	if req.HTTPRequest != nil {
+		return req.HTTPRequest.Header.Get(key)
+	}
+	return "", false
+}
+
+// hasEncapsulatedHTTP reports whether the request carries either an
+// encapsulated HTTP request or response. Used to short-circuit when_http
+// matching for requests without any HTTP context (e.g. OPTIONS).
+func hasEncapsulatedHTTP(req *icap.Request) bool {
+	return req.HTTPRequest != nil || req.HTTPResponse != nil
+}
+
+// methodMatches reports whether req belongs to the set of accepted methods.
+// An empty list means "any method".
+func methodMatches(methods []string, reqMethod string) bool {
+	if len(methods) == 0 {
+		return true
+	}
+	for _, m := range methods {
+		if m == reqMethod {
+			return true
+		}
+	}
+	return false
+}
+
+// validICAPMethods is the closed set of ICAP methods a scenario can declare.
+var validICAPMethods = map[string]bool{
+	"REQMOD":  true,
+	"RESPMOD": true,
+	"OPTIONS": true,
 }
 
 // extractPath extracts the path from an ICAP URI.

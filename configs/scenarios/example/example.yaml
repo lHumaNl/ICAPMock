@@ -13,21 +13,51 @@
 #    Scenarios without an explicit priority default to 0; higher numbers win.
 # 3. If no scenario matches, the server falls back to mock.default_mode.
 #
-# HEADER MATCHING ("when:" block)
-# --------------------------------
-# Every key under "when:" is an ICAP/HTTP request header name (case-insensitive).
-# The value is matched as a literal string unless it begins with "re:" —
-# in that case the remainder is treated as a Go regular expression.
+# HEADER MATCHING ("when:" block) — ICAP-level headers
+# -----------------------------------------------------
+# Every key under "when:" is an ICAP request header name (case-insensitive) —
+# e.g. Host, X-Client-IP, X-Server-IP, Allow, Encapsulated. Values are matched
+# literally unless they begin with "re:" — in that case the remainder is a Go
+# regular expression.
 #
 #   when:
-#     X-Filename: "invoice.pdf"          # exact match
-#     Content-Type: "re:(?i)text/html"   # regex match (case-insensitive)
+#     X-Client-IP: "re:^10\\."           # regex match on ICAP header
+#     X-Custom-Tag: "important"          # exact match
 #
-# A scenario with no "when:" block matches every request (use as a catch-all).
+# A scenario with no "when:"/"when_http:" block matches every request.
 #
-# RESPONSE HEADERS ("set:" block)
-# --------------------------------
-# Every key under "set:" becomes an ICAP response header.
+# ENCAPSULATED HTTP MATCHING ("when_http:" block)
+# ------------------------------------------------
+# "when:" looks at the ICAP envelope. Things like Content-Type or filename
+# live inside the encapsulated HTTP request (REQMOD) or response (RESPMOD) —
+# match those with "when_http:".
+#
+#   when_http:
+#     headers:
+#       Content-Type: "re:(?i)application/x-dosexec"
+#     url: "re:(?i)/(coparer\\.c|\\.exe$)"   # URI of the wrapped HTTP request
+#     method: GET                            # HTTP method of the wrapped request
+#
+# Scenarios using "when_http:" only match requests that actually carry an
+# encapsulated HTTP message (so OPTIONS won't match). "when:" and "when_http:"
+# combine with AND — every clause must match.
+#
+# RESPONSE HEADERS AND BODY — TWO LAYERS
+# ---------------------------------------
+# An ICAP response carries both an envelope (the ICAP-level status/headers/
+# body) and an encapsulated HTTP message (the request/response being modified).
+# Scenarios can populate both independently:
+#
+#     set:            ICAP envelope headers
+#     body:           ICAP envelope body (rarely needed)
+#     http_set:       Encapsulated HTTP response headers
+#     http_body:      Encapsulated HTTP response body
+#     http_body_file: Encapsulated HTTP response body (from disk)
+#
+# Block pages use the http_* fields so the origin client sees a real HTTP/1.1
+# response with proper Content-Type and a chunk-encoded body. Content-Length
+# on the wrapped response is recomputed automatically to match http_body
+# unless you pin it explicitly in http_set (use "auto" to force recompute).
 #
 # DELAYS
 # ------
@@ -40,6 +70,33 @@
 # Weights are relative integers; they do not need to sum to 100.
 # When a "responses:" list is present, top-level status/body/set/delay are
 # ignored — every variant must declare its own values.
+#
+# RESPONSE TEMPLATES ("defaults.response_templates" + "use:")
+# -----------------------------------------------------------
+# Library of named responses, defined under defaults.response_templates and
+# referenced by name via "use: <name>" at scenario / branch / weighted-variant
+# level. A template is either a plain inline response or a list of weighted
+# variants. Templates are flat — they cannot themselves "use:" another
+# template. "defaults.use: <name>" acts as the file-wide fallback when no
+# scenario matches at all (otherwise ICAP 404 is returned).
+#
+# BRANCHES ("branches:" list inside a scenario)
+# ---------------------------------------------
+# For OR-style dispatch inside one scenario. Each branch carries its own
+# optional when/when_http plus response fields (inline / use / responses).
+# First matching branch wins. If none match, the scenario is considered
+# non-matching and the registry moves to the next scenario. "branches:" and
+# scenario-level response fields (status/body/use/responses) are mutually
+# exclusive — for a fallback, add an explicit catch-all branch without
+# conditions at the end of the list.
+#
+# ENDPOINT LIST + PATH CAPTURES
+# -----------------------------
+# "endpoint:" accepts a single path or a list (["/v1/scan", "/v2/scan"]).
+# Any entry may include "{name}" placeholders — compiled to a regex-named
+# capture, so "/env/{id}/scan" matches "/env/abc-123/scan" with id="abc-123".
+# Captured values are available as "${name}" in response strings (body, set,
+# http_headers). Use "$${" to embed a literal dollar-brace sequence.
 # =============================================================================
 
 
@@ -49,9 +106,11 @@
 # Any field listed here acts as a file-level default. Individual scenarios can
 # override any default by re-declaring the same field.
 defaults:
-  # ICAP method this file handles.
-  # Values: REQMOD, RESPMOD, OPTIONS
-  # (Can still be overridden per-scenario if needed.)
+  # ICAP method(s) this file handles.
+  # Accepts either a single string ("method: REQMOD") or a list
+  # ("method: [REQMOD, RESPMOD]") — the scenario matches any request whose
+  # method is in the list. Can still be overridden per-scenario if needed.
+  # Values: REQMOD, RESPMOD, OPTIONS.
   method: REQMOD
 
   # ICAP service endpoint path (matched against the request URI).
@@ -66,6 +125,30 @@ defaults:
   headers:
     Server: "ICAP Mock Server / example"
     ISTag: '"example-2026"'
+
+  # Library of named response templates, referenced elsewhere via "use: <name>".
+  response_templates:
+    clean:
+      status: 204
+      delay: 50ms-150ms
+    blocked-page:                # synthesized HTTP block page
+      status: 200                # ICAP: modified response follows
+      http_status: 403           # wrapped HTTP status
+      http_set:                  # wrapped HTTP headers
+        Content-Type: "text/html"
+      http_body: "<html><body><h1>Blocked</h1></body></html>"
+      delay: 300ms-800ms
+    flaky-block:                 # a weighted template: each request samples
+      - weight: 70               # 70% → blocked-page
+        use: blocked-page
+      - weight: 25               # 25% → clean
+        use: clean
+      - weight: 5                # 5% → 500 server error
+        status: 500
+
+  # File-wide fallback: if no scenario matched the request, serve this
+  # template (by name) instead of returning ICAP 404.
+  # use: clean
 
 
 # =============================================================================
@@ -94,15 +177,20 @@ scenarios:
     # Type: int | Default: 0 (not set)
     http_status: 403
 
-    # Response headers specific to this scenario (merged with defaults.headers).
+    # ICAP-envelope headers (merged with defaults.headers).
+    # Use these for ICAP-level metadata (threat tags, service identifiers, …)
+    # that the ICAP client consumes, not the origin HTTP client.
     set:
-      Content-Type: "text/html; charset=utf-8"
       X-Threat-Level: "DANGEROUS"
       X-Virus-ID: "TROJAN"
 
-    # Inline response body. Multi-line YAML literal block (|) works well here.
-    # Use body_file instead if the body is large (see scenario below).
-    body: |
+    # Encapsulated HTTP response headers — what the end-user's browser sees.
+    http_set:
+      Content-Type: "text/html; charset=utf-8"
+
+    # Encapsulated HTTP response body. For large or binary payloads use
+    # http_body_file instead (see scenario below).
+    http_body: |
       <html><body>
         <h1>Access Denied</h1>
         <p>The file <strong>malware.exe</strong> was blocked by the antivirus scanner.</p>
@@ -127,11 +215,13 @@ scenarios:
     status: 200
     http_status: 403
 
-    set:
-      Content-Type: "text/plain"
+    set:                                   # ICAP envelope
       X-Threat-Level: "SUSPICIOUS"
 
-    body: "Executable file blocked by policy."
+    http_set:                              # wrapped HTTP
+      Content-Type: "text/plain"
+
+    http_body: "Executable file blocked by policy."
 
     # Range delay: a random duration between 100 ms and 500 ms is chosen for
     # each request. Format: <min>-<max>, any Go duration units.
@@ -146,23 +236,25 @@ scenarios:
   # ---------------------------------------------------------------------------
   # 3. BODY FROM FILE — serve a large or binary response body from disk
   # ---------------------------------------------------------------------------
-  # Trigger: Content-Type header matches "application/pdf" (case-insensitive).
+  # Trigger: HTTP Content-Type of the encapsulated request is application/pdf.
+  # Note: Content-Type lives in the wrapped HTTP request, not in ICAP headers,
+  # so this uses "when_http:" rather than "when:".
   regex-match-pdf:
-    when:
-      Content-Type: "re:(?i)application/pdf"
+    when_http:
+      headers:
+        Content-Type: "re:(?i)application/pdf"
 
     status: 200
     http_status: 200
 
-    set:
+    http_set:
       Content-Type: "application/pdf"
 
-    # Load the response body from a file path.
-    # Relative paths are resolved from the working directory of the process
-    # (typically the repository root, not this scenario file's directory).
-    # Mutually exclusive with "body:". body_file takes precedence if both given.
-    # Type: string | Default: "" (not used)
-    body_file: "./configs/scenarios/example/sample_response.pdf"
+    # Load the wrapped HTTP response body from a file. Relative paths are
+    # resolved from the working directory of the process (typically the
+    # repository root, not this scenario file's directory). Content-Length is
+    # auto-filled from the file size.
+    http_body_file: "./configs/scenarios/example/sample_response.pdf"
 
     delay: 50ms-200ms
     priority: 5
@@ -196,8 +288,9 @@ scenarios:
         http_status: 200
         set:
           X-Threat-Level: "SUSPICIOUS"
+        http_set:
           Content-Type: "text/plain"
-        body: "File flagged as suspicious but allowed."
+        http_body: "File flagged as suspicious but allowed."
         delay: 200ms-600ms
 
       # Weight 10/100 → 10%: block as dangerous
@@ -206,8 +299,9 @@ scenarios:
         http_status: 403
         set:
           X-Threat-Level: "DANGEROUS"
+        http_set:
           Content-Type: "text/html"
-        body: "<html><body><h1>Blocked</h1></body></html>"
+        http_body: "<html><body><h1>Blocked</h1></body></html>"
         delay: 300ms-1s
 
 
@@ -220,18 +314,24 @@ scenarios:
     # Override the default method for this single scenario.
     method: RESPMOD
 
+    # X-Service-Name is an ICAP-level custom header, Content-Type is in the
+    # encapsulated HTTP response — so they go in different blocks.
     when:
-      Content-Type: "re:(?i)message/rfc822"
       X-Service-Name: "re:(?i)mail-gateway"
+    when_http:
+      headers:
+        Content-Type: "re:(?i)message/rfc822"
 
     status: 200
     http_status: 403
 
-    set:
-      Content-Type: "text/plain"
+    set:                                    # ICAP envelope
       X-Block-Reason: "Malicious email attachment"
 
-    body: "Email attachment blocked."
+    http_set:                               # wrapped HTTP
+      Content-Type: "text/plain"
+
+    http_body: "Email attachment blocked."
     delay: 800ms-2s
 
     # High priority ensures this matches before the generic email catch-all below.
@@ -271,7 +371,84 @@ scenarios:
 
 
   # ---------------------------------------------------------------------------
-  # 8. INLINE WEIGHTED WITH HEADERS — full-featured weighted example
+  # 7b. MULTI-METHOD SCENARIO — one rule for both REQMOD and RESPMOD
+  # ---------------------------------------------------------------------------
+  # A single ICAP listener serves all methods. When a scenario should apply to
+  # more than one, list them under `method:` — either at the scenario level or
+  # inside `defaults:`. Matches a request whose method is in the list.
+  both-methods-pass:
+    method: [REQMOD, RESPMOD]
+    when_http:
+      headers:
+        X-Scan-Skip: "re:^(1|true|yes)$"
+    status: 204
+    delay: 10ms
+
+
+  # ---------------------------------------------------------------------------
+  # 7c. BRANCHES — multiple conditions within one scenario (OR), shared gate
+  # ---------------------------------------------------------------------------
+  # Use "branches:" when several response cases live under the same filter.
+  # Branches are matched top-to-bottom; the first that matches wins. If none
+  # match the scenario is skipped (next scenario is tried). For a fallback,
+  # add an explicit catch-all branch at the end.
+  scan-dispatch:
+    # (No scenario-level when:/when_http: — gate is method+endpoint only.)
+    branches:
+      - when_http:
+          headers:
+            Content-Type: "re:(?i)application/x-dosexec"
+        use: blocked-page
+
+      - when_http:
+          headers:
+            Content-Type: "re:(?i)message/rfc822"
+        use: blocked-page
+
+      - when:
+          X-Client-ID: "re:.+"
+        use: flaky-block          # branch can reference a weighted template
+
+      - use: clean                # catch-all — matches anything remaining
+
+
+  # ---------------------------------------------------------------------------
+  # 7d. PATH CAPTURES — extract {id} from the URL and echo it in the response
+  # ---------------------------------------------------------------------------
+  # Captures pulled from the matched endpoint become ${name} substitutions
+  # in response strings (body, set, http_body, http_set). Use "$${" for a
+  # literal dollar-brace sequence.
+  env-status:
+    endpoint: /env/{env}/items/{id}/status
+    status: 200
+    http_status: 200
+    http_set:
+      Content-Type: "application/json"
+      X-Env-Id: "${id}"
+    http_body: |
+      {"env": "${env}", "id": "${id}", "status": "ok"}
+
+
+  # ---------------------------------------------------------------------------
+  # 8. MATCH BY FILENAME IN HTTP URL
+  # ---------------------------------------------------------------------------
+  # If the client does not send X-Filename, the filename is still visible in
+  # the URI of the encapsulated HTTP request (e.g. http://host/path/file.exe).
+  # Use when_http.url with a regex to match on it.
+  block-by-filename:
+    when_http:
+      url: "re:(?i)\\.(exe|dll|scr)(\\?|$)"
+    status: 200
+    http_status: 403
+    http_set:
+      Content-Type: "text/plain"
+    http_body: "Executable blocked by filename policy."
+    delay: 100ms-300ms
+    priority: 15
+
+
+  # ---------------------------------------------------------------------------
+  # 9. INLINE WEIGHTED WITH HEADERS — full-featured weighted example
   # ---------------------------------------------------------------------------
   # Commented out — uncomment to try.
   #
@@ -283,9 +460,10 @@ scenarios:
   #       status: 200
   #       http_status: 403
   #       set:
-  #         Content-Type: "text/html"
   #         X-Verdict: "MALWARE"
-  #       body: "<html><body>Blocked by deep scan.</body></html>"
+  #       http_set:
+  #         Content-Type: "text/html"
+  #       http_body: "<html><body>Blocked by deep scan.</body></html>"
   #       delay: 500ms-1500ms
   #     - weight: 9
   #       status: 204

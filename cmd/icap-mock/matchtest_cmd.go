@@ -266,14 +266,17 @@ func (e *matchExplainer) run() matchResult {
 }
 
 func (e *matchExplainer) checkMethod() {
-	if e.scenario.Match.Method == "" {
+	methods := e.scenario.Match.Methods
+	if len(methods) == 0 {
 		return
 	}
-	if e.scenario.Match.Method == e.req.Method {
-		e.pass(fmt.Sprintf("icap_method=%s matches", e.scenario.Match.Method))
-	} else {
-		e.fail(fmt.Sprintf("icap_method: want %s, got %s", e.scenario.Match.Method, e.req.Method))
+	for _, m := range methods {
+		if m == e.req.Method {
+			e.pass(fmt.Sprintf("icap_method=%s matches (scenario accepts %v)", m, methods))
+			return
+		}
 	}
+	e.fail(fmt.Sprintf("icap_method: want one of %v, got %s", methods, e.req.Method))
 }
 
 func (e *matchExplainer) checkPath() {

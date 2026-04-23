@@ -241,7 +241,9 @@ func (r *Response) writeToBuffer(buf *bytes.Buffer) {
 	}
 }
 
-// writeHTTPMessage writes an HTTP message to the buffer.
+// writeHTTPMessage writes an HTTP message to the buffer. Headers are written
+// inline; the body (if any) is serialized in HTTP chunked transfer encoding,
+// which is what ICAP mandates for req-body / res-body sections per RFC 3507.
 func (r *Response) writeHTTPMessage(buf *bytes.Buffer, m *HTTPMessage, isRequest bool) {
 	if isRequest {
 		// Write request line
@@ -267,9 +269,11 @@ func (r *Response) writeHTTPMessage(buf *bytes.Buffer, m *HTTPMessage, isRequest
 	}
 	buf.WriteString("\r\n")
 
-	// Write body
+	// Write body in chunked encoding when present. BuildEncapsulatedHeader
+	// already advertises req-body / res-body at the offset right after this
+	// blank line, so the bytes that follow must be valid chunked data.
 	if len(m.Body) > 0 {
-		buf.Write(m.Body)
+		_ = WriteChunkedBody(buf, m.Body)
 	}
 }
 

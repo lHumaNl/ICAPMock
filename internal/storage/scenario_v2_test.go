@@ -5,6 +5,8 @@ package storage
 import (
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // --- ParseDelay tests ---
@@ -278,8 +280,8 @@ func TestMatchValue_Matches_RegexCaseSensitive(t *testing.T) {
 func TestConvertV2ToScenarios_Basic(t *testing.T) {
 	file := &ScenarioFileV2{
 		Defaults: ScenarioDefaultsV2{
-			Method:   "RESPMOD",
-			Endpoint: "/scan-file",
+			Method:   MethodList{"RESPMOD"},
+			Endpoint: EndpointList{"/scan-file"},
 			Status:   204,
 			Headers: map[string]string{
 				"service": "Mock ICAP Server",
@@ -307,11 +309,11 @@ func TestConvertV2ToScenarios_Basic(t *testing.T) {
 	if s.Name != "scenario-a" {
 		t.Errorf("Name: got %q, want %q", s.Name, "scenario-a")
 	}
-	if s.Match.Method != "RESPMOD" {
-		t.Errorf("Method: got %q, want RESPMOD", s.Match.Method)
+	if len(s.Match.Methods) != 1 || s.Match.Methods[0] != "RESPMOD" {
+		t.Errorf("Methods: got %v, want [RESPMOD]", s.Match.Methods)
 	}
-	if s.Match.Path != "/scan-file" {
-		t.Errorf("Path: got %q, want /scan-file", s.Match.Path)
+	if len(s.Match.Paths) == 0 || s.Match.Paths[0] != "/scan-file" {
+		t.Errorf("Paths: got %v, want [/scan-file]", s.Match.Paths)
 	}
 	if s.Response.ICAPStatus != 204 {
 		t.Errorf("ICAPStatus: got %d, want 204", s.Response.ICAPStatus)
@@ -321,6 +323,8 @@ func TestConvertV2ToScenarios_Basic(t *testing.T) {
 func TestConvertV2ToScenarios_HeaderMerge(t *testing.T) {
 	file := &ScenarioFileV2{
 		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"REQMOD"},
+			Endpoint: EndpointList{"/x"},
 			Headers: map[string]string{
 				"default-header": "default-value",
 				"override-me":    "original",
@@ -354,6 +358,7 @@ func TestConvertV2ToScenarios_HeaderMerge(t *testing.T) {
 
 func TestConvertV2ToScenarios_PriorityAssignment(t *testing.T) {
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"first":  {},
 			"second": {},
@@ -385,6 +390,7 @@ func TestConvertV2ToScenarios_PriorityAssignment(t *testing.T) {
 
 func TestConvertV2ToScenarios_ExplicitPriority(t *testing.T) {
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"high": {Priority: 9999},
 			"low":  {Priority: 1},
@@ -412,14 +418,14 @@ func TestConvertV2ToScenarios_ExplicitPriority(t *testing.T) {
 func TestConvertV2ToScenarios_EntryOverridesDefaults(t *testing.T) {
 	file := &ScenarioFileV2{
 		Defaults: ScenarioDefaultsV2{
-			Method:   "RESPMOD",
-			Endpoint: "/default-endpoint",
+			Method:   MethodList{"RESPMOD"},
+			Endpoint: EndpointList{"/default-endpoint"},
 			Status:   204,
 		},
 		Scenarios: map[string]ScenarioEntryV2{
 			"override": {
-				Method:   "REQMOD",
-				Endpoint: "/custom-endpoint",
+				Method:   MethodList{"REQMOD"},
+				Endpoint: EndpointList{"/custom-endpoint"},
 				Status:   200,
 			},
 		},
@@ -431,11 +437,11 @@ func TestConvertV2ToScenarios_EntryOverridesDefaults(t *testing.T) {
 	}
 
 	s := scenarios[0]
-	if s.Match.Method != "REQMOD" {
-		t.Errorf("Method: got %q, want REQMOD", s.Match.Method)
+	if len(s.Match.Methods) != 1 || s.Match.Methods[0] != "REQMOD" {
+		t.Errorf("Methods: got %v, want [REQMOD]", s.Match.Methods)
 	}
-	if s.Match.Path != "/custom-endpoint" {
-		t.Errorf("Path: got %q, want /custom-endpoint", s.Match.Path)
+	if len(s.Match.Paths) == 0 || s.Match.Paths[0] != "/custom-endpoint" {
+		t.Errorf("Paths: got %v, want [/custom-endpoint]", s.Match.Paths)
 	}
 	if s.Response.ICAPStatus != 200 {
 		t.Errorf("ICAPStatus: got %d, want 200", s.Response.ICAPStatus)
@@ -444,6 +450,7 @@ func TestConvertV2ToScenarios_EntryOverridesDefaults(t *testing.T) {
 
 func TestConvertV2ToScenarios_WhenHeaders(t *testing.T) {
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"with-when": {
 				When: map[string]string{
@@ -470,6 +477,7 @@ func TestConvertV2ToScenarios_WhenHeaders(t *testing.T) {
 
 func TestConvertV2ToScenarios_Delay(t *testing.T) {
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"with-delay": {Delay: "500ms"},
 		},
@@ -508,6 +516,7 @@ func TestConvertV2ToScenarios_NilFile(t *testing.T) {
 func TestConvertV2ToScenarios_EmptySet_NoDefaultHeaders(t *testing.T) {
 	// When both defaults.headers and set are empty, Headers should be nil.
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"no-headers": {},
 		},
@@ -524,6 +533,7 @@ func TestConvertV2ToScenarios_EmptySet_NoDefaultHeaders(t *testing.T) {
 
 func TestConvertV2ToScenarios_BodyAndBodyFile(t *testing.T) {
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"with-body": {
 				Body:     "response body text",
@@ -549,6 +559,7 @@ func TestConvertV2ToScenarios_BodyAndBodyFile(t *testing.T) {
 func TestConvertV2ToScenarios_DefaultStatusFallback(t *testing.T) {
 	// No status in defaults or entry — should default to 204.
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"no-status": {},
 		},
@@ -565,6 +576,7 @@ func TestConvertV2ToScenarios_DefaultStatusFallback(t *testing.T) {
 
 func TestConvertV2ToScenarios_UnknownNameSkipped(t *testing.T) {
 	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"real": {},
 		},
@@ -577,5 +589,304 @@ func TestConvertV2ToScenarios_UnknownNameSkipped(t *testing.T) {
 	}
 	if len(scenarios) != 1 {
 		t.Errorf("expected 1 scenario, got %d", len(scenarios))
+	}
+}
+
+// --- when_http / HTTP match tests ---
+
+func TestConvertV2ToScenarios_WhenHTTP(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/av/reqmod"}},
+		Scenarios: map[string]ScenarioEntryV2{
+			"http-match": {
+				WhenHTTP: &WhenHTTPV2{
+					Headers: map[string]string{
+						"Content-Type": "re:(?i)application/x-dosexec",
+					},
+					URL:    "re:(?i)\\.(exe|dll)$",
+					Method: "GET",
+				},
+			},
+		},
+	}
+
+	scenarios, err := ConvertV2ToScenarios(file, []string{"http-match"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := scenarios[0]
+	if s.Match.HTTPHeaders["Content-Type"] != "re:(?i)application/x-dosexec" {
+		t.Errorf("HTTPHeaders: got %q", s.Match.HTTPHeaders["Content-Type"])
+	}
+	if s.Match.HTTPURL != "re:(?i)\\.(exe|dll)$" {
+		t.Errorf("HTTPURL: got %q", s.Match.HTTPURL)
+	}
+	if s.Match.HTTPMethod != "GET" {
+		t.Errorf("HTTPMethod: got %q", s.Match.HTTPMethod)
+	}
+}
+
+func TestConvertV2ToScenarios_MissingMethodOrEndpoint(t *testing.T) {
+	cases := []struct {
+		name     string
+		defaults ScenarioDefaultsV2
+		entry    ScenarioEntryV2
+		want     string
+	}{
+		{
+			name:  "no method",
+			entry: ScenarioEntryV2{Endpoint: EndpointList{"/x"}},
+			want:  "method is not set",
+		},
+		{
+			name:  "no endpoint",
+			entry: ScenarioEntryV2{Method: MethodList{"REQMOD"}},
+			want:  "endpoint is not set",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := &ScenarioFileV2{
+				Defaults:  tc.defaults,
+				Scenarios: map[string]ScenarioEntryV2{"s": tc.entry},
+			}
+			_, err := ConvertV2ToScenarios(file, []string{"s"})
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.want)
+			}
+			if !containsString(err.Error(), tc.want) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+func containsString(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// --- MethodList tests ---
+
+func TestMethodList_UnmarshalYAML_Scalar(t *testing.T) {
+	var out struct {
+		M MethodList `yaml:"m"`
+	}
+	if err := yaml.Unmarshal([]byte("m: REQMOD\n"), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.M) != 1 || out.M[0] != "REQMOD" {
+		t.Errorf("got %v, want [REQMOD]", out.M)
+	}
+}
+
+func TestMethodList_UnmarshalYAML_Sequence(t *testing.T) {
+	var out struct {
+		M MethodList `yaml:"m"`
+	}
+	if err := yaml.Unmarshal([]byte("m: [REQMOD, RESPMOD]\n"), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.M) != 2 || out.M[0] != "REQMOD" || out.M[1] != "RESPMOD" {
+		t.Errorf("got %v, want [REQMOD RESPMOD]", out.M)
+	}
+}
+
+func TestMethodList_UnmarshalYAML_Empty(t *testing.T) {
+	var out struct {
+		M MethodList `yaml:"m"`
+	}
+	if err := yaml.Unmarshal([]byte("m:\n"), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.M != nil && len(out.M) != 0 {
+		t.Errorf("got %v, want empty", out.M)
+	}
+}
+
+func TestConvertV2_MultipleMethods(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"REQMOD", "RESPMOD"},
+			Endpoint: EndpointList{"/scan"},
+		},
+		Scenarios: map[string]ScenarioEntryV2{"s": {}},
+	}
+	scenarios, err := ConvertV2ToScenarios(file, []string{"s"})
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if len(scenarios[0].Match.Methods) != 2 {
+		t.Errorf("Methods: got %v, want 2 items", scenarios[0].Match.Methods)
+	}
+}
+
+func TestConvertV2_InvalidMethod(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"WRONG"},
+			Endpoint: EndpointList{"/x"},
+		},
+		Scenarios: map[string]ScenarioEntryV2{"s": {}},
+	}
+	_, err := ConvertV2ToScenarios(file, []string{"s"})
+	if err == nil {
+		t.Fatal("expected error for invalid method")
+	}
+	if !containsString(err.Error(), "invalid ICAP method") {
+		t.Errorf("error %q does not mention invalid method", err.Error())
+	}
+}
+
+// --- Endpoint list + captures ---
+
+func TestEndpointList_UnmarshalYAML(t *testing.T) {
+	cases := []struct {
+		in   string
+		want EndpointList
+	}{
+		{"e: /scan\n", EndpointList{"/scan"}},
+		{"e: [/a, \"/b/{id}\"]\n", EndpointList{"/a", "/b/{id}"}},
+		{"e:\n", nil},
+	}
+	for _, tc := range cases {
+		var out struct {
+			E EndpointList `yaml:"e"`
+		}
+		if err := yaml.Unmarshal([]byte(tc.in), &out); err != nil {
+			t.Fatalf("unmarshal %q: %v", tc.in, err)
+		}
+		if len(out.E) != len(tc.want) {
+			t.Errorf("%q: got %v, want %v", tc.in, out.E, tc.want)
+			continue
+		}
+		for i := range tc.want {
+			if out.E[i] != tc.want[i] {
+				t.Errorf("%q[%d]: got %q, want %q", tc.in, i, out.E[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestCompileEndpoint_Captures(t *testing.T) {
+	ce, err := compileEndpoint("/env/{id}/ok")
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(ce.captures) != 1 || ce.captures[0] != "id" {
+		t.Errorf("captures: got %v, want [id]", ce.captures)
+	}
+	m := ce.re.FindStringSubmatch("/env/abc-123/ok")
+	if m == nil {
+		t.Fatal("expected match for /env/abc-123/ok")
+	}
+	if ce.re.FindStringSubmatch("/env/abc/def/ok") != nil {
+		t.Error("should not match when extra path segment is present")
+	}
+}
+
+func TestMatchEndpoint_WithCaptures(t *testing.T) {
+	p, err := compileEndpoint("/env/{env}/queue/{qid}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps, ok := matchEndpoint([]compiledEndpoint{p}, "/env/prod/queue/42?x=1")
+	if !ok {
+		t.Fatal("expected match with stripped query")
+	}
+	if caps["env"] != "prod" || caps["qid"] != "42" {
+		t.Errorf("captures: %v", caps)
+	}
+}
+
+// --- Branches + templates + use ---
+
+func TestConvertV2_BranchesWithTemplates(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"REQMOD"},
+			Endpoint: EndpointList{"/scan"},
+			ResponseTemplates: map[string]ResponseTemplateV2{
+				"clean":   {Inline: &InlineResponseV2{Status: 204}},
+				"blocked": {Inline: &InlineResponseV2{Status: 200, HTTPStatus: 403, Body: "<html>blocked</html>"}},
+			},
+			Use: "clean",
+		},
+		Scenarios: map[string]ScenarioEntryV2{
+			"s": {
+				Branches: []BranchV2{
+					{When: map[string]string{"X-Tag": "bad"}, Use: "blocked"},
+					{Use: "clean"},
+				},
+			},
+		},
+	}
+	scenarios, err := ConvertV2ToScenarios(file, []string{"s"})
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	s := scenarios[0]
+	if len(s.Branches) != 2 {
+		t.Fatalf("branches: got %d, want 2", len(s.Branches))
+	}
+	if s.Branches[0].Response.ICAPStatus != 200 || s.Branches[0].Response.HTTPStatus != 403 {
+		t.Errorf("branch[0] resp: %+v", s.Branches[0].Response)
+	}
+	if s.Branches[1].Response.ICAPStatus != 204 {
+		t.Errorf("branch[1] resp: %+v", s.Branches[1].Response)
+	}
+}
+
+func TestConvertV2_BranchesRejectInlineOnSameLevel(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
+		Scenarios: map[string]ScenarioEntryV2{
+			"bad": {
+				Status:   200,
+				Branches: []BranchV2{{Use: "does-not-matter"}},
+			},
+		},
+	}
+	_, err := ConvertV2ToScenarios(file, []string{"bad"})
+	if err == nil {
+		t.Fatal("expected error for mixing inline response with branches")
+	}
+	if !containsString(err.Error(), "branches cannot be combined") {
+		t.Errorf("error: %v", err)
+	}
+}
+
+func TestConvertV2_UnknownTemplateRef(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
+		Scenarios: map[string]ScenarioEntryV2{
+			"s": {Use: "missing"},
+		},
+	}
+	_, err := ConvertV2ToScenarios(file, []string{"s"})
+	if err == nil {
+		t.Fatal("expected error for unknown template reference")
+	}
+	if !containsString(err.Error(), "missing") {
+		t.Errorf("error should name the missing template: %v", err)
+	}
+}
+
+func TestConvertV2_DefaultsUseUnknown(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"REQMOD"},
+			Endpoint: EndpointList{"/x"},
+			Use:      "nope",
+		},
+		Scenarios: map[string]ScenarioEntryV2{"s": {}},
+	}
+	_, err := ConvertV2ToScenarios(file, []string{"s"})
+	if err == nil {
+		t.Fatal("expected error for unknown defaults.use")
 	}
 }

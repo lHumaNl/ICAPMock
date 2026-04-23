@@ -25,6 +25,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/internal/server"
 	"github.com/icap-mock/icap-mock/internal/storage"
+	"github.com/icap-mock/icap-mock/pkg/icap"
 	"github.com/icap-mock/icap-mock/pkg/plugin"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -442,8 +443,8 @@ func loadInlineScenarios(entry serverEntry, registry storage.ScenarioRegistry, l
 			}
 		}
 		storageScenarios[name] = storage.ScenarioEntryV2{
-			Method:     e.Method,
-			Endpoint:   e.Endpoint,
+			Method:     storage.MethodList(e.Method),
+			Endpoint:   storage.EndpointList(e.Endpoint),
 			Status:     e.Status,
 			HTTPStatus: e.HTTPStatus,
 			Priority:   e.Priority,
@@ -771,6 +772,8 @@ func createHandlers(
 }
 
 // registerHandlers registers all ICAP handlers with the router.
+//
+//nolint:gocyclo // handler registration aggregates (path × method) across many scenarios
 func registerHandlers(
 	rtr *router.Router,
 	proc processor.Processor,
@@ -797,30 +800,104 @@ func registerHandlers(
 		}
 	}
 
-	// Register custom endpoints from scenarios
+	// Register custom endpoints from scenarios. The router keys handlers by
+	// path only, so to support a single custom endpoint serving multiple ICAP
+	// methods (e.g. both REQMOD and RESPMOD on /av/scan) we register a
+	// dispatching handler that selects the right method-handler per request.
 	if registry != nil {
-		registered := make(map[string]bool)
+		// methodsByEP aggregates declared methods per endpoint path. Scenarios
+		// may declare multiple endpoints (EndpointList) and multiple methods;
+		// each (path, method) pair is registered once. Paths containing "{…}"
+		// captures go to the pattern-matched fallback (see rtr.HandlePattern).
+		methodsByEP := make(map[string]map[string]bool)
+		epOrder := make([]string, 0)
 		for _, ep := range defaultEndpoints {
-			registered[ep] = true
+			methodsByEP[ep] = nil // skip — already registered above
+		}
+		collect := func(ep string, methods []string) {
+			if _, isDefault := methodsByEP[ep]; isDefault && methodsByEP[ep] == nil {
+				return
+			}
+			set, ok := methodsByEP[ep]
+			if !ok {
+				set = make(map[string]bool)
+				methodsByEP[ep] = set
+				epOrder = append(epOrder, ep)
+			}
+			for _, m := range methods {
+				set[m] = true
+			}
 		}
 		for _, s := range registry.List() {
-			ep := s.Match.Path
-			if ep == "" || registered[ep] {
+			methods := s.Match.Methods
+			if len(methods) == 0 {
+				methods = []string{"RESPMOD"}
+			}
+			paths := s.Match.Paths
+			if len(paths) == 0 && s.Match.Path != "" {
+				paths = []string{s.Match.Path}
+			}
+			for _, ep := range paths {
+				collect(ep, methods)
+			}
+		}
+		for _, ep := range epOrder {
+			allowed := methodsByEP[ep]
+			h := newMethodDispatchHandler(allowed, wrappedReqmod, wrappedRespmod, wrappedOptions)
+
+			methodList := make([]string, 0, len(allowed))
+			for m := range allowed {
+				methodList = append(methodList, m)
+			}
+
+			// Capture-style endpoints ("/env/{id}/…") need regex dispatch.
+			if strings.Contains(ep, "{") {
+				re, cerr := storage.CompileEndpointRegex(ep)
+				if cerr != nil {
+					return fmt.Errorf("compiling pattern endpoint %s: %w", ep, cerr)
+				}
+				if err := rtr.HandlePattern(re, h); err != nil {
+					return fmt.Errorf("registering pattern endpoint %s: %w", ep, err)
+				}
+				log.Info("registered pattern endpoint from scenario", "endpoint", ep, "methods", methodList)
 				continue
 			}
-			registered[ep] = true
-			h := wrappedRespmod
-			if s.Match.Method == "REQMOD" {
-				h = wrappedReqmod
-			}
+
 			if err := rtr.Handle(ep, h); err != nil {
 				return fmt.Errorf("registering handler for custom endpoint %s: %w", ep, err)
 			}
-			log.Info("registered custom endpoint from scenario", "endpoint", ep, "method", s.Match.Method)
+			log.Info("registered custom endpoint from scenario", "endpoint", ep, "methods", methodList)
 		}
 	}
 
 	return nil
+}
+
+// newMethodDispatchHandler returns a handler that picks the right method
+// handler by req.Method, restricted to the set of methods actually declared
+// by scenarios on this path. Requests whose method is not in the set get a
+// 405-equivalent 204 (ICAP has no 405; the router already 404s unknown paths,
+// so here we fall through to RESPMOD for legacy tolerance).
+func newMethodDispatchHandler(allowed map[string]bool, reqmod, respmod, options handler.Handler) handler.Handler {
+	return handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+		switch req.Method {
+		case "REQMOD":
+			if allowed["REQMOD"] {
+				return reqmod.Handle(ctx, req)
+			}
+		case "RESPMOD":
+			if allowed["RESPMOD"] {
+				return respmod.Handle(ctx, req)
+			}
+		case "OPTIONS":
+			if allowed["OPTIONS"] {
+				return options.Handle(ctx, req)
+			}
+		}
+		// Method not declared for this endpoint — fall back to RESPMOD to
+		// preserve previous behavior for silently-typed scenarios.
+		return respmod.Handle(ctx, req)
+	}, "")
 }
 
 // startMetricsServer starts the Prometheus metrics HTTP server.

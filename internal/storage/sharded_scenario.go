@@ -240,20 +240,23 @@ func (r *ShardedScenarioRegistry) indexScenario(s *Scenario) {
 	// Добавляем в список сценариев
 	shard.scenarios = append(shard.scenarios, s)
 
-	// Индексируем по method + path prefix
-	key := r.buildIndexKey(s)
-	shard.index[key] = append(shard.index[key], s)
+	// Индексируем по каждому (method, path_prefix). Для multi-method сценария
+	// добавляем одну и ту же запись под каждый из его методов.
+	for _, key := range r.buildIndexKeys(s) {
+		shard.index[key] = append(shard.index[key], s)
+	}
 }
 
 // getShardForScenario определяет shard для сценария.
-// Использует hash от path_pattern если есть, иначе от имени.
+// Использует hash от первого endpoint'а (если есть) или path_pattern, иначе от имени.
 func (r *ShardedScenarioRegistry) getShardForScenario(s *Scenario) int {
-	path := s.Match.Path
-	if path == "" {
-		// Если нет path pattern, используем имя
-		return r.hashString(s.Name)
+	if len(s.Match.Paths) > 0 {
+		return r.hashString(s.Match.Paths[0])
 	}
-	return r.hashString(path)
+	if s.Match.Path != "" {
+		return r.hashString(s.Match.Path)
+	}
+	return r.hashString(s.Name)
 }
 
 // getShardForRequest определяет shard для запроса.
@@ -275,20 +278,48 @@ func (r *ShardedScenarioRegistry) hashString(s string) int {
 	return int(h % uint32(r.shardCount)) //nolint:gosec // safe range
 }
 
-// buildIndexKey строит ключ индекса для сценария.
-// Формат: "METHOD:path_prefix".
-func (r *ShardedScenarioRegistry) buildIndexKey(s *Scenario) string {
-	method := s.Match.Method
-	if method == "" {
-		method = "*"
+// buildIndexKeys строит набор ключей индекса — по одному на каждую пару
+// (метод, endpoint-префикс). Формат: "METHOD:path_prefix". Пустой список
+// методов в MatchRule означает "любой метод" (ключ "*"); пустой список
+// путей — "любой путь" (префикс "*").
+func (r *ShardedScenarioRegistry) buildIndexKeys(s *Scenario) []string {
+	prefixes := make([]string, 0)
+	switch {
+	case len(s.Match.Paths) > 0:
+		for _, p := range s.Match.Paths {
+			pre := extractPathPrefix(p)
+			if pre == "" {
+				pre = "*"
+			}
+			prefixes = append(prefixes, pre)
+		}
+	case s.Match.Path != "":
+		pre := extractPathPrefix(s.Match.Path)
+		if pre == "" {
+			pre = "*"
+		}
+		prefixes = append(prefixes, pre)
+	default:
+		prefixes = append(prefixes, "*")
 	}
 
-	pathPrefix := extractPathPrefix(s.Match.Path)
-	if pathPrefix == "" {
-		pathPrefix = "*"
+	methods := s.Match.Methods
+	if len(methods) == 0 {
+		methods = MethodList{"*"}
 	}
-
-	return method + ":" + pathPrefix
+	keys := make([]string, 0, len(prefixes)*len(methods))
+	seen := make(map[string]bool, len(prefixes)*len(methods))
+	for _, pre := range prefixes {
+		for _, m := range methods {
+			k := m + ":" + pre
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // extractPathPrefix извлекает префикс пути из regex паттерна.
@@ -441,13 +472,33 @@ func (r *ShardedScenarioRegistry) buildSearchKeys(req *icap.Request) []string {
 	return keys
 }
 
-// buildCacheKey строит ключ для кэша на основе запроса.
+// buildCacheKey строит ключ для кэша на основе запроса. Ключ включает
+// дискриминаторы, по которым чаще всего матчат сценарии: ICAP метод/URI,
+// метод и URI вложенного HTTP-запроса, и Content-Type сканируемого контента
+// (из response у RESPMOD или request у REQMOD).
+//
+// Полностью 100% корректный кеш пришлось бы выключить для любого сценария
+// с header-матчингом (ключей бесконечно много). Этот набор покрывает
+// практические кейсы (Content-Type — самый частый дискриминатор), но если
+// понадобится матч по произвольному HTTP-заголовку, кеш будет возвращать
+// стейл. В таком случае отключайте его через ShardingConfig.EnableCache=false.
 func (r *ShardedScenarioRegistry) buildCacheKey(req *icap.Request) string {
-	httpMethod := ""
+	var httpMethod, httpURI, contentType string
 	if req.HTTPRequest != nil {
 		httpMethod = req.HTTPRequest.Method
+		httpURI = req.HTTPRequest.URI
 	}
-	return req.Method + "|" + req.URI + "|" + httpMethod
+	if req.HTTPResponse != nil {
+		if ct, ok := req.HTTPResponse.Header.Get("Content-Type"); ok {
+			contentType = ct
+		}
+	}
+	if contentType == "" && req.HTTPRequest != nil {
+		if ct, ok := req.HTTPRequest.Header.Get("Content-Type"); ok {
+			contentType = ct
+		}
+	}
+	return req.Method + "|" + req.URI + "|" + httpMethod + "|" + httpURI + "|" + contentType
 }
 
 // fallbackMatch выполняет полный поиск по всем shard-ам.
@@ -484,22 +535,39 @@ func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, b
 // matches проверяет соответствует ли сценарий запросу.
 func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	// Check ICAP method
-	if s.Match.Method != "" && s.Match.Method != req.Method {
+	if !methodMatches(s.Match.Methods, req.Method) {
 		return false
 	}
 
-	// Check path pattern
-	if s.compiledPath != nil {
-		path := extractPath(req.URI)
-		if !s.compiledPath.MatchString(path) {
+	// Check endpoint(s). Any one match is enough; capture names from the
+	// matched endpoint are merged onto req.Captures for use in response
+	// substitution.
+	if len(s.compiledPaths) > 0 {
+		caps, ok := matchEndpoint(s.compiledPaths, extractPath(req.URI))
+		if !ok {
 			return false
+		}
+		if len(caps) > 0 {
+			if req.Captures == nil {
+				req.Captures = make(map[string]string, len(caps))
+			}
+			for k, v := range caps {
+				req.Captures[k] = v
+			}
 		}
 	}
 
-	// Check headers
+	// Check headers (all must match — exact or regex via re: prefix)
 	for key, value := range s.Match.Headers {
 		h, ok := req.Header.Get(key)
-		if !ok || h != value {
+		if !ok {
+			return false
+		}
+		if compiled, hasRegex := s.compiledHeaders[key]; hasRegex {
+			if !compiled.MatchString(h) {
+				return false
+			}
+		} else if h != value {
 			return false
 		}
 	}
@@ -510,6 +578,43 @@ func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
 			return false
 		}
 		if req.HTTPRequest.Method != s.Match.HTTPMethod {
+			return false
+		}
+	}
+
+	// Check encapsulated HTTP headers. For RESPMOD the scanned headers live in
+	// req.HTTPResponse (Content-Type, Content-Length, …); httpHeaderLookup
+	// picks the right side by ICAP method and falls back to the other side.
+	if len(s.Match.HTTPHeaders) > 0 {
+		if !hasEncapsulatedHTTP(req) {
+			return false
+		}
+		for key, value := range s.Match.HTTPHeaders {
+			h, ok := httpHeaderLookup(req, key)
+			if !ok {
+				return false
+			}
+			if compiled, hasRegex := s.compiledHTTPHeaders[key]; hasRegex {
+				if !compiled.MatchString(h) {
+					return false
+				}
+			} else if h != value {
+				return false
+			}
+		}
+	}
+
+	// Check encapsulated HTTP URL. The URL lives on the original HTTP request
+	// even for RESPMOD (req-hdr part of Encapsulated).
+	if s.Match.HTTPURL != "" {
+		if req.HTTPRequest == nil {
+			return false
+		}
+		if s.compiledHTTPURL != nil {
+			if !s.compiledHTTPURL.MatchString(req.HTTPRequest.URI) {
+				return false
+			}
+		} else if req.HTTPRequest.URI != s.Match.HTTPURL {
 			return false
 		}
 	}
@@ -530,6 +635,11 @@ func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
 		if !matchClientIP(s.Match.ClientIP, req.ClientIP) {
 			return false
 		}
+	}
+
+	// If the scenario has branches, require at least one branch to match.
+	if len(s.Branches) > 0 && s.SelectBranch(req) < 0 {
+		return false
 	}
 
 	return true

@@ -30,7 +30,7 @@ func TestMockProcessor_Process(t *testing.T) {
 			scenario: &storage.Scenario{
 				Name: "test-scenario",
 				Match: storage.MatchRule{
-					Method: icap.MethodREQMOD,
+					Methods: []string{icap.MethodREQMOD},
 				},
 				Response: storage.ResponseTemplate{
 					ICAPStatus: 200,
@@ -45,7 +45,7 @@ func TestMockProcessor_Process(t *testing.T) {
 			scenario: &storage.Scenario{
 				Name: "default-scenario",
 				Match: storage.MatchRule{
-					Method: icap.MethodREQMOD,
+					Methods: []string{icap.MethodREQMOD},
 				},
 				Response: storage.ResponseTemplate{
 					ICAPStatus: 204,
@@ -59,7 +59,7 @@ func TestMockProcessor_Process(t *testing.T) {
 			scenario: &storage.Scenario{
 				Name: "delayed-scenario",
 				Match: storage.MatchRule{
-					Method: icap.MethodREQMOD,
+					Methods: []string{icap.MethodREQMOD},
 				},
 				Response: storage.ResponseTemplate{
 					ICAPStatus: 200,
@@ -74,7 +74,7 @@ func TestMockProcessor_Process(t *testing.T) {
 			scenario: &storage.Scenario{
 				Name: "error-scenario",
 				Match: storage.MatchRule{
-					Method: icap.MethodREQMOD,
+					Methods: []string{icap.MethodREQMOD},
 				},
 				Response: storage.ResponseTemplate{
 					ICAPStatus: 500,
@@ -140,7 +140,7 @@ func TestMockProcessor_NoMatch(t *testing.T) {
 	err := registry.Add(&storage.Scenario{
 		Name: "respmod-only",
 		Match: storage.MatchRule{
-			Method: icap.MethodRESPMOD,
+			Methods: []string{icap.MethodRESPMOD},
 		},
 		Response: storage.ResponseTemplate{
 			ICAPStatus: 200,
@@ -171,7 +171,7 @@ func TestMockProcessor_ContextCancellation(t *testing.T) {
 	err := registry.Add(&storage.Scenario{
 		Name: "slow-scenario",
 		Match: storage.MatchRule{
-			Method: icap.MethodREQMOD,
+			Methods: []string{icap.MethodREQMOD},
 		},
 		Response: storage.ResponseTemplate{
 			ICAPStatus: 200,
@@ -214,7 +214,7 @@ func TestMockProcessor_ResponseBody(t *testing.T) {
 	err := registry.Add(&storage.Scenario{
 		Name: "body-scenario",
 		Match: storage.MatchRule{
-			Method: icap.MethodREQMOD,
+			Methods: []string{icap.MethodREQMOD},
 		},
 		Response: storage.ResponseTemplate{
 			ICAPStatus: 200,
@@ -247,7 +247,7 @@ func TestMockProcessor_HTTPHeadersModification(t *testing.T) {
 	err := registry.Add(&storage.Scenario{
 		Name: "header-mod-scenario",
 		Match: storage.MatchRule{
-			Method: icap.MethodREQMOD,
+			Methods: []string{icap.MethodREQMOD},
 		},
 		Response: storage.ResponseTemplate{
 			ICAPStatus:  200,
@@ -296,7 +296,7 @@ func TestMockProcessor_RESPMOD(t *testing.T) {
 	err := registry.Add(&storage.Scenario{
 		Name: "respmod-scenario",
 		Match: storage.MatchRule{
-			Method: icap.MethodRESPMOD,
+			Methods: []string{icap.MethodRESPMOD},
 		},
 		Response: storage.ResponseTemplate{
 			ICAPStatus:  200,
@@ -353,7 +353,7 @@ func TestMockProcessor_ThreadSafety(t *testing.T) {
 	err := registry.Add(&storage.Scenario{
 		Name: "concurrent-test",
 		Match: storage.MatchRule{
-			Method: icap.MethodREQMOD,
+			Methods: []string{icap.MethodREQMOD},
 		},
 		Response: storage.ResponseTemplate{
 			ICAPStatus: 200,
@@ -414,4 +414,24 @@ func createTestREQMODRequest(t *testing.T) *icap.Request {
 		t.Fatalf("failed to create request: %v", err)
 	}
 	return req
+}
+
+func TestSubstituteString_WithCaptures(t *testing.T) {
+	vars := map[string]string{"id": "42", "env": "prod"}
+	cases := []struct {
+		in, want string
+	}{
+		{"plain", "plain"},
+		{"${id}", "42"},
+		{"id=${id} env=${env}", "id=42 env=prod"},
+		{"${missing}", ""},
+		{"$${id}", "${id}"},
+		{"a $${env} b ${env} c", "a ${env} b prod c"},
+	}
+	for _, tc := range cases {
+		got := substituteString(tc.in, vars)
+		if got != tc.want {
+			t.Errorf("substituteString(%q): got %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

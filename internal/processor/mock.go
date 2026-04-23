@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
@@ -86,13 +89,26 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		)
 	}
 
-	// Select weighted response if available
-	selectedResponse := &scenario.Response
+	// Determine the response source: matched branch (if the scenario uses
+	// branches) or the scenario-level response.
+	baseResp := &scenario.Response
+	weighted := scenario.WeightedResponses
+	if len(scenario.Branches) > 0 {
+		idx := scenario.SelectBranch(req)
+		if idx < 0 {
+			// Matcher should have rejected the scenario; defensive guard.
+			return nil, apperrors.ErrScenarioNotFound
+		}
+		b := &scenario.Branches[idx]
+		baseResp = &b.Response
+		weighted = b.WeightedResponses
+	}
+
+	selectedResponse := baseResp
 	var selectedDelay *storage.DelayConfig
-	if len(scenario.WeightedResponses) > 0 {
-		wr := selectWeightedResponse(scenario.WeightedResponses)
-		// Build a merged response template
-		merged := scenario.Response // copy base
+	if len(weighted) > 0 {
+		wr := selectWeightedResponse(weighted)
+		merged := *baseResp // copy base
 		if wr.ICAPStatus != 0 {
 			merged.ICAPStatus = wr.ICAPStatus
 		}
@@ -102,13 +118,31 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		if wr.Body != "" {
 			merged.Body = wr.Body
 		}
+		if wr.BodyFile != "" {
+			merged.BodyFile = wr.BodyFile
+		}
+		if wr.HTTPBody != "" {
+			merged.HTTPBody = wr.HTTPBody
+		}
+		if wr.HTTPBodyFile != "" {
+			merged.HTTPBodyFile = wr.HTTPBodyFile
+		}
 		if len(wr.Headers) > 0 {
 			merged.Headers = wr.Headers
+		}
+		if len(wr.HTTPHeaders) > 0 {
+			merged.HTTPHeaders = wr.HTTPHeaders
 		}
 		if wr.Delay.Min > 0 || wr.Delay.Max > 0 {
 			selectedDelay = &wr.Delay
 		}
 		selectedResponse = &merged
+	}
+
+	// Substitute ${name} placeholders using captured path parameters.
+	if len(req.Captures) > 0 {
+		substituted := substituteCaptures(*selectedResponse, req.Captures)
+		selectedResponse = &substituted
 	}
 
 	// Apply delay
@@ -151,6 +185,8 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 }
 
 // buildResponse constructs an ICAP response from a scenario's response template.
+//
+//nolint:gocyclo // response building covers several orthogonal shapes (REQMOD/RESPMOD × modify/synthesize)
 func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Request) (*icap.Response, error) {
 	resp := icap.NewResponse(scenario.Response.ICAPStatus)
 
@@ -173,6 +209,17 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 		resp.Body = []byte(body)
 	}
 
+	// Load the wrapped HTTP body (if any) from http_body / http_body_file.
+	httpBody, err := loadHTTPBody(&scenario.Response)
+	if err != nil {
+		return nil, apperrors.NewICAPError(
+			apperrors.ErrInternalServerError.Code,
+			"failed to read http_body_file",
+			apperrors.ErrInternalServerError.ICAPStatus,
+			err,
+		)
+	}
+
 	// Handle REQMOD with HTTP request modification
 	if req.IsREQMOD() && req.HTTPRequest != nil {
 		httpReq := p.cloneHTTPMessage(req.HTTPRequest)
@@ -192,12 +239,20 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 			for key, value := range scenario.Response.HTTPHeaders {
 				httpResp.Header.Set(key, value)
 			}
+			if len(httpBody) > 0 {
+				httpResp.Body = httpBody
+				setBodyContentLength(httpResp.Header, scenario.Response.HTTPHeaders, len(httpBody))
+			}
 
 			resp.SetHTTPResponse(httpResp)
 		} else {
 			// Add/modify HTTP headers on the request
 			for key, value := range scenario.Response.HTTPHeaders {
 				httpReq.Header.Set(key, value)
+			}
+			if len(httpBody) > 0 {
+				httpReq.Body = httpBody
+				setBodyContentLength(httpReq.Header, scenario.Response.HTTPHeaders, len(httpBody))
 			}
 
 			resp.SetHTTPRequest(httpReq)
@@ -218,11 +273,47 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 		for key, value := range scenario.Response.HTTPHeaders {
 			httpResp.Header.Set(key, value)
 		}
+		if len(httpBody) > 0 {
+			// Replace the original body with the synthesized one.
+			httpResp.Body = httpBody
+			setBodyContentLength(httpResp.Header, scenario.Response.HTTPHeaders, len(httpBody))
+		}
 
 		resp.SetHTTPResponse(httpResp)
 	}
 
 	return resp, nil
+}
+
+// loadHTTPBody returns the body bytes for the wrapped HTTP response.
+// Precedence: HTTPBody (inline string) > HTTPBodyFile (file path).
+// Returns (nil, nil) when neither is set.
+func loadHTTPBody(resp *storage.ResponseTemplate) ([]byte, error) {
+	if resp.HTTPBody != "" {
+		return []byte(resp.HTTPBody), nil
+	}
+	if resp.HTTPBodyFile != "" {
+		b, err := os.ReadFile(resp.HTTPBodyFile) //nolint:gosec // path comes from a loaded scenario file, not end-user input
+		if err != nil {
+			return nil, err
+		}
+		return b, nil
+	}
+	return nil, nil
+}
+
+// setBodyContentLength sets Content-Length on h to len(body) = n. It
+// unconditionally overwrites any existing value (e.g. one carried over from
+// cloning the original HTTP message) unless the user explicitly declared
+// Content-Length in http_set — in which case that declared value wins, even
+// if it disagrees with the body length.
+//
+// The sentinel "auto" in http_set is a way to say "always recompute".
+func setBodyContentLength(h icap.Header, userHTTPSet map[string]string, n int) {
+	if userValue, userSet := userHTTPSet["Content-Length"]; userSet && userValue != "auto" {
+		return
+	}
+	h.Set("Content-Length", strconv.Itoa(n))
 }
 
 // cloneHTTPMessage creates a deep copy of an HTTPMessage.
@@ -271,6 +362,50 @@ func (p *MockProcessor) SetLogger(log *logger.Logger) {
 // statusToString converts an HTTP status code to its string representation.
 func statusToString(status int) string {
 	return strconv.Itoa(status)
+}
+
+// capturePlaceholder matches ${name} substitution tokens. The escape "$${…}"
+// (double dollar) is preserved by replacing "$${" with a placeholder before
+// substitution and restoring it afterwards.
+var capturePlaceholder = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// substituteCaptures returns a copy of resp with all ${name} placeholders
+// replaced using vars. Applies to Body, HTTPBody, Headers and HTTPHeaders
+// values. Literal "$${" is preserved as "${".
+func substituteCaptures(resp storage.ResponseTemplate, vars map[string]string) storage.ResponseTemplate {
+	out := resp
+	out.Body = substituteString(resp.Body, vars)
+	out.HTTPBody = substituteString(resp.HTTPBody, vars)
+	if len(resp.Headers) > 0 {
+		out.Headers = substituteMap(resp.Headers, vars)
+	}
+	if len(resp.HTTPHeaders) > 0 {
+		out.HTTPHeaders = substituteMap(resp.HTTPHeaders, vars)
+	}
+	return out
+}
+
+func substituteMap(m, vars map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = substituteString(v, vars)
+	}
+	return out
+}
+
+// substituteString replaces ${name} with vars[name] (empty string if absent)
+// and treats "$${" as an escape for a literal "${".
+func substituteString(s string, vars map[string]string) string {
+	if s == "" {
+		return s
+	}
+	const escaped = "\x00ESC\x00"
+	tmp := strings.ReplaceAll(s, "$${", escaped)
+	tmp = capturePlaceholder.ReplaceAllStringFunc(tmp, func(match string) string {
+		name := match[2 : len(match)-1]
+		return vars[name]
+	})
+	return strings.ReplaceAll(tmp, escaped, "${")
 }
 
 // selectWeightedResponse picks a response variant based on weights.

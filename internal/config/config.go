@@ -119,8 +119,8 @@ type InlineWeightedResponse struct {
 type InlineScenarioEntry struct {
 	When       map[string]string        `yaml:"when,omitempty" json:"when,omitempty"`
 	Set        map[string]string        `yaml:"set,omitempty" json:"set,omitempty"`
-	Method     string                   `yaml:"method,omitempty" json:"method,omitempty"`
-	Endpoint   string                   `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	Method     MethodList               `yaml:"method,omitempty" json:"method,omitempty"`
+	Endpoint   EndpointList             `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
 	Body       string                   `yaml:"body,omitempty" json:"body,omitempty"`
 	BodyFile   string                   `yaml:"body_file,omitempty" json:"body_file,omitempty"`
 	Delay      string                   `yaml:"delay,omitempty" json:"delay,omitempty"`

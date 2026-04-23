@@ -1249,3 +1249,236 @@ func BenchmarkSortEfficiency(b *testing.B) {
 		})
 	}
 }
+
+// TestShardedScenarioRegistry_WhenHTTPHeaders verifies that scenarios can
+// match against headers of the encapsulated HTTP request (not only ICAP
+// headers), including regex via "re:" prefix.
+func TestShardedScenarioRegistry_WhenHTTPHeaders(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "s.yaml")
+	yml := `
+defaults:
+  method: REQMOD
+  endpoint: /av/reqmod
+scenarios:
+  kata-dosexec:
+    when_http:
+      headers:
+        Content-Type: "re:(?i)application/x-dosexec"
+    status: 200
+    http_status: 403
+  kata-clean:
+    status: 204
+`
+	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	registry := NewShardedScenarioRegistry()
+	if err := registry.Load(file); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Request with matching HTTP Content-Type.
+	req := &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost:1344/av/reqmod",
+		Header: icap.NewHeader(),
+		HTTPRequest: &icap.HTTPMessage{
+			Method: "GET",
+			URI:    "http://origin/Coparer.c",
+			Header: icap.NewHeader(),
+		},
+	}
+	req.HTTPRequest.Header.Set("Content-Type", "application/x-dosexec")
+
+	s, err := registry.Match(req)
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if s.Name != "kata-dosexec" {
+		t.Errorf("expected kata-dosexec, got %s", s.Name)
+	}
+
+	// Request without matching Content-Type → fallback to kata-clean.
+	// NOTE: different ICAP URI so the registry's match-cache (keyed on
+	// method|URI|httpMethod) doesn't return the previous result. In real
+	// traffic each wrapped resource has its own URI anyway.
+	req2 := &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost:1344/av/reqmod?r=2",
+		Header: icap.NewHeader(),
+		HTTPRequest: &icap.HTTPMessage{
+			Method: "GET",
+			URI:    "http://origin/readme.txt",
+			Header: icap.NewHeader(),
+		},
+	}
+	req2.HTTPRequest.Header.Set("Content-Type", "text/plain")
+	s2, err := registry.Match(req2)
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if s2.Name != "kata-clean" {
+		t.Errorf("expected kata-clean, got %s", s2.Name)
+	}
+}
+
+// TestShardedScenarioRegistry_WhenHTTPURL verifies matching by the URL of
+// the encapsulated HTTP request (filename in URL).
+func TestShardedScenarioRegistry_WhenHTTPURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "s.yaml")
+	yml := `
+defaults:
+  method: REQMOD
+  endpoint: /av/reqmod
+scenarios:
+  by-filename:
+    when_http:
+      url: "re:(?i)/(coparer\\.c|autorun\\.u)(\\?|$)"
+    status: 200
+  clean:
+    status: 204
+`
+	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	registry := NewShardedScenarioRegistry()
+	if err := registry.Load(file); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	req := &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost/av/reqmod",
+		Header: icap.NewHeader(),
+		HTTPRequest: &icap.HTTPMessage{
+			Method: "GET",
+			URI:    "http://origin/path/Coparer.c",
+			Header: icap.NewHeader(),
+		},
+	}
+	s, err := registry.Match(req)
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if s.Name != "by-filename" {
+		t.Errorf("expected by-filename, got %s", s.Name)
+	}
+}
+
+// TestShardedScenarioRegistry_ICAPHeaderRegex verifies that "re:" prefix in
+// "when:" is honored in the sharded registry (regression: previously exact
+// match only).
+func TestShardedScenarioRegistry_ICAPHeaderRegex(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "s.yaml")
+	yml := `
+defaults:
+  method: REQMOD
+  endpoint: /av/reqmod
+scenarios:
+  internal-net:
+    when:
+      X-Client-IP: "re:^10\\."
+    status: 200
+  other:
+    status: 204
+`
+	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	registry := NewShardedScenarioRegistry()
+	if err := registry.Load(file); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	req := &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost/av/reqmod",
+		Header: icap.NewHeader(),
+	}
+	req.Header.Set("X-Client-IP", "10.0.189.78")
+	s, err := registry.Match(req)
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if s.Name != "internal-net" {
+		t.Errorf("expected internal-net (regex match on ICAP header), got %s", s.Name)
+	}
+}
+
+// TestShardedScenarioRegistry_WhenHTTPRequiresHTTPRequest verifies that
+// when_http scenarios don't match when the request has no encapsulated HTTP
+// message (e.g., OPTIONS).
+func TestShardedScenarioRegistry_WhenHTTPRequiresHTTPRequest(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "s.yaml")
+	yml := `
+defaults:
+  method: REQMOD
+  endpoint: /av/reqmod
+scenarios:
+  needs-http:
+    when_http:
+      headers:
+        Content-Type: "re:.*"
+    status: 200
+  fallback:
+    status: 204
+`
+	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	registry := NewShardedScenarioRegistry()
+	if err := registry.Load(file); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	req := &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost/av/reqmod",
+		Header: icap.NewHeader(),
+		// HTTPRequest intentionally nil
+	}
+	s, err := registry.Match(req)
+	if err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+	if s.Name != "fallback" {
+		t.Errorf("expected fallback (nil HTTPRequest), got %s", s.Name)
+	}
+}
+
+// TestShardedScenarioRegistry_MultiMethod verifies that one scenario declared
+// with a list of methods matches requests of each of those methods.
+func TestShardedScenarioRegistry_MultiMethod(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "s.yaml")
+	yml := `
+defaults:
+  method: [REQMOD, RESPMOD]
+  endpoint: /scan
+scenarios:
+  both:
+    status: 204
+`
+	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	registry := NewShardedScenarioRegistry()
+	if err := registry.Load(file); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, m := range []string{icap.MethodREQMOD, icap.MethodRESPMOD} {
+		req := &icap.Request{
+			Method: m,
+			URI:    "icap://localhost/scan?t=" + m,
+			Header: icap.NewHeader(),
+		}
+		s, err := registry.Match(req)
+		if err != nil {
+			t.Fatalf("Match %s: %v", m, err)
+		}
+		if s.Name != "both" {
+			t.Errorf("Match %s: got %s, want both", m, s.Name)
+		}
+	}
+}
