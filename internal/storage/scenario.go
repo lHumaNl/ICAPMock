@@ -870,7 +870,7 @@ func matchEndpoint(paths []compiledEndpoint, reqPath string) (map[string]string,
 // other side — so users can still match on Host/User-Agent/cookies of the
 // client request even in a RESPMOD scenario.
 func httpHeaderLookup(req *icap.Request, key string) (string, bool) {
-	if req.Method == "RESPMOD" {
+	if req.Method == icap.MethodRESPMOD {
 		if req.HTTPResponse != nil {
 			if v, ok := req.HTTPResponse.Header.Get(key); ok {
 				return v, true
