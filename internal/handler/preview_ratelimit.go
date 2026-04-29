@@ -31,9 +31,10 @@ type PreviewRateLimiter struct {
 
 // PreviewRateLimiterConfig contains configuration for preview rate limiting.
 type PreviewRateLimiterConfig struct {
-	// Enabled enables preview rate limiting.
-	// Default: true
-	Enabled bool
+	// CleanupInterval is the interval between cleanup runs to remove
+	// expired client entries from the map.
+	// Default: 5 minutes
+	CleanupInterval time.Duration
 
 	// MaxRequests is the maximum number of preview requests allowed
 	// per client within the time window.
@@ -49,10 +50,13 @@ type PreviewRateLimiterConfig struct {
 	// Default: 10000
 	MaxClients int
 
-	// CleanupInterval is the interval between cleanup runs to remove
-	// expired client entries from the map.
-	// Default: 5 minutes
-	CleanupInterval time.Duration
+	// Enabled enables preview rate limiting.
+	// Default: true
+	Enabled bool
+
+	// TrustClientIDHeader enables X-Client-ID for rate-limit buckets.
+	// Default: false
+	TrustClientIDHeader bool
 }
 
 // ClientTracker tracks request timestamps and remaining quota for a single client.
@@ -199,24 +203,28 @@ func (l *PreviewRateLimiter) CheckLimit(req *icap.Request) (exceeded bool, remai
 }
 
 // extractClientID extracts a unique client identifier from the request.
-// Uses X-Client-ID header if present, otherwise falls back to ClientIP.
+// Uses X-Client-ID only when explicitly trusted, otherwise falls back to ClientIP.
 func (l *PreviewRateLimiter) extractClientID(req *icap.Request) string {
-	// Check for X-Client-ID header first
+	if l.config.TrustClientIDHeader {
+		return l.extractTrustedClientID(req)
+	}
+	return fallbackClientID(req)
+}
+
+func (l *PreviewRateLimiter) extractTrustedClientID(req *icap.Request) string {
 	if clientID, exists := req.GetHeader("X-Client-ID"); exists && clientID != "" {
 		return clientID
 	}
+	return fallbackClientID(req)
+}
 
-	// Fall back to client IP
+func fallbackClientID(req *icap.Request) string {
 	if req.ClientIP != "" {
 		return req.ClientIP
 	}
-
-	// Last resort: use remote address
 	if req.RemoteAddr != "" {
 		return req.RemoteAddr
 	}
-
-	// No identifier found
 	return "unknown"
 }
 
@@ -273,32 +281,28 @@ func (l *PreviewRateLimiter) evictOldestClient() {
 
 // cleanupExpiredRequestsLocked is like cleanupExpiredRequests but assumes the lock is already held.
 func (l *PreviewRateLimiter) cleanupExpiredRequestsLocked(tracker *ClientTracker, windowStart time.Time) {
-	// Find the first request within the window
-	index := 0
-	for i, reqTime := range tracker.requests {
-		if reqTime.After(windowStart) {
-			index = i
-			break
-		}
-	}
-
-	// Remove expired requests (all requests before index)
-	// If loop completed without finding a request in window (all expired), index=0 but we need to clear all
 	if len(tracker.requests) == 0 {
-		// Nothing to cleanup
 		return
 	}
-
-	if index > 0 || (index == 0 && !tracker.requests[0].After(windowStart)) {
+	before := len(tracker.requests)
+	tracker.requests = activePreviewRequests(tracker.requests, windowStart)
+	if before != len(tracker.requests) {
 		if l.logger != nil {
 			l.logger.Debug("cleaning up expired requests",
-				"before", len(tracker.requests),
-				"after", len(tracker.requests)-index,
-				"index", index,
+				"before", before,
+				"after", len(tracker.requests),
 			)
 		}
-		tracker.requests = tracker.requests[index:]
 	}
+}
+
+func activePreviewRequests(requests []time.Time, windowStart time.Time) []time.Time {
+	for i, reqTime := range requests {
+		if reqTime.After(windowStart) {
+			return requests[i:]
+		}
+	}
+	return requests[:0]
 }
 
 // cleanupLoop periodically cleans up expired client entries.
@@ -335,14 +339,7 @@ func (l *PreviewRateLimiter) cleanup() {
 
 	for id, tracker := range l.clients {
 		// Clean up expired requests for this tracker
-		index := 0
-		for i, reqTime := range tracker.requests {
-			if reqTime.After(windowStart) {
-				index = i
-				break
-			}
-		}
-		tracker.requests = tracker.requests[index:]
+		tracker.requests = activePreviewRequests(tracker.requests, windowStart)
 
 		// Mark client for deletion if no requests and not recently accessed
 		if len(tracker.requests) == 0 && now.Sub(tracker.lastAccess) > l.config.CleanupInterval {

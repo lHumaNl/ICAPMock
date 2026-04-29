@@ -154,6 +154,7 @@ type ScenarioEntryV2 struct {
 	WhenHTTP     *WhenHTTPV2          `yaml:"when_http,omitempty"`
 	Set          map[string]string    `yaml:"set,omitempty"`
 	HTTPSet      map[string]string    `yaml:"http_set,omitempty"`
+	Stream       *StreamConfig        `yaml:"stream,omitempty"`
 	Method       MethodList           `yaml:"method,omitempty"`
 	Endpoint     EndpointList         `yaml:"endpoint,omitempty"`
 	Use          string               `yaml:"use,omitempty"`
@@ -161,6 +162,7 @@ type ScenarioEntryV2 struct {
 	BodyFile     string               `yaml:"body_file,omitempty"`
 	HTTPBody     string               `yaml:"http_body,omitempty"`
 	HTTPBodyFile string               `yaml:"http_body_file,omitempty"`
+	Error        string               `yaml:"error,omitempty"`
 	Delay        string               `yaml:"delay,omitempty"`
 	Responses    []WeightedResponseV2 `yaml:"responses,omitempty"`
 	Branches     []BranchV2           `yaml:"branches,omitempty"`
@@ -177,11 +179,13 @@ type BranchV2 struct {
 	WhenHTTP     *WhenHTTPV2          `yaml:"when_http,omitempty"`
 	Set          map[string]string    `yaml:"set,omitempty"`
 	HTTPSet      map[string]string    `yaml:"http_set,omitempty"`
+	Stream       *StreamConfig        `yaml:"stream,omitempty"`
 	Use          string               `yaml:"use,omitempty"`
 	Body         string               `yaml:"body,omitempty"`
 	BodyFile     string               `yaml:"body_file,omitempty"`
 	HTTPBody     string               `yaml:"http_body,omitempty"`
 	HTTPBodyFile string               `yaml:"http_body_file,omitempty"`
+	Error        string               `yaml:"error,omitempty"`
 	Delay        string               `yaml:"delay,omitempty"`
 	Responses    []WeightedResponseV2 `yaml:"responses,omitempty"`
 	Status       int                  `yaml:"status,omitempty"`
@@ -200,11 +204,13 @@ type ResponseTemplateV2 struct {
 type InlineResponseV2 struct {
 	Set          map[string]string `yaml:"set,omitempty"`
 	HTTPSet      map[string]string `yaml:"http_set,omitempty"`
+	Stream       *StreamConfig     `yaml:"stream,omitempty"`
 	Use          string            `yaml:"use,omitempty"`
 	Body         string            `yaml:"body,omitempty"`
 	BodyFile     string            `yaml:"body_file,omitempty"`
 	HTTPBody     string            `yaml:"http_body,omitempty"`
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty"`
+	Error        string            `yaml:"error,omitempty"`
 	Delay        string            `yaml:"delay,omitempty"`
 	Status       int               `yaml:"status,omitempty"`
 	HTTPStatus   int               `yaml:"http_status,omitempty"`
@@ -252,9 +258,11 @@ type WhenHTTPV2 struct {
 type WeightedResponseV2 struct {
 	Set          map[string]string `yaml:"set,omitempty"`
 	HTTPSet      map[string]string `yaml:"http_set,omitempty"`
+	Stream       *StreamConfig     `yaml:"stream,omitempty"`
 	Body         string            `yaml:"body,omitempty"`
 	HTTPBody     string            `yaml:"http_body,omitempty"`
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty"`
+	Error        string            `yaml:"error,omitempty"`
 	Delay        string            `yaml:"delay,omitempty"`
 	Use          string            `yaml:"use,omitempty"`
 	Weight       int               `yaml:"weight,omitempty"`
@@ -376,7 +384,7 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 
 		// Validate mutual exclusion: branches vs scenario-level response.
 		hasBranches := len(entry.Branches) > 0
-		hasInline := entry.Status != 0 || entry.HTTPStatus != 0 || entry.Body != "" || entry.BodyFile != "" || entry.Delay != "" || len(entry.Responses) > 0 || entry.Use != ""
+		hasInline := entry.Status != 0 || entry.HTTPStatus != 0 || entry.Body != "" || entry.BodyFile != "" || entry.Error != "" || entry.Delay != "" || len(entry.Responses) > 0 || entry.Use != "" || entry.Stream != nil
 		if hasBranches && hasInline {
 			return nil, fmt.Errorf("scenario %q: branches cannot be combined with scenario-level response fields (status/body/use/responses/...) on the same level — move the fallback into an explicit catch-all branch", name)
 		}
@@ -433,11 +441,13 @@ func resolveScenarioResponse(name string, entry ScenarioEntryV2, file *ScenarioF
 	inline := InlineResponseV2{
 		Set:          entry.Set,
 		HTTPSet:      entry.HTTPSet,
+		Stream:       entry.Stream,
 		Use:          entry.Use,
 		Body:         entry.Body,
 		BodyFile:     entry.BodyFile,
 		HTTPBody:     entry.HTTPBody,
 		HTTPBodyFile: entry.HTTPBodyFile,
+		Error:        entry.Error,
 		Delay:        entry.Delay,
 		Status:       entry.Status,
 		HTTPStatus:   entry.HTTPStatus,
@@ -459,11 +469,13 @@ func buildBranches(scenarioName string, in []BranchV2, file *ScenarioFileV2) ([]
 		inline := InlineResponseV2{
 			Set:          b.Set,
 			HTTPSet:      b.HTTPSet,
+			Stream:       b.Stream,
 			Use:          b.Use,
 			Body:         b.Body,
 			BodyFile:     b.BodyFile,
 			HTTPBody:     b.HTTPBody,
 			HTTPBodyFile: b.HTTPBodyFile,
+			Error:        b.Error,
 			Delay:        b.Delay,
 			Status:       b.Status,
 			HTTPStatus:   b.HTTPStatus,
@@ -561,10 +573,12 @@ func buildWeightedList(where string, variants []WeightedResponseV2, base InlineR
 		inl := InlineResponseV2{
 			Set:          wr.Set,
 			HTTPSet:      wr.HTTPSet,
+			Stream:       wr.Stream,
 			Use:          wr.Use,
 			Body:         wr.Body,
 			HTTPBody:     wr.HTTPBody,
 			HTTPBodyFile: wr.HTTPBodyFile,
+			Error:        wr.Error,
 			Delay:        wr.Delay,
 			Status:       wr.Status,
 			HTTPStatus:   wr.HTTPStatus,
@@ -587,12 +601,14 @@ func buildWeightedList(where string, variants []WeightedResponseV2, base InlineR
 			Weight:       wr.Weight,
 			Headers:      tpl.Headers,
 			HTTPHeaders:  tpl.HTTPHeaders,
+			Stream:       tpl.Stream,
 			ICAPStatus:   tpl.ICAPStatus,
 			HTTPStatus:   tpl.HTTPStatus,
 			Body:         tpl.Body,
 			BodyFile:     tpl.BodyFile,
 			HTTPBody:     tpl.HTTPBody,
 			HTTPBodyFile: tpl.HTTPBodyFile,
+			Error:        tpl.Error,
 		}
 		if w.Weight == 0 {
 			w.Weight = 1
@@ -626,10 +642,12 @@ func inlineToTemplate(where string, inline InlineResponseV2, defHeaders map[stri
 		HTTPStatus:   httpStatus,
 		Headers:      headers,
 		HTTPHeaders:  inline.HTTPSet,
+		Stream:       inline.Stream,
 		Body:         inline.Body,
 		BodyFile:     inline.BodyFile,
 		HTTPBody:     inline.HTTPBody,
 		HTTPBodyFile: inline.HTTPBodyFile,
+		Error:        inline.Error,
 	}
 	if inline.Delay != "" {
 		dc, err := ParseDelay(inline.Delay)
@@ -664,8 +682,14 @@ func mergeInline(base, over InlineResponseV2) InlineResponseV2 {
 	if over.HTTPBodyFile != "" {
 		out.HTTPBodyFile = over.HTTPBodyFile
 	}
+	if over.Error != "" {
+		out.Error = over.Error
+	}
 	if over.Delay != "" {
 		out.Delay = over.Delay
+	}
+	if over.Stream != nil {
+		out.Stream = over.Stream
 	}
 	if len(over.Set) > 0 {
 		out.Set = mergeHeaders(base.Set, over.Set)
@@ -683,9 +707,9 @@ func isEmptyInline(i InlineResponseV2) bool {
 func isEmptyInlineExceptUse(i InlineResponseV2) bool {
 	return i.Status == 0 && i.HTTPStatus == 0 &&
 		i.Body == "" && i.BodyFile == "" &&
-		i.HTTPBody == "" && i.HTTPBodyFile == "" &&
+		i.HTTPBody == "" && i.HTTPBodyFile == "" && i.Error == "" &&
 		i.Delay == "" &&
-		len(i.Set) == 0 && len(i.HTTPSet) == 0
+		i.Stream == nil && len(i.Set) == 0 && len(i.HTTPSet) == 0
 }
 
 // mergeHeaders merges base headers with overlay, returning nil if the result is empty.

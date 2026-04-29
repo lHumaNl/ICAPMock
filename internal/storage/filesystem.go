@@ -21,7 +21,11 @@ import (
 	prometheusmetrics "github.com/icap-mock/icap-mock/internal/metrics"
 )
 
-const extJSONL = ".jsonl"
+const (
+	extJSONL          = ".jsonl"
+	jsonLineDelimiter = '\n'
+	oversizedRecord   = "storage_record_too_large"
+)
 
 // Compile-time interface assertions to ensure FileStorage implements
 // both RequestReader and RequestWriter interfaces (ISP compliance).
@@ -75,6 +79,7 @@ type FileStorage struct {
 	wg             sync.WaitGroup
 	fileCounter    int64
 	requestCount   int64
+	pendingWrites  atomic.Int64
 	mu             sync.RWMutex
 	rotationMu     sync.Mutex
 	closed         atomic.Bool
@@ -165,6 +170,7 @@ func (fs *FileStorage) SaveRequest(_ context.Context, sr *StoredRequest) error {
 	if fs.closed.Load() {
 		return ErrStorageClosed
 	}
+	fs.pendingWrites.Add(1)
 
 	// P0 FIX: Non-blocking send - if channel is full, return error
 	// instead of blocking synchronously which violates async I/O principle
@@ -172,6 +178,7 @@ func (fs *FileStorage) SaveRequest(_ context.Context, sr *StoredRequest) error {
 	case fs.requestCh <- sr:
 		return nil
 	default:
+		fs.pendingWrites.Add(-1)
 		// Channel full - log warning and drop request
 		fs.logger.Warn("Request channel full, dropping request",
 			"request_id", sr.ID,
@@ -205,12 +212,14 @@ func (fs *FileStorage) asyncWriter() {
 				if err := fs.writeRequest(sr); err != nil {
 					fs.logger.Error("failed to write request during drain", "error", err)
 				}
+				fs.pendingWrites.Add(-1)
 			}
 			return
 		case sr := <-fs.requestCh:
 			if err := fs.writeRequest(sr); err != nil {
 				fs.logger.Error("failed to write request", "error", err)
 			}
+			fs.pendingWrites.Add(-1)
 		}
 	}
 }
@@ -279,58 +288,129 @@ func (fs *FileStorage) rotationHandler() {
 // P0 FIX: Non-blocking rotation - signals rotation instead of blocking.
 // P1 FIX: Checks disk space before writing to prevent crash when disk is full.
 func (fs *FileStorage) writeRequest(sr *StoredRequest) error {
+	data, err := encodeStoredRequestLine(sr)
+	if err != nil {
+		return err
+	}
+	if fs.dropOversizedRecordIfNeeded(sr.ID, int64(len(data))) {
+		return nil
+	}
+
 	// P1 FIX: Check disk space before writing
-	if fs.diskMonitor != nil {
-		// Estimate request size (roughly 1KB for safety)
-		estimatedSize := int64(1024)
-		canWrite, err := fs.diskMonitor.CheckDiskSpace(estimatedSize)
-		if err != nil {
-			fs.logger.Warn("Failed to check disk space", "error", err)
-			// Continue anyway - best effort
-		} else if !canWrite {
-			// Not enough space - skip this write
-			return fmt.Errorf("insufficient disk space, skipping write")
-		}
+	if diskErr := fs.ensureDiskSpace(int64(len(data))); diskErr != nil {
+		return diskErr
 	}
 
 	fs.rotationMu.Lock()
+	needsRotation, err := fs.writeEncodedRequestLocked(data)
+	fs.rotationMu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	fs.signalRotationIfNeeded(needsRotation)
+	return nil
+}
+
+func encodeStoredRequestLine(sr *StoredRequest) ([]byte, error) {
+	data, err := json.Marshal(sr)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request: %w", err)
+	}
+	return append(data, jsonLineDelimiter), nil
+}
+
+func (fs *FileStorage) ensureDiskSpace(recordSize int64) error {
+	if fs.diskMonitor == nil {
+		return nil
+	}
+	canWrite, err := fs.diskMonitor.CheckDiskSpace(recordSize)
+	if err != nil {
+		fs.logger.Warn("Failed to check disk space", "error", err)
+		return nil
+	}
+	if !canWrite {
+		return fmt.Errorf("insufficient disk space, skipping write")
+	}
+	return nil
+}
+
+func (fs *FileStorage) writeEncodedRequestLocked(data []byte) (bool, error) {
+	if err := fs.ensureCurrentFileLocked(); err != nil {
+		return false, err
+	}
+	if err := fs.rotateForSizeIfNeededLocked(int64(len(data))); err != nil {
+		return false, err
+	}
+	if _, err := fs.currentFile.Write(data); err != nil {
+		return false, fmt.Errorf("writing request: %w", err)
+	}
+	fs.requestCount++
+	return fs.config.RotateAfter > 0 && fs.requestCount >= int64(fs.config.RotateAfter), nil
+}
+
+func (fs *FileStorage) ensureCurrentFileLocked() error {
 
 	// Check if we need to rotate before writing
 	if fs.currentFile == nil {
 		if err := fs.initBatchFile(); err != nil {
-			fs.rotationMu.Unlock()
 			return err
 		}
 	}
-
-	// HIGH-005 FIX: Encode without indentation (5-10 MB/sec I/O savings)
-	encoder := json.NewEncoder(fs.currentFile)
-	// Note: SetIndent removed for performance - was: encoder.SetIndent("", "  ")
-	if err := encoder.Encode(sr); err != nil {
-		fs.rotationMu.Unlock()
-		return fmt.Errorf("encoding request: %w", err)
-	}
-
-	// P0 FIX: Track request count and signal rotation if needed
-	// Non-blocking: send signal to rotation handler instead of blocking
-	fs.requestCount++
-	needsRotation := fs.config.RotateAfter > 0 && fs.requestCount >= int64(fs.config.RotateAfter)
-
-	// Release lock before signaling rotation to avoid deadlock
-	fs.rotationMu.Unlock()
-
-	// Signal rotation if needed (non-blocking)
-	if needsRotation {
-		select {
-		case fs.rotationSignal <- struct{}{}:
-			// Signal sent successfully, rotation handler will process it
-		default:
-			// Rotation channel full - log warning but continue
-			fs.logger.Warn("Rotation signal channel full, rotation delayed")
-		}
-	}
-
 	return nil
+}
+
+func (fs *FileStorage) rotateForSizeIfNeededLocked(recordSize int64) error {
+	if fs.config.MaxFileSize <= 0 {
+		return nil
+	}
+	currentSize, err := fs.currentFileSizeLocked()
+	if err != nil {
+		return err
+	}
+	if currentSize == 0 || currentSize+recordSize <= fs.config.MaxFileSize {
+		return nil
+	}
+	return fs.rotateFileLocked()
+}
+
+func (fs *FileStorage) currentFileSizeLocked() (int64, error) {
+	info, err := fs.currentFile.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("checking current batch file size: %w", err)
+	}
+	return info.Size(), nil
+}
+
+func (fs *FileStorage) isOversizedRecord(recordSize int64) bool {
+	return fs.config.MaxFileSize > 0 && recordSize > fs.config.MaxFileSize
+}
+
+func (fs *FileStorage) dropOversizedRecordIfNeeded(requestID string, recordSize int64) bool {
+	if !fs.isOversizedRecord(recordSize) {
+		return false
+	}
+	fs.logger.Warn("Stored request exceeds max file size; dropping record",
+		"request_id", requestID,
+		"record_size", recordSize,
+		"max_file_size", fs.config.MaxFileSize,
+	)
+	if fs.metrics != nil {
+		fs.metrics.RecordError(oversizedRecord)
+	}
+	return true
+}
+
+func (fs *FileStorage) signalRotationIfNeeded(needsRotation bool) {
+	if !needsRotation {
+		return
+	}
+	select {
+	case fs.rotationSignal <- struct{}{}:
+		// Signal sent successfully, rotation handler will process it.
+	default:
+		fs.logger.Warn("Rotation signal channel full, rotation delayed")
+	}
 }
 
 // initBatchFile initializes the first batch file for writing.
@@ -361,7 +441,10 @@ func (fs *FileStorage) initBatchFile() error {
 func (fs *FileStorage) rotateFile() error {
 	fs.rotationMu.Lock()
 	defer fs.rotationMu.Unlock()
+	return fs.rotateFileLocked()
+}
 
+func (fs *FileStorage) rotateFileLocked() error {
 	// Close current file if open
 	if fs.currentFile != nil {
 		// WARN-006 FIX: Sync with retry before close to ensure data is flushed to disk
@@ -624,7 +707,7 @@ func (fs *FileStorage) readBatchFile(path string) ([]*StoredRequest, error) {
 // Note: For batch files, this marks the request as deleted but doesn't remove
 // it from the file (would require rewriting the entire batch).
 // For old format files, it removes the file entirely.
-func (fs *FileStorage) DeleteRequest(_ context.Context, id string) error {
+func (fs *FileStorage) DeleteRequest(ctx context.Context, id string) error {
 	if !fs.config.Enabled {
 		return ErrStorageDisabled
 	}
@@ -635,6 +718,10 @@ func (fs *FileStorage) DeleteRequest(_ context.Context, id string) error {
 	if fs.closed.Load() {
 		return ErrStorageClosed
 	}
+	if err := fs.drainPendingWrites(ctx); err != nil {
+		return err
+	}
+	fs.drainRotationSignals()
 
 	// Find the file by ID - search both old and new formats
 	patterns := []string{
@@ -842,29 +929,45 @@ func (fs *FileStorage) Flush(ctx context.Context) error {
 		return nil
 	}
 
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	if fs.closed.Load() {
 		return ErrStorageClosed
 	}
 
-	// Wait for the channel to drain
-	for {
+	if err := fs.drainPendingWrites(ctx); err != nil {
+		return err
+	}
+	return fs.syncCurrentFile()
+}
+
+func (fs *FileStorage) drainPendingWrites(ctx context.Context) error {
+	for fs.pendingWrites.Load() > 0 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+func (fs *FileStorage) syncCurrentFile() error {
+	fs.rotationMu.Lock()
+	defer fs.rotationMu.Unlock()
+	if fs.currentFile == nil {
+		return nil
+	}
+	return fs.syncWithRetry(fs.currentFile)
+}
+
+func (fs *FileStorage) drainRotationSignals() {
+	for {
+		select {
+		case <-fs.rotationSignal:
 		default:
-			if len(fs.requestCh) == 0 {
-				// Channel is empty, now sync the file
-				fs.rotationMu.Lock()
-				if fs.currentFile != nil {
-					err := fs.syncWithRetry(fs.currentFile)
-					fs.rotationMu.Unlock()
-					return err
-				}
-				fs.rotationMu.Unlock()
-				return nil
-			}
-			// Small sleep to avoid busy waiting
-			time.Sleep(10 * time.Millisecond)
+			return
 		}
 	}
 }
@@ -872,7 +975,7 @@ func (fs *FileStorage) Flush(ctx context.Context) error {
 // Clear removes all stored requests from storage.
 // This deletes all request files in the storage directory.
 // Returns the number of requests cleared.
-func (fs *FileStorage) Clear(_ context.Context) (int64, error) {
+func (fs *FileStorage) Clear(ctx context.Context) (int64, error) {
 	if !fs.config.Enabled {
 		return 0, nil
 	}
@@ -883,6 +986,10 @@ func (fs *FileStorage) Clear(_ context.Context) (int64, error) {
 	if fs.closed.Load() {
 		return 0, ErrStorageClosed
 	}
+	if err := fs.drainPendingWrites(ctx); err != nil {
+		return 0, err
+	}
+	fs.drainRotationSignals()
 
 	// First, flush and close the current batch file to release the handle
 	fs.rotationMu.Lock()
@@ -934,7 +1041,7 @@ func (fs *FileStorage) Clear(_ context.Context) (int64, error) {
 
 // DeleteRequests removes multiple requests matching the given filter.
 // Returns the number of requests deleted.
-func (fs *FileStorage) DeleteRequests(_ context.Context, filter RequestFilter) (int64, error) {
+func (fs *FileStorage) DeleteRequests(ctx context.Context, filter RequestFilter) (int64, error) {
 	if !fs.config.Enabled {
 		return 0, nil
 	}
@@ -945,6 +1052,10 @@ func (fs *FileStorage) DeleteRequests(_ context.Context, filter RequestFilter) (
 	if fs.closed.Load() {
 		return 0, ErrStorageClosed
 	}
+	if err := fs.drainPendingWrites(ctx); err != nil {
+		return 0, err
+	}
+	fs.drainRotationSignals()
 
 	// Build glob patterns for both old and new formats
 	patterns := []string{
@@ -961,44 +1072,54 @@ func (fs *FileStorage) DeleteRequests(_ context.Context, filter RequestFilter) (
 		}
 
 		for _, path := range matches {
-			ext := filepath.Ext(path)
-			if ext == extJSONL {
-				// Batch file - find and remove matching requests
-				requests, err := fs.readBatchFile(path)
-				if err != nil {
-					continue
-				}
-
-				var remaining []*StoredRequest
-				for _, sr := range requests {
-					if fs.matchesFilter(sr, filter) {
-						deleted++
-					} else {
-						remaining = append(remaining, sr)
-					}
-				}
-
-				// Only rewrite if we deleted something
-				if len(remaining) < len(requests) {
-					if err := fs.rewriteBatchFile(path, remaining); err != nil {
-						// Log but continue with other files
-						continue
-					}
-				}
-			} else {
-				// Old format - single request file
-				sr, err := fs.readRequestFile(path)
-				if err != nil {
-					continue
-				}
-				if fs.matchesFilter(sr, filter) {
-					if err := os.Remove(path); err == nil {
-						deleted++
-					}
-				}
-			}
+			deleted += fs.deleteRequestsFromFile(path, filter)
 		}
 	}
 
 	return deleted, nil
+}
+
+func (fs *FileStorage) deleteRequestsFromFile(path string, filter RequestFilter) int64 {
+	if filepath.Ext(path) == extJSONL {
+		return fs.deleteRequestsFromBatchFile(path, filter)
+	}
+	return fs.deleteRequestFileIfMatched(path, filter)
+}
+
+func (fs *FileStorage) deleteRequestsFromBatchFile(path string, filter RequestFilter) int64 {
+	requests, err := fs.readBatchFile(path)
+	if err != nil {
+		return 0
+	}
+	remaining, deleted := fs.partitionRequestsForDelete(requests, filter)
+	if len(remaining) == len(requests) {
+		return 0
+	}
+	if err := fs.rewriteBatchFile(path, remaining); err != nil {
+		return 0
+	}
+	return deleted
+}
+
+func (fs *FileStorage) partitionRequestsForDelete(requests []*StoredRequest, filter RequestFilter) (remaining []*StoredRequest, deleted int64) {
+	remaining = make([]*StoredRequest, 0, len(requests))
+	for _, sr := range requests {
+		if fs.matchesFilter(sr, filter) {
+			deleted++
+		} else {
+			remaining = append(remaining, sr)
+		}
+	}
+	return remaining, deleted
+}
+
+func (fs *FileStorage) deleteRequestFileIfMatched(path string, filter RequestFilter) int64 {
+	sr, err := fs.readRequestFile(path)
+	if err != nil || !fs.matchesFilter(sr, filter) {
+		return 0
+	}
+	if err := os.Remove(path); err != nil {
+		return 0
+	}
+	return 1
 }

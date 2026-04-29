@@ -1338,6 +1338,59 @@ func TestStreamingBodyRESPMOD(t *testing.T) {
 	}
 }
 
+func TestStreamingBodyRESPMODWithRequestAndResponseBodies(t *testing.T) {
+	httpRequest := "POST /submit HTTP/1.1\r\n" +
+		"Host: origin-server.net\r\n" +
+		"Content-Length: 4\r\n" +
+		"\r\n"
+	requestBody := "4\r\nping\r\n0\r\n\r\n"
+	httpResponse := "HTTP/1.1 200 OK\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n"
+	responseBody := "4\r\npong\r\n0\r\n\r\n"
+	input := respmodInputWithBodies(httpRequest, requestBody, httpResponse, responseBody)
+
+	req, err := icap.ParseRequest(bufio.NewReader(strings.NewReader(input)))
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+	assertParsedHTTPMessage(t, req.HTTPRequest, "POST", "/submit", "")
+	assertParsedHTTPMessage(t, req.HTTPResponse, "", "", "200")
+	assertHTTPBody(t, req.HTTPRequest, "ping")
+	assertHTTPBody(t, req.HTTPResponse, "pong")
+}
+
+func respmodInputWithBodies(httpRequest, requestBody, httpResponse, responseBody string) string {
+	reqBodyOffset := len(httpRequest)
+	resHdrOffset := reqBodyOffset + len(requestBody)
+	resBodyOffset := resHdrOffset + len(httpResponse)
+	return "RESPMOD icap://icap-server.net:1344/respmod ICAP/1.0\r\n" +
+		"Host: icap-server.net\r\n" +
+		fmt.Sprintf("Encapsulated: req-hdr=0, req-body=%d, res-hdr=%d, res-body=%d\r\n", reqBodyOffset, resHdrOffset, resBodyOffset) +
+		"\r\n" + httpRequest + requestBody + httpResponse + responseBody
+}
+
+func assertParsedHTTPMessage(t *testing.T, msg *icap.HTTPMessage, method, uri, status string) {
+	t.Helper()
+	if msg == nil {
+		t.Fatal("HTTP message is nil")
+	}
+	if msg.Method != method || msg.URI != uri || msg.Status != status {
+		t.Fatalf("HTTP message = method %q uri %q status %q", msg.Method, msg.URI, msg.Status)
+	}
+}
+
+func assertHTTPBody(t *testing.T, msg *icap.HTTPMessage, want string) {
+	t.Helper()
+	body, err := msg.GetBody()
+	if err != nil {
+		t.Fatalf("GetBody() error = %v", err)
+	}
+	if string(body) != want {
+		t.Fatalf("body = %q, want %q", body, want)
+	}
+}
+
 // BenchmarkStreamingBodyMemory benchmarks memory usage with streaming.
 // Run with: go test -bench=BenchmarkStreamingBodyMemory -benchmem.
 func BenchmarkStreamingBodyMemory(b *testing.B) {

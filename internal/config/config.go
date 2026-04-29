@@ -6,10 +6,22 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const defaultHost = "0.0.0.0"
+
+// DefaultBodyPatternLimitBytes preserves the legacy 10 MiB body_pattern read cap.
+const DefaultBodyPatternLimitBytes int64 = 10 * 1024 * 1024
+
+const (
+	BodyPatternLimitActionNoMatch = "no_match"
+	BodyPatternLimitActionError   = "error"
+)
 
 // durationField maps a raw JSON string to a target time.Duration pointer for parsing.
 type durationField struct {
@@ -101,6 +113,37 @@ type DefaultsConfig struct {
 	MaxBodySize     int64         `yaml:"max_body_size,omitempty" json:"max_body_size,omitempty"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout,omitempty" json:"idle_timeout,omitempty"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout,omitempty" json:"shutdown_timeout,omitempty"`
+	Streaming       bool          `yaml:"streaming,omitempty" json:"streaming,omitempty"`
+	streamingSet    bool
+	maxBodySizeSet  bool
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for DefaultsConfig.
+func (d *DefaultsConfig) UnmarshalJSON(data []byte) error {
+	type Alias DefaultsConfig
+	temp := struct {
+		*Alias
+		MaxBodySize json.RawMessage `json:"max_body_size"`
+	}{Alias: (*Alias)(d)}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+	if jsonObjectHasKey(data, "streaming") {
+		d.SetStreaming(d.Streaming)
+	}
+	return applyJSONMaxBodySize(temp.MaxBodySize, &d.MaxBodySize, &d.maxBodySizeSet)
+}
+
+// SetMaxBodySize records an explicit defaults max body size override.
+func (d *DefaultsConfig) SetMaxBodySize(value int64) {
+	d.MaxBodySize = value
+	d.maxBodySizeSet = true
+}
+
+// SetStreaming records an explicit defaults streaming override.
+func (d *DefaultsConfig) SetStreaming(value bool) {
+	d.Streaming = value
+	d.streamingSet = true
 }
 
 // InlineWeightedResponse mirrors storage.WeightedResponseV2 for inline scenario definitions.
@@ -131,7 +174,7 @@ type InlineScenarioEntry struct {
 }
 
 // ServerEntryConfig defines an ICAP server instance with its own port and scenarios.
-// Fields that are zero/empty fall back to DefaultsConfig values.
+// Fields that are unset fall back to DefaultsConfig values.
 type ServerEntryConfig struct {
 	Scenarios       map[string]InlineScenarioEntry `yaml:"scenarios,omitempty" json:"scenarios,omitempty"`
 	ScenariosDir    string                         `yaml:"scenarios_dir" json:"scenarios_dir"`
@@ -144,6 +187,37 @@ type ServerEntryConfig struct {
 	MaxBodySize     int64                          `yaml:"max_body_size,omitempty" json:"max_body_size,omitempty"`
 	IdleTimeout     time.Duration                  `yaml:"idle_timeout,omitempty" json:"idle_timeout,omitempty"`
 	ShutdownTimeout time.Duration                  `yaml:"shutdown_timeout,omitempty" json:"shutdown_timeout,omitempty"`
+	Streaming       bool                           `yaml:"streaming,omitempty" json:"streaming,omitempty"`
+	streamingSet    bool
+	maxBodySizeSet  bool
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ServerEntryConfig.
+func (e *ServerEntryConfig) UnmarshalJSON(data []byte) error {
+	type Alias ServerEntryConfig
+	temp := struct {
+		*Alias
+		MaxBodySize json.RawMessage `json:"max_body_size"`
+	}{Alias: (*Alias)(e)}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+	if jsonObjectHasKey(data, "streaming") {
+		e.SetStreaming(e.Streaming)
+	}
+	return applyJSONMaxBodySize(temp.MaxBodySize, &e.MaxBodySize, &e.maxBodySizeSet)
+}
+
+// SetMaxBodySize records an explicit server entry max body size override.
+func (e *ServerEntryConfig) SetMaxBodySize(value int64) {
+	e.MaxBodySize = value
+	e.maxBodySizeSet = true
+}
+
+// SetStreaming records an explicit server entry streaming override.
+func (e *ServerEntryConfig) SetStreaming(value bool) {
+	e.Streaming = value
+	e.streamingSet = true
 }
 
 // ToServerConfig merges this entry with defaults to produce a ServerConfig
@@ -160,6 +234,9 @@ func (e *ServerEntryConfig) ToServerConfig(defaults DefaultsConfig) ServerConfig
 		ShutdownTimeout: defaults.ShutdownTimeout,
 		Streaming:       true, // default
 	}
+	if defaults.streamingSet {
+		cfg.Streaming = defaults.Streaming
+	}
 	// Apply per-server overrides
 	if e.Host != "" {
 		cfg.Host = e.Host
@@ -173,7 +250,7 @@ func (e *ServerEntryConfig) ToServerConfig(defaults DefaultsConfig) ServerConfig
 	if e.MaxConnections != 0 {
 		cfg.MaxConnections = e.MaxConnections
 	}
-	if e.MaxBodySize != 0 {
+	if e.MaxBodySize != 0 || e.maxBodySizeSet {
 		cfg.MaxBodySize = e.MaxBodySize
 	}
 	if e.IdleTimeout != 0 {
@@ -182,14 +259,19 @@ func (e *ServerEntryConfig) ToServerConfig(defaults DefaultsConfig) ServerConfig
 	if e.ShutdownTimeout != 0 {
 		cfg.ShutdownTimeout = e.ShutdownTimeout
 	}
+	if e.streamingSet {
+		cfg.Streaming = e.Streaming
+	}
 	return cfg
 }
 
 // Config is the root configuration structure for the ICAP Mock Server.
 // It contains all sub-configurations for different components.
 type Config struct {
+	SourcePath         string                       `yaml:"-" json:"-"`
 	Servers            map[string]ServerEntryConfig `yaml:"servers,omitempty" json:"servers,omitempty"`
 	Health             HealthConfig                 `yaml:"health" json:"health"`
+	Management         ManagementConfig             `yaml:"management" json:"management"`
 	Plugin             PluginConfig                 `yaml:"plugin" json:"plugin"`
 	Metrics            MetricsConfig                `yaml:"metrics" json:"metrics"`
 	Replay             ReplayConfig                 `yaml:"replay" json:"replay"`
@@ -248,6 +330,8 @@ func (c *Config) SetDefaults() {
 	c.Mock.DefaultMode = "mock"
 	c.Mock.DefaultTimeout = 5 * time.Second
 	c.Mock.ServiceID = "icap-mock"
+	c.Mock.Matching.BodyPatternLimit = NewBodySizeLimit(DefaultBodyPatternLimitBytes)
+	c.Mock.Matching.BodyPatternLimitAction = BodyPatternLimitActionNoMatch
 
 	// Hot reload defaults (disabled by default)
 	c.Mock.HotReload.Enabled = false
@@ -310,6 +394,11 @@ func (c *Config) SetDefaults() {
 	c.Health.HealthPath = "/health"
 	c.Health.ReadyPath = "/ready"
 
+	// Management API defaults (disabled until explicitly enabled)
+	c.Management.Enabled = false
+	c.Management.ScenarioReloadEnabled = false
+	c.Management.ConfigReloadEnabled = false
+
 	// Replay defaults (disabled by default)
 	c.Replay.Enabled = false
 	c.Replay.Speed = 1.0
@@ -334,6 +423,7 @@ func (c *Config) SetDefaults() {
 	c.Preview.MaxRequests = 100
 	c.Preview.WindowSeconds = 60
 	c.Preview.MaxClients = 10000
+	c.Preview.TrustClientIDHeader = false
 
 	// Circuit Breaker defaults (disabled by default for backward compatibility)
 	c.CircuitBreaker.Enabled = false
@@ -364,17 +454,61 @@ func (c *Config) SetDefaults() {
 }
 
 // ServerConfig contains ICAP server configuration.
+//
+//nolint:govet // config field grouping favors stable readability over fieldalignment.
 type ServerConfig struct {
-	Host            string        `yaml:"host" json:"host"`
-	TLS             TLSConfig     `yaml:"tls" json:"tls"`
-	Port            int           `yaml:"port" json:"port"`
 	ReadTimeout     time.Duration `yaml:"read_timeout" json:"read_timeout"`
 	WriteTimeout    time.Duration `yaml:"write_timeout" json:"write_timeout"`
-	MaxConnections  int           `yaml:"max_connections" json:"max_connections"`
 	MaxBodySize     int64         `yaml:"max_body_size" json:"max_body_size"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout"`
+	Port            int           `yaml:"port" json:"port"`
+	MaxConnections  int           `yaml:"max_connections" json:"max_connections"`
 	Streaming       bool          `yaml:"streaming" json:"streaming"`
+	// TrustClientIPHeader enables X-Client-IP only for trusted proxy peers.
+	TrustClientIPHeader bool `yaml:"trust_client_ip_header" json:"trust_client_ip_header"`
+	maxBodySizeSet      bool
+	TLS                 TLSConfig `yaml:"tls" json:"tls"`
+	Host                string    `yaml:"host" json:"host"`
+	TrustedProxies      []string  `yaml:"trusted_proxies" json:"trusted_proxies"`
+}
+
+func applyJSONMaxBodySize(raw json.RawMessage, value *int64, present *bool) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	size, err := parseJSONMaxBodySize(raw)
+	if err != nil {
+		return err
+	}
+	*present = true
+	*value = size
+	return nil
+}
+
+func jsonObjectHasKey(data []byte, key string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	_, ok := raw[key]
+	return ok
+}
+
+func parseJSONMaxBodySize(raw json.RawMessage) (int64, error) {
+	var num int64
+	if err := json.Unmarshal(raw, &num); err == nil {
+		return num, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return 0, fmt.Errorf("invalid max_body_size: %w", err)
+	}
+	size, err := ParseByteSize(text)
+	if err != nil {
+		return 0, fmt.Errorf("invalid max_body_size: %w", err)
+	}
+	return size, nil
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ServerConfig.
@@ -429,26 +563,7 @@ func (c *ServerConfig) UnmarshalJSON(data []byte) error {
 		c.ShutdownTimeout = d
 	}
 
-	// Parse max_body_size (supports human-readable strings like "10MB")
-	if len(temp.MaxBodySize) > 0 {
-		// Try as number first
-		var num int64
-		if err := json.Unmarshal(temp.MaxBodySize, &num); err == nil {
-			c.MaxBodySize = num
-		} else {
-			// Try as string
-			var s string
-			if err := json.Unmarshal(temp.MaxBodySize, &s); err == nil {
-				if size, parseErr := ParseByteSize(s); parseErr == nil {
-					c.MaxBodySize = size
-				} else {
-					return fmt.Errorf("invalid max_body_size: %w", parseErr)
-				}
-			}
-		}
-	}
-
-	return nil
+	return applyJSONMaxBodySize(temp.MaxBodySize, &c.MaxBodySize, &c.maxBodySizeSet)
 }
 
 // TLSConfig contains TLS configuration for the ICAP server.
@@ -533,11 +648,123 @@ type MetricsConfig struct {
 
 // MockConfig contains mock processor configuration.
 type MockConfig struct {
-	DefaultMode    string          `yaml:"default_mode" json:"default_mode"`
-	ScenariosDir   string          `yaml:"scenarios_dir" json:"scenarios_dir"`
-	ServiceID      string          `yaml:"service_id" json:"service_id"`
-	HotReload      HotReloadConfig `yaml:"hot_reload" json:"hot_reload"`
-	DefaultTimeout time.Duration   `yaml:"default_timeout" json:"default_timeout"`
+	DefaultMode    string             `yaml:"default_mode" json:"default_mode"`
+	ScenariosDir   string             `yaml:"scenarios_dir" json:"scenarios_dir"`
+	ServiceID      string             `yaml:"service_id" json:"service_id"`
+	Matching       MockMatchingConfig `yaml:"matching" json:"matching"`
+	HotReload      HotReloadConfig    `yaml:"hot_reload" json:"hot_reload"`
+	DefaultTimeout time.Duration      `yaml:"default_timeout" json:"default_timeout"`
+}
+
+// MockMatchingConfig contains scenario matching safety limits.
+type MockMatchingConfig struct {
+	BodyPatternLimitAction string        `yaml:"body_pattern_limit_action" json:"body_pattern_limit_action"`
+	BodyPatternLimit       BodySizeLimit `yaml:"body_pattern_limit" json:"body_pattern_limit"`
+}
+
+// BodySizeLimit stores a finite byte limit or an explicit unlimited value.
+type BodySizeLimit struct {
+	Bytes     int64
+	Unlimited bool
+	set       bool
+}
+
+// NewBodySizeLimit returns a finite byte-size limit.
+func NewBodySizeLimit(bytes int64) BodySizeLimit {
+	return BodySizeLimit{Bytes: bytes, set: true}
+}
+
+// NewUnlimitedBodySizeLimit returns an explicitly unlimited byte-size limit.
+func NewUnlimitedBodySizeLimit() BodySizeLimit {
+	return BodySizeLimit{Unlimited: true, set: true}
+}
+
+func (l BodySizeLimit) isSet() bool {
+	return l.set || l.Unlimited || l.Bytes != 0
+}
+
+// EffectiveBodyPatternLimit resolves the matching limit with server.max_body_size.
+func EffectiveBodyPatternLimit(limit BodySizeLimit, serverMaxBodySize int64) BodySizeLimit {
+	if limit.Unlimited {
+		return effectiveUnlimitedBodyPatternLimit(serverMaxBodySize)
+	}
+	return effectiveFiniteBodyPatternLimit(limit, serverMaxBodySize)
+}
+
+func effectiveUnlimitedBodyPatternLimit(serverMaxBodySize int64) BodySizeLimit {
+	if serverMaxBodySize > 0 {
+		return NewBodySizeLimit(serverMaxBodySize)
+	}
+	return NewUnlimitedBodySizeLimit()
+}
+
+func effectiveFiniteBodyPatternLimit(limit BodySizeLimit, serverMaxBodySize int64) BodySizeLimit {
+	if serverMaxBodySize > 0 && serverMaxBodySize < limit.Bytes {
+		return NewBodySizeLimit(serverMaxBodySize)
+	}
+	return limit
+}
+
+// UnmarshalYAML supports sizes like "10mb" and the literal "unlimited".
+func (l *BodySizeLimit) UnmarshalYAML(value *yaml.Node) error {
+	parsed, err := parseBodySizeLimitNode(value)
+	if err != nil {
+		return err
+	}
+	*l = parsed
+	return nil
+}
+
+// UnmarshalJSON supports sizes like "10mb" and the literal "unlimited".
+func (l *BodySizeLimit) UnmarshalJSON(data []byte) error {
+	parsed, err := parseBodySizeLimitJSON(data)
+	if err != nil {
+		return err
+	}
+	*l = parsed
+	return nil
+}
+
+func parseBodySizeLimitNode(value *yaml.Node) (BodySizeLimit, error) {
+	if value.Tag == "!!str" {
+		return ParseBodySizeLimit(value.Value)
+	}
+	var bytes int64
+	if err := value.Decode(&bytes); err != nil {
+		return BodySizeLimit{}, fmt.Errorf("invalid body_pattern_limit: %w", err)
+	}
+	return parseBodySizeLimitBytes(bytes)
+}
+
+func parseBodySizeLimitJSON(data []byte) (BodySizeLimit, error) {
+	var bytes int64
+	if err := json.Unmarshal(data, &bytes); err == nil {
+		return parseBodySizeLimitBytes(bytes)
+	}
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return BodySizeLimit{}, fmt.Errorf("invalid body_pattern_limit: %w", err)
+	}
+	return ParseBodySizeLimit(raw)
+}
+
+// ParseBodySizeLimit parses a positive byte size or the literal "unlimited".
+func ParseBodySizeLimit(value string) (BodySizeLimit, error) {
+	if strings.EqualFold(strings.TrimSpace(value), "unlimited") {
+		return NewUnlimitedBodySizeLimit(), nil
+	}
+	bytes, err := ParseByteSize(value)
+	if err != nil {
+		return BodySizeLimit{}, err
+	}
+	return parseBodySizeLimitBytes(bytes)
+}
+
+func parseBodySizeLimitBytes(bytes int64) (BodySizeLimit, error) {
+	if bytes <= 0 {
+		return BodySizeLimit{}, fmt.Errorf("body size must be positive or unlimited: %d", bytes)
+	}
+	return NewBodySizeLimit(bytes), nil
 }
 
 // HotReloadConfig contains configuration for scenario hot-reloading.
@@ -827,6 +1054,77 @@ type HealthConfig struct {
 	Enabled    bool   `yaml:"enabled" json:"enabled"`
 }
 
+// ManagementConfig contains management API controls and authentication.
+type ManagementConfig struct {
+	Token                 string `yaml:"token" json:"token"`
+	TokenEnv              string `yaml:"token_env" json:"token_env"`
+	Enabled               bool   `yaml:"enabled" json:"enabled"`
+	ScenarioReloadEnabled bool   `yaml:"scenario_reload_enabled" json:"scenario_reload_enabled"`
+	ConfigReloadEnabled   bool   `yaml:"config_reload_enabled" json:"config_reload_enabled"`
+	enabledSet            bool
+	scenarioReloadSet     bool
+	configReloadSet       bool
+}
+
+type managementConfigWire struct {
+	Enabled               *bool  `yaml:"enabled" json:"enabled"`
+	ScenarioReloadEnabled *bool  `yaml:"scenario_reload_enabled" json:"scenario_reload_enabled"`
+	ConfigReloadEnabled   *bool  `yaml:"config_reload_enabled" json:"config_reload_enabled"`
+	Token                 string `yaml:"token" json:"token"`
+	TokenEnv              string `yaml:"token_env" json:"token_env"`
+}
+
+// UnmarshalYAML tracks whether boolean fields were present in a YAML file.
+func (c *ManagementConfig) UnmarshalYAML(value *yaml.Node) error {
+	var raw managementConfigWire
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	c.applyWire(raw)
+	return nil
+}
+
+// UnmarshalJSON tracks whether boolean fields were present in a JSON file.
+func (c *ManagementConfig) UnmarshalJSON(data []byte) error {
+	var raw managementConfigWire
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.applyWire(raw)
+	return nil
+}
+
+func (c *ManagementConfig) applyWire(raw managementConfigWire) {
+	c.Token = raw.Token
+	c.TokenEnv = raw.TokenEnv
+	c.setManagementBools(raw)
+}
+
+func (c *ManagementConfig) setManagementBools(raw managementConfigWire) {
+	setBool(&c.Enabled, &c.enabledSet, raw.Enabled)
+	setBool(&c.ScenarioReloadEnabled, &c.scenarioReloadSet, raw.ScenarioReloadEnabled)
+	setBool(&c.ConfigReloadEnabled, &c.configReloadSet, raw.ConfigReloadEnabled)
+}
+
+func setBool(dst, present, src *bool) {
+	if src == nil {
+		return
+	}
+	*dst = *src
+	*present = true
+}
+
+// ResolvedToken returns the configured bearer token or the token_env value.
+func (c ManagementConfig) ResolvedToken() string {
+	if c.Token != "" {
+		return c.Token
+	}
+	if c.TokenEnv == "" {
+		return ""
+	}
+	return os.Getenv(c.TokenEnv)
+}
+
 // ReplayConfig contains request replay configuration.
 type ReplayConfig struct {
 	RequestsDir string  `yaml:"requests_dir" json:"requests_dir"`
@@ -861,17 +1159,30 @@ type ShardingConfig struct {
 	CacheSize   int  `yaml:"cache_size" json:"cache_size"`
 	Enabled     bool `yaml:"enabled" json:"enabled"`
 	EnableCache bool `yaml:"enable_cache" json:"enable_cache"`
+	enabledSet  bool
+	cacheSet    bool
+}
+
+// UnmarshalJSON tracks explicitly provided sharding boolean fields.
+func (c *ShardingConfig) UnmarshalJSON(data []byte) error {
+	type Alias ShardingConfig
+	temp := struct {
+		*Alias
+		Enabled     *bool `json:"enabled"`
+		EnableCache *bool `json:"enable_cache"`
+	}{Alias: (*Alias)(c)}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+	c.enabledSet = temp.Enabled != nil
+	c.cacheSet = temp.EnableCache != nil
+	return nil
 }
 
 // PreviewConfig contains preview mode rate limiting configuration.
 // This prevents DoS attacks by limiting the number of preview requests
 // per client within a time window.
 type PreviewConfig struct {
-	// Enabled enables preview rate limiting.
-	// When true, preview requests are rate-limited per client.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
 	// MaxRequests is the maximum number of preview requests allowed
 	// per client within the time window.
 	// Default: 100
@@ -885,4 +1196,13 @@ type PreviewConfig struct {
 	// When this limit is reached, the least recently used client is evicted.
 	// Default: 10000
 	MaxClients int `yaml:"max_clients" json:"max_clients"`
+
+	// Enabled enables preview rate limiting.
+	// When true, preview requests are rate-limited per client.
+	// Default: true
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// TrustClientIDHeader enables X-Client-ID for preview rate-limit buckets.
+	// Default: false
+	TrustClientIDHeader bool `yaml:"trust_client_id_header" json:"trust_client_id_header"`
 }

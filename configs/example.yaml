@@ -54,6 +54,19 @@ server:
   # Type: bool | Default: true
   streaming: true
 
+  # Trust X-Client-IP only when the TCP peer is a trusted proxy listed below.
+  # Useful when ICAP traffic is terminated or forwarded by a local proxy/LB.
+  # Type: bool | Default: false
+  trust_client_ip_header: false
+
+  # Exact IPs or CIDRs allowed to supply X-Client-IP when trust_client_ip_header
+  # is enabled. Empty means "any proxy peer" once the header trust switch is on,
+  # so prefer an explicit allow-list in shared environments.
+  # Type: []string | Default: []
+  trusted_proxies:
+    - "127.0.0.1"
+    - "192.0.2.0/24"
+
   # Close idle connections (no reads/writes) after this duration.
   # Prevents slow-loris attacks and leaks of idle file descriptors.
   # Type: duration | Default: 60s
@@ -127,6 +140,36 @@ health:
   # Can also be set via the ICAP_API_TOKEN environment variable.
   # Type: string | Default: ""
   # api_token: "super-secret-token"
+
+
+# =============================================================================
+# MANAGEMENT — live scenario/config reload API on the health HTTP server
+# =============================================================================
+management:
+  # Enable management API routes on the health server:
+  #   POST /api/v1/scenarios/reload
+  #   POST /api/v1/config/reload-current
+  #   POST /api/v1/config/load   body: {"path":"configs/example.yaml"}
+  # Type: bool | Default: false
+  enabled: false
+
+  # Allow POST /api/v1/scenarios/reload.
+  # Type: bool | Default: false
+  scenario_reload_enabled: false
+
+  # Allow POST /api/v1/config/reload-current and /api/v1/config/load.
+  # Type: bool | Default: false
+  config_reload_enabled: false
+
+  # Optional static bearer token for management routes.
+  # If neither token nor token_env (nor legacy health.api_token) is set, the
+  # server logs a warning because the management API is unauthenticated.
+  # Type: string | Default: ""
+  # token: "replace-me"
+
+  # Optional environment variable name that contains the bearer token.
+  # Type: string | Default: ""
+  # token_env: "ICAP_MANAGEMENT_TOKEN"
 
 
 # =============================================================================
@@ -209,6 +252,18 @@ mock:
   # Useful for identifying instances in multi-node deployments.
   # Type: string | Default: "icap-mock"
   service_id: "icap-mock"
+
+  # Body regex matching safety limits. Use "unlimited" only when the effective
+  # server.max_body_size is also intentionally unlimited. Applies to legacy
+  # scenarios that use match.body_pattern.
+  matching:
+    # Type: byte size or "unlimited" | Default: 10mb
+    body_pattern_limit: 10mb
+
+    # Action when a body exceeds the effective body_pattern_limit.
+    # Values: "no_match" (try other scenarios) or "error" (fail matching)
+    # Type: string | Default: "no_match"
+    body_pattern_limit_action: no_match
 
   # ---------------------------------------------------------------------------
   # HOT RELOAD — watch scenario files for changes and reload without restart
@@ -449,6 +504,12 @@ preview:
   # Maximum number of distinct clients to track.
   # Type: int | Default: 10000
   max_clients: 10000
+
+  # When true, preview rate limiting uses X-Client-ID as the client bucket key.
+  # Keep false unless a trusted upstream injects that header consistently.
+  # When false, the limiter uses the resolved client IP instead.
+  # Type: bool | Default: false
+  trust_client_id_header: false
 
 
 # =============================================================================

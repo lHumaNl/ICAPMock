@@ -11,6 +11,10 @@ bin/
 coverage.out
 coverage.html
 coverage/
+*.pcap
+*.pcapng
+**/*.pcap
+**/*.pcapng
 
 # IDE and editor files
 .idea/

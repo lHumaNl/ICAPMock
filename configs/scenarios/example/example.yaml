@@ -21,7 +21,7 @@
 # regular expression.
 #
 #   when:
-#     X-Client-IP: "re:^10\\."           # regex match on ICAP header
+#     X-Client-IP: "re:^192\\.0\\.2\\."  # regex match on ICAP header
 #     X-Custom-Tag: "important"          # exact match
 #
 # A scenario with no "when:"/"when_http:" block matches every request.
@@ -35,7 +35,7 @@
 #   when_http:
 #     headers:
 #       Content-Type: "re:(?i)application/x-dosexec"
-#     url: "re:(?i)/(coparer\\.c|\\.exe$)"   # URI of the wrapped HTTP request
+#     url: "re:(?i)/(synthetic-block-a\\.bin|\\.exe$)" # wrapped HTTP URI
 #     method: GET                            # HTTP method of the wrapped request
 #
 # Scenarios using "when_http:" only match requests that actually carry an
@@ -53,11 +53,23 @@
 #     http_set:       Encapsulated HTTP response headers
 #     http_body:      Encapsulated HTTP response body
 #     http_body_file: Encapsulated HTTP response body (from disk)
+#     stream:         Streamed encapsulated body (request/response passthrough,
+#                     multipart selection, clean FIN endings, etc.)
 #
 # Block pages use the http_* fields so the origin client sees a real HTTP/1.1
 # response with proper Content-Type and a chunk-encoded body. Content-Length
 # on the wrapped response is recomputed automatically to match http_body
 # unless you pin it explicitly in http_set (use "auto" to force recompute).
+#
+# STREAMING NOTES
+# ---------------
+# - stream.source.from: request_http_body  → wrapped HTTP request body (REQMOD)
+# - stream.source.from: response_http_body → wrapped HTTP response body (RESPMOD)
+# - stream.parts concatenates several ordered sources
+# - multipart.fields match part names exactly; multipart.files.filename uses regex
+# - fallback.raw_file is for non-multipart raw source bodies only; for multipart
+#   selector misses use allow_empty or explicit fallback.body/body_file/from
+# - finish.mode: complete (default), fin, or weighted
 #
 # DELAYS
 # ------
@@ -351,7 +363,7 @@ scenarios:
     delay: 10ms-50ms
 
     # Explicit low priority so any scenario with conditions wins over this one.
-    priority: -10
+    priority: 0
 
 
   # ---------------------------------------------------------------------------
@@ -470,3 +482,107 @@ scenarios:
   #       set:
   #         X-Verdict: "CLEAN"
   #       delay: 100ms-300ms
+
+
+  # ---------------------------------------------------------------------------
+  # 10. STREAM request_http_body — pass through wrapped REQMOD body
+  # ---------------------------------------------------------------------------
+  # Trigger: REQMOD to a dedicated endpoint. The mock streams the encapsulated
+  # HTTP request body back in the modified message body path.
+  stream-request-http-body:
+    endpoint: /stream/request-http-body
+    status: 200
+    stream:
+      source:
+        from: request_http_body
+      chunks:
+        size: 16
+        delay: 5ms
+
+
+  # ---------------------------------------------------------------------------
+  # 11. STREAM response_http_body + FIN — pass through wrapped RESPMOD body
+  # ---------------------------------------------------------------------------
+  # Trigger: RESPMOD to a dedicated endpoint. Demonstrates clean FIN termination
+  # instead of the final terminating chunk.
+  stream-response-http-body-fin:
+    method: RESPMOD
+    endpoint: /stream/response-http-body
+    status: 200
+    stream:
+      source:
+        from: response_http_body
+      chunks:
+        size: 16
+      finish:
+        mode: fin
+        fin:
+          close: clean
+          after:
+            bytes: 64
+
+
+  # ---------------------------------------------------------------------------
+  # 12. stream.parts — compose several sources in order
+  # ---------------------------------------------------------------------------
+  # The mock concatenates the wrapped HTTP response body, an inline marker, and
+  # the raw ICAP response body source in one streamed output.
+  stream-composite-parts:
+    method: RESPMOD
+    endpoint: /stream/parts
+    status: 200
+    stream:
+      parts:
+        - from: response_http_body
+        - body: "\n-- streamed by icap-mock --\n"
+        - from: response_body
+      chunks:
+        size: 12
+
+
+  # ---------------------------------------------------------------------------
+  # 13. MULTIPART selectors + safe fallback
+  # ---------------------------------------------------------------------------
+  # Trigger: multipart/form-data upload on REQMOD. Select the form field named
+  # "comment" plus file parts whose filename matches the regex. If that selector
+  # produces no bytes, return an explicit safe fallback body. Do not use
+  # fallback.raw_file for multipart selector misses.
+  multipart-upload-stream:
+    endpoint: /stream/multipart-upload
+    status: 200
+    stream:
+      source:
+        from: request_http_body
+      multipart:
+        fields: [comment]
+        files:
+          filename: ".*\\.(txt|bin)$"
+      fallback:
+        body: "no matching multipart parts selected\n"
+      chunks:
+        size: 16
+
+
+  # ---------------------------------------------------------------------------
+  # 14. Weighted complete-vs-FIN ending
+  # ---------------------------------------------------------------------------
+  # 80% of responses end normally with the terminating chunk; 20% end with a
+  # clean FIN after some bytes have been sent.
+  weighted-finish-stream:
+    endpoint: /stream/weighted-finish
+    status: 200
+    stream:
+      source:
+        from: body
+        body: "preview-approved"
+      chunks:
+        size: 4
+        delay: 2ms
+      finish:
+        mode: weighted
+        complete_percent: 80
+        fin_percent: 20
+        fin:
+          close: clean
+          after:
+            bytes: 8

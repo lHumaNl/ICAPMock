@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -23,10 +24,11 @@ func (e ValidationError) Error() string {
 
 // Validator validates configuration values.
 type Validator struct {
-	validLogLevels  map[string]bool
-	validLogFormats map[string]bool
-	validModes      map[string]bool
-	validAlgorithms map[string]bool
+	validLogLevels               map[string]bool
+	validLogFormats              map[string]bool
+	validModes                   map[string]bool
+	validAlgorithms              map[string]bool
+	validBodyPatternLimitActions map[string]bool
 }
 
 // NewValidator creates a new configuration validator.
@@ -51,6 +53,10 @@ func NewValidator() *Validator {
 			"token_bucket":         true,
 			"sliding_window":       true,
 			"sharded_token_bucket": true,
+		},
+		validBodyPatternLimitActions: map[string]bool{
+			BodyPatternLimitActionNoMatch: true,
+			BodyPatternLimitActionError:   true,
 		},
 	}
 }
@@ -142,6 +148,7 @@ func (v *Validator) validateServer(cfg *ServerConfig) []ValidationError {
 			Value:   cfg.MaxBodySize,
 		})
 	}
+	errors = append(errors, validateTrustedProxies(cfg.TrustedProxies)...)
 
 	// Validate TLS configuration
 	if cfg.TLS.Enabled {
@@ -174,6 +181,31 @@ func (v *Validator) validateServer(cfg *ServerConfig) []ValidationError {
 	}
 
 	return errors
+}
+
+func validateTrustedProxies(proxies []string) []ValidationError {
+	var errors []ValidationError
+	for _, proxy := range proxies {
+		if !isValidProxyAddress(strings.TrimSpace(proxy)) {
+			errors = append(errors, ValidationError{
+				Field:   "server.trusted_proxies",
+				Message: "trusted proxy must be an IP address or CIDR range",
+				Value:   proxy,
+			})
+		}
+	}
+	return errors
+}
+
+func isValidProxyAddress(proxy string) bool {
+	if proxy == "" {
+		return false
+	}
+	if net.ParseIP(proxy) != nil {
+		return true
+	}
+	_, _, err := net.ParseCIDR(proxy)
+	return err == nil
 }
 
 // validateLogging validates logging configuration.
@@ -293,6 +325,27 @@ func (v *Validator) validateMock(cfg *MockConfig) []ValidationError {
 		})
 	}
 
+	errors = append(errors, v.validateMockMatching(&cfg.Matching)...)
+
+	return errors
+}
+
+func (v *Validator) validateMockMatching(cfg *MockMatchingConfig) []ValidationError {
+	var errors []ValidationError
+	if !cfg.BodyPatternLimit.Unlimited && cfg.BodyPatternLimit.Bytes <= 0 {
+		errors = append(errors, ValidationError{
+			Field:   "mock.matching.body_pattern_limit",
+			Message: "body_pattern_limit must be positive or unlimited",
+			Value:   cfg.BodyPatternLimit.Bytes,
+		})
+	}
+	if !v.validBodyPatternLimitActions[strings.ToLower(cfg.BodyPatternLimitAction)] {
+		errors = append(errors, ValidationError{
+			Field:   "mock.matching.body_pattern_limit_action",
+			Message: "invalid action, must be one of: no_match, error",
+			Value:   cfg.BodyPatternLimitAction,
+		})
+	}
 	return errors
 }
 

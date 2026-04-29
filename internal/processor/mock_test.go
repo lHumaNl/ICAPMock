@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -395,6 +396,149 @@ func TestMockProcessor_Interface(_ *testing.T) {
 	var _ Processor = NewMockProcessor(nil, nil)
 }
 
+func TestMockProcessor_StreamRequestBodyAndHTTPReason(t *testing.T) {
+	registry := storage.NewScenarioRegistry()
+	err := registry.Add(&storage.Scenario{
+		Name:  "stream-request-body",
+		Match: storage.MatchRule{Methods: []string{icap.MethodREQMOD}},
+		Response: storage.ResponseTemplate{
+			ICAPStatus: 200,
+			HTTPStatus: 403,
+			Stream: &storage.StreamConfig{
+				Source: storage.StreamSourceConfig{From: "request_body"},
+				Chunks: storage.StreamChunksConfig{Size: storage.SizeSpec{Min: 2, Max: 2, IsSet: true}},
+				Finish: storage.StreamFinishConfig{Mode: icap.StreamFinishComplete},
+			},
+		},
+		Priority: 100,
+	})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	req := createTestREQMODRequest(t)
+	req.HTTPRequest = &icap.HTTPMessage{Method: "POST", URI: "/upload", Proto: "HTTP/1.1", Header: icap.NewHeader()}
+	req.HTTPRequest.SetLoadedBody([]byte("abcd"))
+	resp, err := proc.Process(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if _, err := resp.WriteTo(&out); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "HTTP/1.1 403 Forbidden") {
+		t.Fatalf("HTTP reason phrase not written correctly: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n") {
+		t.Fatalf("streamed request body missing: %q", out.String())
+	}
+}
+
+func TestMockProcessor_StreamResponseBody(t *testing.T) {
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(responseBodyStreamScenario(icap.StreamFinishComplete)); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	resp, err := proc.Process(context.Background(), createTestRESPMODRequest(t))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if _, err := resp.WriteTo(&out); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "3\r\nwxy\r\n1\r\nz\r\n0\r\n\r\n") {
+		t.Fatalf("streamed response body missing: %q", out.String())
+	}
+}
+
+func TestMockProcessor_StreamFINModeSetsConnectionClose(t *testing.T) {
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(responseBodyStreamScenario(icap.StreamFinishFIN)); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	resp, err := proc.Process(context.Background(), createTestRESPMODRequest(t))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if got, ok := resp.GetHeader("Connection"); !ok || got != "close" {
+		t.Fatalf("Connection header = %q, %v; want close, true", got, ok)
+	}
+}
+
+func TestMockProcessor_UsesSelectedBranchAndWeightedErrors(t *testing.T) {
+	tests := []struct {
+		scenario *storage.Scenario
+		name     string
+		want     string
+	}{
+		{name: "branch", want: "branch error", scenario: branchErrorScenario()},
+		{name: "weighted", want: "weighted error", scenario: weightedErrorScenario()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := processScenarioError(t, tt.scenario)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Process() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func branchErrorScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name: "branch-error", Match: storage.MatchRule{Methods: []string{icap.MethodREQMOD}}, Priority: 100,
+		Response: storage.ResponseTemplate{ICAPStatus: 204, Error: "scenario error"},
+		Branches: []storage.Branch{{Response: storage.ResponseTemplate{ICAPStatus: 500, Error: "branch error"}}},
+	}
+}
+
+func weightedErrorScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name: "weighted-error", Match: storage.MatchRule{Methods: []string{icap.MethodREQMOD}}, Priority: 100,
+		Response:          storage.ResponseTemplate{ICAPStatus: 204},
+		WeightedResponses: []storage.WeightedResponse{{Weight: 1, ICAPStatus: 500, Error: "weighted error"}},
+	}
+}
+
+func processScenarioError(t *testing.T, scenario *storage.Scenario) error {
+	t.Helper()
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(scenario); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	_, err := NewMockProcessor(registry, createTestLogger(t)).Process(context.Background(), createTestREQMODRequest(t))
+	return err
+}
+
+func responseBodyStreamScenario(mode string) *storage.Scenario {
+	finish := storage.StreamFinishConfig{Mode: mode}
+	if mode == icap.StreamFinishFIN {
+		finish.Fin = storage.StreamFINConfig{Close: "clean"}
+	}
+	return &storage.Scenario{
+		Name:  "stream-response-body",
+		Match: storage.MatchRule{Methods: []string{icap.MethodRESPMOD}},
+		Response: storage.ResponseTemplate{
+			ICAPStatus: 200,
+			Stream: &storage.StreamConfig{
+				Source: storage.StreamSourceConfig{From: "response_body"},
+				Chunks: storage.StreamChunksConfig{Size: storage.SizeSpec{Min: 3, Max: 3, IsSet: true}},
+				Finish: finish,
+			},
+		},
+		Priority: 100,
+	}
+}
+
 // Helper functions
 
 func createTestLogger(t *testing.T) *logger.Logger {
@@ -416,6 +560,18 @@ func createTestREQMODRequest(t *testing.T) *icap.Request {
 	return req
 }
 
+func createTestRESPMODRequest(t *testing.T) *icap.Request {
+	t.Helper()
+	req, err := icap.NewRequest(icap.MethodRESPMOD, "icap://localhost/avscan")
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.HTTPRequest = &icap.HTTPMessage{Method: "GET", URI: "/download", Proto: "HTTP/1.1", Header: icap.NewHeader()}
+	req.HTTPResponse = &icap.HTTPMessage{Proto: "HTTP/1.1", Status: "200", StatusText: "OK", Header: icap.NewHeader()}
+	req.HTTPResponse.SetLoadedBody([]byte("wxyz"))
+	return req
+}
+
 func TestSubstituteString_WithCaptures(t *testing.T) {
 	vars := map[string]string{"id": "42", "env": "prod"}
 	cases := []struct {
@@ -433,5 +589,70 @@ func TestSubstituteString_WithCaptures(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("substituteString(%q): got %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestSubstituteCaptures_StreamNestedFields(t *testing.T) {
+	resp := storage.ResponseTemplate{Stream: &storage.StreamConfig{
+		Body: "top-${id}", BodyFile: "/tmp/${id}.bin",
+		Source: storage.StreamSourceConfig{Body: "source-${id}", BodyFile: "/src/${id}"},
+		Parts:  []storage.StreamPartConfig{{Body: "part-${id}", BodyFile: "/part/${id}"}},
+		Fallback: storage.StreamFallbackConfig{
+			Body: "fallback-${id}", BodyFile: "/fallback/${id}",
+			RawFile: storage.StreamRawFileFallback{Filename: []string{"${id}\\.dat"}},
+		},
+		Multipart: storage.StreamMultipartConfig{
+			Fields: []string{"field-${id}"},
+			Files:  storage.StreamMultipartFilesConfig{Filename: []string{"file-${id}"}},
+		},
+	}}
+
+	got := substituteCaptures(resp, map[string]string{"id": "42"}).Stream
+	assertStreamSubstituted(t, got)
+}
+
+func assertStreamSubstituted(t *testing.T, got *storage.StreamConfig) {
+	t.Helper()
+	checks := []string{got.Body, got.BodyFile, got.Source.Body, got.Source.BodyFile, got.Parts[0].Body,
+		got.Parts[0].BodyFile, got.Fallback.Body, got.Fallback.BodyFile, got.Fallback.RawFile.Filename[0],
+		got.Multipart.Fields[0], got.Multipart.Files.Filename[0]}
+	for _, value := range checks {
+		if strings.Contains(value, "${id}") {
+			t.Fatalf("unsubstituted stream value %q", value)
+		}
+	}
+}
+
+func TestMockProcessor_ShardedRegistryCaptureSubstitutionOnRepeatedMatch(t *testing.T) {
+	registry := storage.NewShardedScenarioRegistry()
+	err := registry.Add(&storage.Scenario{
+		Name:     "capture-response",
+		Match:    storage.MatchRule{Paths: []string{"/env/{id}/scan"}},
+		Response: storage.ResponseTemplate{ICAPStatus: 200, Body: "id=${id}"},
+		Priority: 100,
+	})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	_, err = proc.Process(context.Background(), captureSubstitutionRequest())
+	if err != nil {
+		t.Fatalf("first Process() error = %v", err)
+	}
+	resp, err := proc.Process(context.Background(), captureSubstitutionRequest())
+	if err != nil {
+		t.Fatalf("second Process() error = %v", err)
+	}
+	if string(resp.Body) != "id=abc" {
+		t.Fatalf("response body = %q, want id=abc", string(resp.Body))
+	}
+}
+
+func captureSubstitutionRequest() *icap.Request {
+	return &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost/env/abc/scan",
+		Header: icap.NewHeader(),
 	}
 }

@@ -567,6 +567,33 @@ func TestLoader_LoadWithoutMetrics(t *testing.T) {
 	}
 }
 
+func TestLoader_LoadMergesShardingConfig(t *testing.T) {
+	content := `
+sharding:
+  enabled: false
+  shard_count: 4
+  cache_size: 2
+  enable_cache: false
+`
+	cfgPath := filepath.Join(t.TempDir(), "sharding.yaml")
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg, err := NewLoader().Load(LoadOptions{ConfigPath: cfgPath})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	assertShardingConfig(t, cfg.Sharding)
+}
+
+func assertShardingConfig(t *testing.T, got ShardingConfig) {
+	t.Helper()
+	if got.Enabled || got.EnableCache || got.ShardCount != 4 || got.CacheSize != 2 {
+		t.Fatalf("sharding config = %+v, want disabled cache disabled count 4 size 2", got)
+	}
+}
+
 // TestLoader_LoadProductionConfig tests loading a production-like configuration.
 func TestLoader_LoadProductionConfig(t *testing.T) {
 	content := `

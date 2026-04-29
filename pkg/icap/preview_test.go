@@ -5,6 +5,7 @@ package icap_test
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -42,6 +43,12 @@ func TestParsePreviewHeader(t *testing.T) {
 			input:   "1048576", // 1MB
 			want:    1048576,
 			wantErr: false,
+		},
+		{
+			name:    "oversized preview",
+			input:   "1048577",
+			want:    0,
+			wantErr: true,
 		},
 		{
 			name:    "whitespace trimmed",
@@ -86,6 +93,46 @@ func TestParsePreviewHeader(t *testing.T) {
 				t.Errorf("ParsePreviewHeader() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetPreviewBodyRejectsOversizedLimit(t *testing.T) {
+	msg := &icap.HTTPMessage{BodyReader: strings.NewReader("hello")}
+	_, err := msg.GetPreviewBody(icap.DefaultMaxPreviewBytes + 1)
+	if err == nil {
+		t.Fatal("GetPreviewBody() error = nil, want oversized preview error")
+	}
+}
+
+func TestGetPreviewBodyRechainsForGetBody(t *testing.T) {
+	msg := &icap.HTTPMessage{BodyReader: icap.NewChunkedReader(strings.NewReader("a\r\nhelloworld\r\n0\r\n\r\n"))}
+	preview, err := msg.GetPreviewBody(5)
+	if err != nil {
+		t.Fatalf("GetPreviewBody() error = %v", err)
+	}
+	if string(preview) != "hello" {
+		t.Fatalf("preview = %q, want hello", preview)
+	}
+	body, err := msg.GetBody()
+	if err != nil {
+		t.Fatalf("GetBody() error = %v", err)
+	}
+	if string(body) != "helloworld" {
+		t.Fatalf("body = %q, want helloworld", body)
+	}
+}
+
+func TestGetPreviewBodyRechainsForStreaming(t *testing.T) {
+	msg := &icap.HTTPMessage{BodyReader: icap.NewChunkedReader(strings.NewReader("a\r\nhelloworld\r\n0\r\n\r\n"))}
+	if _, err := msg.GetPreviewBody(5); err != nil {
+		t.Fatalf("GetPreviewBody() error = %v", err)
+	}
+	body, err := io.ReadAll(msg.BodyReader)
+	if err != nil {
+		t.Fatalf("BodyReader ReadAll() error = %v", err)
+	}
+	if string(body) != "helloworld" {
+		t.Fatalf("stream body = %q, want helloworld", body)
 	}
 }
 

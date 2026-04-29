@@ -269,6 +269,78 @@ func TestChunkedReaderWithTrailer(t *testing.T) {
 	}
 }
 
+func TestChunkedReaderRejectsOversizedChunkHeader(t *testing.T) {
+	input := strings.Repeat("f", icap.MaxChunkHeaderLength) + "\r\n0\r\n\r\n"
+	r := icap.NewChunkedReader(strings.NewReader(input))
+
+	got, err := io.ReadAll(r)
+
+	if !errors.Is(err, icap.ErrChunkHeaderTooLong) {
+		t.Fatalf("ReadAll() error = %v, want %v", err, icap.ErrChunkHeaderTooLong)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ReadAll() bytes = %d, want 0", len(got))
+	}
+}
+
+func TestChunkedReaderRejectsOversizedTrailerLine(t *testing.T) {
+	trailer := "X-Long: " + strings.Repeat("a", icap.MaxTrailerLineLength)
+	r := icap.NewChunkedReader(strings.NewReader("0\r\n" + trailer + "\r\n"))
+
+	_, err := io.ReadAll(r)
+
+	if !errors.Is(err, icap.ErrTrailerLineTooLong) {
+		t.Fatalf("ReadAll() error = %v, want %v", err, icap.ErrTrailerLineTooLong)
+	}
+}
+
+func TestChunkedReaderRejectsTooManyTrailers(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("0\r\n")
+	for i := 0; i <= icap.MaxTrailerCount; i++ {
+		input.WriteString("X-Test: ok\r\n")
+	}
+	input.WriteString("\r\n")
+
+	r := icap.NewChunkedReader(strings.NewReader(input.String()))
+	_, err := io.ReadAll(r)
+
+	if !errors.Is(err, icap.ErrTooManyTrailers) {
+		t.Fatalf("ReadAll() error = %v, want %v", err, icap.ErrTooManyTrailers)
+	}
+}
+
+func TestChunkedReaderRejectsTooLargeTrailers(t *testing.T) {
+	var input strings.Builder
+	input.WriteString("0\r\n")
+	line := "X-Fill: " + strings.Repeat("a", icap.MaxTrailerLineLength/2) + "\r\n"
+	for input.Len() <= icap.MaxTrailerBytes+len("0\r\n") {
+		input.WriteString(line)
+	}
+	input.WriteString("\r\n")
+
+	r := icap.NewChunkedReader(strings.NewReader(input.String()))
+	_, err := io.ReadAll(r)
+
+	if !errors.Is(err, icap.ErrTrailersTooLarge) {
+		t.Fatalf("ReadAll() error = %v, want %v", err, icap.ErrTrailersTooLarge)
+	}
+}
+
+func TestChunkedReaderDecodesNormalChunkedBody(t *testing.T) {
+	input := "5\r\nhello\r\n6;ext=value\r\n world\r\n0\r\nX-Checksum: ok\r\n\r\n"
+	r := icap.NewChunkedReader(strings.NewReader(input))
+
+	got, err := io.ReadAll(r)
+
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(got) != "hello world" {
+		t.Fatalf("ReadAll() = %q, want %q", string(got), "hello world")
+	}
+}
+
 // TestChunkedWriterFlush tests flushing chunked writer.
 func TestChunkedWriterFlush(t *testing.T) {
 	var buf bytes.Buffer

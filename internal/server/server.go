@@ -571,7 +571,12 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 
 			// Extract client IP
 			req.RemoteAddr = conn.RemoteAddr()
-			req.ClientIP = extractClientIP(req.Header, conn.RemoteAddr())
+			req.ClientIP = extractClientIP(
+				req.Header,
+				conn.RemoteAddr(),
+				s.config.TrustClientIPHeader,
+				s.config.TrustedProxies,
+			)
 
 			// Reset deadline for processing
 			if s.config.WriteTimeout > 0 {

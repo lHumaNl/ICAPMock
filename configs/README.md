@@ -69,6 +69,59 @@ servers:
 
 See `example.yaml` for the complete list of available fields with defaults and descriptions.
 
+### Body-pattern safety limits
+
+`mock.matching.body_pattern_limit` and `mock.matching.body_pattern_limit_action` protect
+body-regex matching from unbounded reads. They apply to legacy scenarios that use
+`match.body_pattern`.
+
+```yaml
+mock:
+  matching:
+    body_pattern_limit: 10mb
+    body_pattern_limit_action: no_match   # or: error
+```
+
+- `no_match` — oversized bodies simply do not satisfy `body_pattern`; other scenarios may still match.
+- `error` — matching stops with a controlled error instead of silently skipping the scenario.
+- `unlimited` is allowed, but the effective limit is still capped by `server.max_body_size` when that
+  server-side limit is finite.
+
+### Management API, reloads, and trusted headers
+
+The health HTTP server can expose runtime management endpoints when `management.enabled: true`:
+
+```yaml
+management:
+  enabled: true
+  scenario_reload_enabled: true
+  config_reload_enabled: true
+  token_env: ICAP_MANAGEMENT_TOKEN
+```
+
+Available routes:
+
+- `POST /api/v1/scenarios/reload`
+- `POST /api/v1/config/reload-current`
+- `POST /api/v1/config/load` with `{"path":"configs/example.yaml"}`
+
+If no token is configured, the server logs a warning because the management API is left open.
+
+Trusted client identity is configured separately:
+
+```yaml
+server:
+  trust_client_ip_header: true
+  trusted_proxies: ["192.0.2.0/24", "127.0.0.1"]
+
+preview:
+  trust_client_id_header: true
+```
+
+- `server.trust_client_ip_header` allows `X-Client-IP`, but only from trusted proxy peers.
+- `preview.trust_client_id_header` makes preview rate limiting use `X-Client-ID` buckets; keep it
+  disabled unless a trusted upstream owns that header.
+
 ---
 
 ## Scenario config (v2 format)
@@ -181,7 +234,7 @@ block-by-url:
 
 internal-client-only:
   when:
-    X-Client-IP: "re:^10\\."
+    X-Client-IP: "re:^192\\.0\\.2\\."
   when_http:
     method: POST
   status: 204
@@ -289,7 +342,7 @@ scenarios:
           headers: { Content-Type: "re:(?i)application/x-dosexec" }
         use: blocked
       - when:
-          X-Client-IP: "re:^10\\."
+          X-Client-IP: "re:^192\\.0\\.2\\."
         use: flaky-block      # branch may reference a weighted template
       - use: clean             # catch-all inside the scenario
 ```
@@ -316,6 +369,110 @@ scenarios:
 
 A capture-style endpoint is registered with the router as a regex pattern, so captures work
 transparently alongside plain paths declared in the same list.
+
+### Streaming encapsulated bodies
+
+`stream:` is available on inline responses, branches, and weighted variants. It streams bytes in
+chunked ICAP output without forcing a separate `http_body` / `http_body_file` payload.
+
+```yaml
+scenarios:
+  reqmod-stream:
+    method: REQMOD
+    endpoint: /stream/request
+    status: 200
+    stream:
+      source:
+        from: request_http_body
+      chunks:
+        size: 16
+
+  respmod-stream:
+    method: RESPMOD
+    endpoint: /stream/response
+    status: 200
+    stream:
+      source:
+        from: response_http_body
+      finish:
+        mode: fin
+        fin:
+          close: clean
+          after:
+            bytes: 64
+```
+
+- `request_http_body` requires an explicit `REQMOD` method.
+- `response_http_body` requires an explicit `RESPMOD` method.
+- `finish.mode` defaults to `complete`; `fin` sends a clean FIN instead of the final terminating chunk.
+
+### `stream.parts`
+
+Use `parts:` to concatenate several sources in order. `stream.from` and `stream.parts` are mutually
+exclusive.
+
+```yaml
+scenarios:
+  composite-stream:
+    method: RESPMOD
+    endpoint: /stream/parts
+    status: 200
+    stream:
+      parts:
+        - from: response_http_body
+        - body: "\n-- streamed by icap-mock --\n"
+        - from: response_body
+```
+
+### Multipart selectors and safe fallback
+
+Multipart selectors only work with `request_http_body` / `response_http_body` sources because they
+inspect the encapsulated HTTP message body.
+
+```yaml
+scenarios:
+  multipart-upload:
+    method: REQMOD
+    endpoint: /stream/multipart-upload
+    status: 200
+    stream:
+      source:
+        from: request_http_body
+      multipart:
+        fields: [comment]
+        files:
+          filename: ".*\\.(txt|bin)$"
+      fallback:
+        body: "no matching multipart parts selected\n"
+```
+
+- `multipart.fields` matches part names exactly.
+- `multipart.files: true` selects all file parts.
+- `multipart.files.filename` filters file parts by regex.
+- `fallback.raw_file` is only for non-multipart raw source bodies. For multipart selector misses,
+  use `multipart.allow_empty: true` or an explicit safe fallback such as `fallback.body`,
+  `fallback.body_file`, or a supported `fallback.from` source.
+
+### Weighted complete-vs-FIN ending
+
+```yaml
+scenarios:
+  weighted-finish:
+    method: REQMOD
+    endpoint: /stream/weighted-finish
+    status: 200
+    stream:
+      source: { from: body, body: "preview-approved" }
+      finish:
+        mode: weighted
+        complete_percent: 80
+        fin_percent: 20
+        fin:
+          close: clean
+```
+
+For weighted mode, `complete_percent + fin_percent` must equal `100`. If `fin_percent` is non-zero,
+`finish.fin` must also be configured.
 
 ### Weighted responses
 
@@ -375,7 +532,7 @@ scan-file:
 ```yaml
 block-known-malware:
   when:
-    X-Filename: "Worm.BAT.Autorun.u"
+    X-Filename: "synthetic-block-a.bin"
   status: 200
   http_status: 403
   set:

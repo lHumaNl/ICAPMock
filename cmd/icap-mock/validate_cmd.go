@@ -118,20 +118,20 @@ func validateFile(filePath string, seenNames map[string]string) bool {
 		return false
 	}
 
-	var sf storage.ScenarioFile
-	if err := yaml.Unmarshal(data, &sf); err != nil {
-		fmt.Printf("  [FAIL] YAML parse error: %v\n", err)
+	scenarios, err := loadScenariosForValidation(filePath, data)
+	if err != nil {
+		fmt.Printf("  [FAIL] cannot parse file: %v\n", err)
 		return false
 	}
 
-	if len(sf.Scenarios) == 0 {
+	if len(scenarios) == 0 {
 		fmt.Printf("  (no scenarios defined)\n")
 		return true
 	}
 
 	allPassed := true
-	for i := range sf.Scenarios {
-		s := &sf.Scenarios[i]
+	for i := range scenarios {
+		s := &scenarios[i]
 		scenarioLabel := s.Name
 		if scenarioLabel == "" {
 			scenarioLabel = fmt.Sprintf("<unnamed #%d>", i+1)
@@ -151,51 +151,179 @@ func validateFile(filePath string, seenNames map[string]string) bool {
 	return allPassed
 }
 
+// loadScenarios parses a scenario YAML file in either v1 or v2 format and
+// returns a flat list of runtime scenarios.
+func loadScenariosForValidation(filePath string, data []byte) ([]storage.Scenario, error) {
+	var sf storage.ScenarioFile
+	if err := yaml.Unmarshal(data, &sf); err == nil {
+		return sf.Scenarios, nil
+	}
+
+	var sfV2 storage.ScenarioFileV2
+	if err := yaml.Unmarshal(data, &sfV2); err != nil {
+		return nil, fmt.Errorf("%w (v1/v2 decode)", err)
+	}
+
+	names, err := v2ScenarioNames(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse v2 scenario order: %w", err)
+	}
+
+	converted, err := storage.ConvertV2ToScenarios(&sfV2, names)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert v2 scenarios: %w", err)
+	}
+
+	out := make([]storage.Scenario, 0, len(converted))
+	baseDir := filepath.Dir(filePath)
+	for _, s := range converted {
+		normalizeScenarioBodyFiles(s, baseDir)
+		out = append(out, *s)
+	}
+
+	return out, nil
+}
+
+func normalizeScenarioBodyFiles(s *storage.Scenario, baseDir string) {
+	normalizeResponseBodyFiles(&s.Response, baseDir)
+	for idx := range s.Branches {
+		b := &s.Branches[idx]
+		normalizeResponseBodyFiles(&b.Response, baseDir)
+		for widx := range b.WeightedResponses {
+			normalizeWeightedResponseBodyFiles(&b.WeightedResponses[widx], baseDir)
+		}
+	}
+
+	for idx := range s.WeightedResponses {
+		normalizeWeightedResponseBodyFiles(&s.WeightedResponses[idx], baseDir)
+	}
+}
+
+func normalizeResponseBodyFiles(r *storage.ResponseTemplate, baseDir string) {
+	r.BodyFile = normalizeBodyFilePath(r.BodyFile, baseDir)
+	r.HTTPBodyFile = normalizeBodyFilePath(r.HTTPBodyFile, baseDir)
+}
+
+func normalizeWeightedResponseBodyFiles(w *storage.WeightedResponse, baseDir string) {
+	w.BodyFile = normalizeBodyFilePath(w.BodyFile, baseDir)
+	w.HTTPBodyFile = normalizeBodyFilePath(w.HTTPBodyFile, baseDir)
+}
+
+func normalizeBodyFilePath(v, baseDir string) string {
+	if v == "" || filepath.IsAbs(v) {
+		return v
+	}
+	return filepath.Join(baseDir, v)
+}
+
+// v2ScenarioNames returns scenario keys in YAML order for v2 files.
+func v2ScenarioNames(data []byte) ([]string, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return nil, nil
+	}
+
+	mapping := root.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		key := mapping.Content[i]
+		value := mapping.Content[i+1]
+		if key.Value == "scenarios" && value.Kind == yaml.MappingNode {
+			names := make([]string, 0, len(value.Content)/2)
+			for j := 0; j < len(value.Content)-1; j += 2 {
+				names = append(names, value.Content[j].Value)
+			}
+			return names, nil
+		}
+	}
+
+	return nil, nil
+}
+
 // validateScenario validates a single scenario and returns a list of errors.
 func validateScenario(s *storage.Scenario, filePath string, seenNames map[string]string) []string {
-	var errs []string
-
-	if s.Name == "" {
-		errs = append(errs, "name is empty")
-	} else {
-		if prev, exists := seenNames[s.Name]; exists {
-			errs = append(errs, fmt.Sprintf("duplicate name %q (first seen in %s)", s.Name, prev))
-		} else {
-			seenNames[s.Name] = filePath
-		}
-	}
-
-	if s.Match.Path != "" {
-		if _, err := regexp.Compile(s.Match.Path); err != nil {
-			errs = append(errs, fmt.Sprintf("invalid path_pattern regex %q: %v", s.Match.Path, err))
-		}
-	}
-
-	if s.Match.BodyPattern != "" {
-		if _, err := regexp.Compile(s.Match.BodyPattern); err != nil {
-			errs = append(errs, fmt.Sprintf("invalid body_pattern regex %q: %v", s.Match.BodyPattern, err))
-		}
-	}
-
-	if s.Response.BodyFile != "" {
-		bodyFilePath := s.Response.BodyFile
-		if !filepath.IsAbs(bodyFilePath) {
-			bodyFilePath = filepath.Join(filepath.Dir(filePath), bodyFilePath)
-		}
-		if _, err := os.Stat(bodyFilePath); err != nil {
-			errs = append(errs, fmt.Sprintf("body_file %q not found: %v", s.Response.BodyFile, err))
-		}
-	}
+	err := make([]string, 0, 7)
+	err = append(err, validateScenarioName(s.Name, filePath, seenNames)...)
+	err = append(err, validateScenarioRegex("path_pattern", s.Match.Path)...)
+	err = append(err, validateScenarioRegex("body_pattern", s.Match.BodyPattern)...)
+	err = append(err, validateScenarioBodyFile(s.Response.BodyFile, filePath)...)
 
 	if s.Priority < 0 {
-		errs = append(errs, fmt.Sprintf("priority %d is negative", s.Priority))
+		err = append(err, fmt.Sprintf("priority %d is negative", s.Priority))
 	}
 
-	status := s.Response.ICAPStatus
-	if status == 0 {
-		errs = append(errs, "icap_status is 0 (will default to 204 at runtime; consider setting it explicitly)")
-	} else if status < 100 || status > 599 {
-		errs = append(errs, fmt.Sprintf("icap_status %d is out of valid range 100-599", status))
+	err = append(err, validateScenarioStatuses(s)...)
+
+	return err
+}
+
+func validateScenarioName(name, filePath string, seenNames map[string]string) []string {
+	if name == "" {
+		return []string{"name is empty"}
+	}
+
+	if prev, exists := seenNames[name]; exists {
+		return []string{fmt.Sprintf("duplicate name %q (first seen in %s)", name, prev)}
+	}
+
+	seenNames[name] = filePath
+
+	return nil
+}
+
+func validateScenarioRegex(fieldName, pattern string) []string {
+	if pattern == "" {
+		return nil
+	}
+
+	if _, err := regexp.Compile(pattern); err != nil {
+		return []string{fmt.Sprintf("invalid %s regex %q: %v", fieldName, pattern, err)}
+	}
+
+	return nil
+}
+
+func validateScenarioBodyFile(bodyFile, filePath string) []string {
+	if bodyFile == "" {
+		return nil
+	}
+
+	bodyFilePath := bodyFile
+	if !filepath.IsAbs(bodyFilePath) {
+		bodyFilePath = filepath.Join(filepath.Dir(filePath), bodyFilePath)
+	}
+
+	if _, err := os.Stat(bodyFilePath); err != nil {
+		return []string{fmt.Sprintf("body_file %q not found: %v", bodyFile, err)}
+	}
+
+	return nil
+}
+
+func validateScenarioStatuses(s *storage.Scenario) []string {
+	var errs []string
+
+	if len(s.Branches) == 0 {
+		status := s.Response.ICAPStatus
+		if status == 0 {
+			errs = append(errs, "icap_status is 0 (will default to 204 at runtime; consider setting it explicitly)")
+		} else if status < 100 || status > 599 {
+			errs = append(errs, fmt.Sprintf("icap_status %d is out of valid range 100-599", status))
+		}
+	}
+
+	for i := range s.Branches {
+		status := s.Branches[i].Response.ICAPStatus
+		if status != 0 && (status < 100 || status > 599) {
+			errs = append(errs, fmt.Sprintf("branch #%d icap_status %d is out of valid range 100-599", i+1, status))
+		}
 	}
 
 	return errs

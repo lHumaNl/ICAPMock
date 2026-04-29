@@ -14,6 +14,7 @@
 - **Scenario engine v2** — YAML-based scenario files with `defaults`, `when` / `when_http` (matching ICAP headers and the encapsulated HTTP request/response), `set` (header overrides), and `delay` ranges
 - **Two-layer response shaping** — `set:` / `body:` target the ICAP envelope, `http_set:` / `http_body:` target the encapsulated HTTP message (headers and body the origin client sees). Used together with `http_status:` to synthesize block pages with correct HTTP headers and chunked body.
 - **Weighted responses** — probabilistic response selection within a scenario (`responses:` with `weight:`)
+- **Body streaming controls** — stream `request_http_body` / `response_http_body`, compose `stream.parts`, select multipart fields/files, and choose complete-vs-FIN endings
 - **Response templates** — reusable named responses in `defaults.response_templates`, referenced via `use: <name>` from scenarios, branches, or weighted variants; `defaults.use:` acts as a file-wide fallback
 - **Branches** — `branches:` list inside a scenario for OR-style dispatch with per-branch response (inline, `use:`, or weighted); first match wins; falls through to the next scenario if none match
 - **Path captures** — endpoints like `/env/{id}/status` extract `{id}` from the URI; captured values are available as `${id}` in body/set/http_headers
@@ -126,6 +127,25 @@ metrics:
 
 See `configs/example.yaml` for a full annotated configuration reference.
 
+### Management API and trusted client identity
+
+The health HTTP server can also expose authenticated management endpoints for live reloads:
+
+- `POST /api/v1/scenarios/reload`
+- `POST /api/v1/config/reload-current`
+- `POST /api/v1/config/load` with JSON body `{"path":"/absolute/or/relative/config.yaml"}`
+
+Enable them with `management.enabled: true`. If you do not set `management.token` or
+`management.token_env`, the server still starts but logs a warning because the management API is
+unauthenticated.
+
+For client identity, two separate trust knobs exist:
+
+- `server.trust_client_ip_header: true` + `server.trusted_proxies:` lets the server honor
+  `X-Client-IP` only from trusted proxy peers.
+- `preview.trust_client_id_header: true` lets preview rate limiting bucket requests by
+  `X-Client-ID`; keep it off unless that header is injected by a trusted upstream.
+
 ---
 
 ## Scenarios (v2 Format)
@@ -154,7 +174,7 @@ scenarios:
   # Match by regex on an ICAP header
   threat-hash:
     when:
-      X-Filename: "re:[a-f0-9]{64}"
+      X-Filename: "re:^[a-f0-9]{64}$"
     set:
       x-verdict: "DANGEROUS"
     delay: 1s-3s
@@ -243,6 +263,59 @@ Mechanics:
 - **`endpoint:`** accepts a scalar or a list; each entry may include `{name}` captures that become regex groups in the path. Captured values are surfaced as `${name}` in `body`, `set`, and `http_headers`; use `$${` for a literal.
 - **`method:`** accepts a scalar or a list, allowing one scenario to serve REQMOD and RESPMOD on the same port without duplication.
 
+### Streaming, multipart selectors, and finish modes
+
+Streaming scenarios can reuse the encapsulated HTTP body directly instead of buffering a separate
+inline response. Public examples live in `configs/scenarios/example/example.yaml`.
+
+```yaml
+scenarios:
+  reqmod-body-stream:
+    endpoint: /stream/request-http-body
+    status: 200
+    stream:
+      source:
+        from: request_http_body
+      chunks:
+        size: 16
+
+  multipart-upload-stream:
+    endpoint: /stream/multipart-upload
+    status: 200
+    stream:
+      source:
+        from: request_http_body
+      multipart:
+        fields: [comment]
+        files:
+          filename: ".*\\.(txt|bin)$"
+      fallback:
+        body: "no matching multipart parts selected\n"
+
+  weighted-finish-stream:
+    endpoint: /stream/weighted-finish
+    status: 200
+    stream:
+      source: { from: body, body: "preview-approved" }
+      finish:
+        mode: weighted
+        complete_percent: 80
+        fin_percent: 20
+        fin:
+          close: clean
+```
+
+Notes:
+
+- `request_http_body` is valid for REQMOD scenarios; `response_http_body` is valid for RESPMOD.
+- `stream.parts` concatenates multiple sources in order.
+- `multipart.fields` matches part names exactly; `multipart.files.filename` uses regex patterns.
+- `fallback.raw_file` is for non-multipart raw source bodies only. For multipart selector misses,
+  use `multipart.allow_empty: true` or an explicit safe fallback such as `fallback.body`,
+  `fallback.body_file`, or a supported `fallback.from` source.
+- `finish.mode: fin` closes with a clean FIN; `finish.mode: weighted` randomly chooses between a
+  normal terminating chunk and a clean FIN using `complete_percent` + `fin_percent`.
+
 ---
 
 ## CLI
@@ -251,20 +324,20 @@ Mechanics:
 # Start the server with a config file
 icap-mock server --config configs/my-config.yaml
 
-# Start with hot-reload enabled
-icap-mock server --config configs/my-config.yaml --watch
+# Start the server and open the TUI
+icap-mock server --config configs/my-config.yaml --tui
 
 # Replay recorded requests against a running server
-icap-mock replay --input data/requests/ --target icap://localhost:1344/scan
+icap-mock replay --dir data/requests --target icap://localhost:1344/scan
 
-# Launch the interactive terminal UI
-icap-mock tui --config configs/my-config.yaml
+# Validate a server config without starting listeners
+icap-mock server --config configs/my-config.yaml --validate
 
-# Validate a config or scenario file
-icap-mock validate --config configs/my-config.yaml
+# Validate legacy list-format scenario YAML files in a directory
+icap-mock validate-scenarios --dir ./legacy-scenarios
 
 # Test a scenario match against a sample request
-icap-mock matchtest --scenario configs/scenarios/default/default.yaml
+icap-mock match-test --dir configs/scenarios/example --uri icap://localhost:1344/example
 ```
 
 ---
@@ -287,6 +360,7 @@ docker-compose --profile monitoring up -d
 ```
 
 Grafana will be available at `http://localhost:3000` (default credentials: `admin` / `admin`).
+Override these credentials via environment variables or a secret before any shared or exposed deployment.
 
 ---
 
@@ -319,6 +393,12 @@ icap-mock/
 ├── docker-compose.yml
 └── Makefile
 ```
+
+---
+
+## Release hygiene
+
+Do not include `*.pcap` or `*.pcapng` captures in release artifacts or Docker build contexts; keep captures as local verification references only.
 
 ---
 

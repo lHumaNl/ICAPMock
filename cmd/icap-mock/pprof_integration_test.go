@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/http/pprof"
 	"os"
 	"strings"
 	"testing"
@@ -30,18 +29,7 @@ func newMetricsHandlerWithPprof(reg prometheus.Gatherer, pprofEnabled bool) http
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
 	if pprofEnabled {
-		// Register pprof handlers when enabled
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
-		mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-		mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
-		mux.Handle("/debug/pprof/block", pprof.Handler("block"))
-		mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
-		mux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+		registerPprofHandlers(mux)
 	} else {
 		// Return 404 for pprof endpoints when disabled
 		mux.HandleFunc("/debug/pprof/", func(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +190,30 @@ func TestPprofEndpointsEnabledWhenConfigEnabled(t *testing.T) {
 				t.Errorf("GET %s: body should contain %q, got: %s", tt.endpoint, tt.contains, body[:minVal(200, len(body))])
 			}
 		})
+	}
+}
+
+func TestMetricsHTTPHandlerRegistersPprofWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	cfg.SetDefaults()
+	cfg.Pprof.Enabled = true
+	registry := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(registry)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	server := httptest.NewServer(newMetricsHTTPHandler(cfg, registry, collector))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/debug/pprof/")
+	if err != nil {
+		t.Fatalf("GET /debug/pprof/ error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 }
 

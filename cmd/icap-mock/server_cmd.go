@@ -250,6 +250,7 @@ func (c *ServerCommand) Run(ctx context.Context) error {
 
 	// Apply CLI overrides
 	c.applyOverrides(cfg)
+	cfg.SourcePath = c.configFile
 
 	// Validate configuration
 	validator := config.NewValidator()
@@ -401,58 +402,112 @@ func parseDurationFlag(name, value string) (time.Duration, bool) {
 }
 
 func (c *ServerCommand) applyServerOverrides(cfg *config.Config) {
+	c.applyServerAddressOverrides(cfg)
+	c.applyServerLimitOverrides(cfg)
+	c.applyServerStreamingOverride(cfg)
+	c.applyServerTimeoutOverrides(cfg)
+	c.applyServerTLSOverrides(cfg)
+}
+
+func (c *ServerCommand) applyServerAddressOverrides(cfg *config.Config) {
 	if c.flagWasSet("server.host", "server-host") {
 		cfg.Server.Host = c.host
+		cfg.Defaults.Host = c.host
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.Host = c.host })
 	}
 	if c.flagWasSet("server.port", "server-port", "p") {
 		cfg.Server.Port = c.port
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.Port = c.port })
 	}
-	if c.maxConns != 0 {
+}
+
+func (c *ServerCommand) applyServerLimitOverrides(cfg *config.Config) {
+	if c.flagWasSet("server.max-connections", "server-max-connections") {
 		cfg.Server.MaxConnections = c.maxConns
+		cfg.Defaults.MaxConnections = c.maxConns
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.MaxConnections = c.maxConns })
 	}
-	if c.maxBodySize != 0 {
+	if c.flagWasSet("server.max-body-size", "server-max-body-size") {
 		cfg.Server.MaxBodySize = c.maxBodySize
+		cfg.Defaults.SetMaxBodySize(c.maxBodySize)
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.SetMaxBodySize(c.maxBodySize) })
 	}
+}
+
+func (c *ServerCommand) applyServerStreamingOverride(cfg *config.Config) {
 	if c.flagWasSet("server.streaming", "server-streaming") {
 		cfg.Server.Streaming = c.streaming
+		cfg.Defaults.SetStreaming(c.streaming)
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.SetStreaming(c.streaming) })
 	}
-	if c.readTimeout != "" {
-		if d, ok := parseDurationFlag("server.read-timeout", c.readTimeout); ok {
-			cfg.Server.ReadTimeout = d
-		}
+}
+
+func (c *ServerCommand) applyServerTimeoutOverrides(cfg *config.Config) {
+	c.applyDurationOverride("server.read-timeout", "server-read-timeout", c.readTimeout, func(d time.Duration) {
+		cfg.Server.ReadTimeout = d
+		cfg.Defaults.ReadTimeout = d
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.ReadTimeout = d })
+	})
+	c.applyDurationOverride("server.write-timeout", "server-write-timeout", c.writeTimeout, func(d time.Duration) {
+		cfg.Server.WriteTimeout = d
+		cfg.Defaults.WriteTimeout = d
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.WriteTimeout = d })
+	})
+	c.applyDurationOverride("server.shutdown-timeout", "server-shutdown-timeout", c.shutdownTimeout, func(d time.Duration) {
+		cfg.Server.ShutdownTimeout = d
+		cfg.Defaults.ShutdownTimeout = d
+		updateServerEntries(cfg, func(entry *config.ServerEntryConfig) { entry.ShutdownTimeout = d })
+	})
+}
+
+func (c *ServerCommand) applyDurationOverride(name, alias, value string, apply func(time.Duration)) {
+	if !c.flagWasSet(name, alias) {
+		return
 	}
-	if c.writeTimeout != "" {
-		if d, ok := parseDurationFlag("server.write-timeout", c.writeTimeout); ok {
-			cfg.Server.WriteTimeout = d
-		}
+	if d, ok := parseDurationFlag(name, value); ok {
+		apply(d)
 	}
-	if c.shutdownTimeout != "" {
-		if d, ok := parseDurationFlag("server.shutdown-timeout", c.shutdownTimeout); ok {
-			cfg.Server.ShutdownTimeout = d
-		}
-	}
+}
+
+func (c *ServerCommand) applyServerTLSOverrides(cfg *config.Config) {
 	if c.flagWasSet("server.tls.enabled", "server-tls-enabled") {
 		cfg.Server.TLS.Enabled = c.tlsEnable
 	}
-	if c.tlsCert != "" {
+	if c.flagWasSet("server.tls.cert", "server-tls-cert") {
 		cfg.Server.TLS.CertFile = c.tlsCert
 	}
-	if c.tlsKey != "" {
+	if c.flagWasSet("server.tls.key", "server-tls-key") {
 		cfg.Server.TLS.KeyFile = c.tlsKey
+	}
+}
+
+func updateServerEntries(cfg *config.Config, update func(*config.ServerEntryConfig)) {
+	for name, entry := range cfg.Servers {
+		update(&entry)
+		cfg.Servers[name] = entry
 	}
 }
 
 func (c *ServerCommand) applyLoggingOverrides(cfg *config.Config) {
 	if c.debugFlag {
 		cfg.Logging.Level = "debug" //nolint:goconst
-	} else if c.logLevel != "" {
+	} else if c.flagWasSet("logging.level", "logging-level", "l") {
 		cfg.Logging.Level = c.logLevel
 	}
-	if c.logFormat != "" {
+	if c.flagWasSet("logging.format", "logging-format") {
 		cfg.Logging.Format = c.logFormat
 	}
-	if c.logOutput != "" {
+	if c.flagWasSet("logging.output", "logging-output") {
 		cfg.Logging.Output = c.logOutput
+	}
+	if c.flagWasSet("logging.max-size", "logging-max-size") {
+		cfg.Logging.MaxSize = c.logMaxSize
+	}
+	if c.flagWasSet("logging.max-backups", "logging-max-backups") {
+		cfg.Logging.MaxBackups = c.logMaxBackups
+	}
+	if c.flagWasSet("logging.max-age", "logging-max-age") {
+		cfg.Logging.MaxAge = c.logMaxAge
 	}
 }
 
@@ -465,52 +520,105 @@ func (c *ServerCommand) applyMetricsAndMockOverrides(cfg *config.Config) {
 	if c.flagWasSet("metrics.enabled", "metrics-enabled") {
 		cfg.Metrics.Enabled = c.metricsEnabled
 	}
-	if c.metricsHost != "" {
+	if c.flagWasSet("metrics.host", "metrics-host") {
 		cfg.Metrics.Host = c.metricsHost
 	}
-	if c.metricsPort != 0 {
+	if c.flagWasSet("metrics.port", "metrics-port") {
 		cfg.Metrics.Port = c.metricsPort
 	}
-	if c.metricsPath != "" {
+	if c.flagWasSet("metrics.path", "metrics-path") {
 		cfg.Metrics.Path = c.metricsPath
 	}
-	if c.mockMode != "" {
+	if c.flagWasSet("mock.mode", "mock-mode") {
 		cfg.Mock.DefaultMode = c.mockMode
 	}
-	if c.scenariosDir != "" {
+	if c.flagWasSet("mock.scenarios-dir", "mock-scenarios-dir") {
 		cfg.Mock.ScenariosDir = c.scenariosDir
+	}
+	if c.flagWasSet("mock.timeout", "mock-timeout") {
+		if d, ok := parseDurationFlag("mock.timeout", c.mockTimeout); ok {
+			cfg.Mock.DefaultTimeout = d
+		}
 	}
 	if c.flagWasSet("chaos.enabled", "chaos-enabled") {
 		cfg.Chaos.Enabled = c.chaosEnabled
 	}
-	if c.chaosErrorRate != 0 {
+	if c.flagWasSet("chaos.error-rate", "chaos-error-rate") {
 		cfg.Chaos.ErrorRate = c.chaosErrorRate
+	}
+	if c.flagWasSet("chaos.timeout-rate", "chaos-timeout-rate") {
+		cfg.Chaos.TimeoutRate = c.chaosTimeoutRate
+	}
+	if c.flagWasSet("chaos.min-latency-ms", "chaos-min-latency-ms") {
+		cfg.Chaos.MinLatencyMs = c.chaosMinLatencyMs
+	}
+	if c.flagWasSet("chaos.max-latency-ms", "chaos-max-latency-ms") {
+		cfg.Chaos.MaxLatencyMs = c.chaosMaxLatencyMs
+	}
+	if c.flagWasSet("chaos.connection-drop-rate", "chaos-connection-drop-rate") {
+		cfg.Chaos.ConnectionDropRate = c.chaosConnectionDropRate
 	}
 }
 
 func (c *ServerCommand) applyInfraOverrides(cfg *config.Config) {
+	c.applyStorageOverrides(cfg)
+	c.applyRateLimitOverrides(cfg)
+	c.applyHealthReplayPluginOverrides(cfg)
+}
+
+func (c *ServerCommand) applyStorageOverrides(cfg *config.Config) {
 	if c.flagWasSet("storage.enabled", "storage-enabled") {
 		cfg.Storage.Enabled = c.storageEnabled
 	}
-	if c.storageDir != "" {
+	if c.flagWasSet("storage.dir", "storage-dir") {
 		cfg.Storage.RequestsDir = c.storageDir
 	}
+	if c.flagWasSet("storage.max-size", "storage-max-size") {
+		cfg.Storage.MaxFileSize = c.storageMaxSize
+	}
+	if c.flagWasSet("storage.rotate", "storage-rotate") {
+		cfg.Storage.RotateAfter = c.storageRotate
+	}
+}
+
+func (c *ServerCommand) applyRateLimitOverrides(cfg *config.Config) {
 	if c.flagWasSet("rate-limit.enabled", "rate-limit-enabled") {
 		cfg.RateLimit.Enabled = c.rateLimitEnabled
 	}
-	if c.rateLimitRPS != 0 {
+	if c.flagWasSet("rate-limit.rps", "rate-limit-rps") {
 		cfg.RateLimit.RequestsPerSecond = c.rateLimitRPS
 	}
+	if c.flagWasSet("rate-limit.burst", "rate-limit-burst") {
+		cfg.RateLimit.Burst = c.rateLimitBurst
+	}
+	if c.flagWasSet("rate-limit.algorithm", "rate-limit-algorithm") {
+		cfg.RateLimit.Algorithm = c.rateLimitAlgo
+	}
+}
+
+func (c *ServerCommand) applyHealthReplayPluginOverrides(cfg *config.Config) {
 	if c.flagWasSet("health.enabled", "health-enabled") {
 		cfg.Health.Enabled = c.healthEnabled
 	}
-	if c.healthPort != 0 {
+	if c.flagWasSet("health.port", "health-port") {
 		cfg.Health.Port = c.healthPort
+	}
+	if c.flagWasSet("health.path", "health-path") {
+		cfg.Health.HealthPath = c.healthPath
+	}
+	if c.flagWasSet("health.ready-path", "health-ready-path") {
+		cfg.Health.ReadyPath = c.readyPath
+	}
+	if c.flagWasSet("replay.enabled", "replay-enabled") {
+		cfg.Replay.Enabled = c.replayEnabled
+	}
+	if c.flagWasSet("replay.speed", "replay-speed") {
+		cfg.Replay.Speed = c.replaySpeed
 	}
 	if c.flagWasSet("plugin.enabled", "plugin-enabled") {
 		cfg.Plugin.Enabled = c.pluginEnabled
 	}
-	if c.pluginDir != "" {
+	if c.flagWasSet("plugin.dir", "plugin-dir") {
 		cfg.Plugin.Dir = c.pluginDir
 	}
 	if c.flagWasSet("pprof.enabled", "pprof-enabled") {

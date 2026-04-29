@@ -3,9 +3,20 @@
 package storage
 
 import (
+	"errors"
+	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/icap-mock/icap-mock/pkg/icap"
+)
+
+var requestIDSequence atomic.Uint64
+
+const (
+	bodyOmittedTooLarge  = "body_size_limit_exceeded"
+	bodyOmittedReadError = "body_read_error"
+	unlimitedBodyLimit   = -1
 )
 
 // Storage defines the full interface for persisting ICAP requests.
@@ -89,18 +100,32 @@ type StoredRequest struct {
 
 // HTTPMessageRecord represents a serialized HTTP message.
 type HTTPMessageRecord struct {
-	Method     string              `json:"method,omitempty"`
-	URI        string              `json:"uri,omitempty"`
-	Status     string              `json:"status,omitempty"`
-	StatusText string              `json:"status_text,omitempty"`
-	Proto      string              `json:"proto"`
-	Headers    map[string][]string `json:"headers,omitempty"`
-	Body       string              `json:"body,omitempty"` // Base64 encoded
+	Method            string              `json:"method,omitempty"`
+	URI               string              `json:"uri,omitempty"`
+	Status            string              `json:"status,omitempty"`
+	StatusText        string              `json:"status_text,omitempty"`
+	Proto             string              `json:"proto"`
+	Headers           map[string][]string `json:"headers,omitempty"`
+	Body              string              `json:"body,omitempty"` // Base64 encoded
+	BodyOmittedReason string              `json:"body_omitted_reason,omitempty"`
+	BodyTruncated     bool                `json:"body_truncated,omitempty"`
+	BodyLimit         int64               `json:"body_limit,omitempty"`
 }
 
 // FromICAPRequest converts an icap.Request to a StoredRequest.
 // This creates a snapshot suitable for JSON serialization.
 func FromICAPRequest(req *icap.Request, responseStatus int, processingTime time.Duration) *StoredRequest {
+	return FromICAPRequestWithBodyLimit(req, responseStatus, processingTime, 0)
+}
+
+// FromICAPRequestWithBodyLimit converts an icap.Request to a StoredRequest,
+// limiting lazy body reads to maxBodySize+1 bytes when maxBodySize is positive.
+func FromICAPRequestWithBodyLimit(
+	req *icap.Request,
+	responseStatus int,
+	processingTime time.Duration,
+	maxBodySize int64,
+) *StoredRequest {
 	sr := &StoredRequest{
 		ID:               GenerateRequestID(time.Now()),
 		Timestamp:        time.Now(),
@@ -120,43 +145,69 @@ func FromICAPRequest(req *icap.Request, responseStatus int, processingTime time.
 
 	// Copy HTTP request if present
 	if req.HTTPRequest != nil {
-		sr.HTTPRequest = &HTTPMessageRecord{
-			Method:  req.HTTPRequest.Method,
-			URI:     req.HTTPRequest.URI,
-			Proto:   req.HTTPRequest.Proto,
-			Headers: make(map[string][]string),
-		}
-		for k, v := range req.HTTPRequest.Header {
-			sr.HTTPRequest.Headers[k] = append([]string(nil), v...)
-		}
-		// Lazy load body for storage
-		if body, err := req.HTTPRequest.GetBody(); err == nil && len(body) > 0 {
-			sr.HTTPRequest.Body = string(body)
-		}
+		sr.HTTPRequest = fromHTTPRequest(req.HTTPRequest, maxBodySize)
 	}
 
 	// Copy HTTP response if present
 	if req.HTTPResponse != nil {
-		sr.HTTPResponse = &HTTPMessageRecord{
-			Status:     req.HTTPResponse.Status,
-			StatusText: req.HTTPResponse.StatusText,
-			Proto:      req.HTTPResponse.Proto,
-			Headers:    make(map[string][]string),
-		}
-		for k, v := range req.HTTPResponse.Header {
-			sr.HTTPResponse.Headers[k] = append([]string(nil), v...)
-		}
-		// Lazy load body for storage
-		if body, err := req.HTTPResponse.GetBody(); err == nil && len(body) > 0 {
-			sr.HTTPResponse.Body = string(body)
-		}
+		sr.HTTPResponse = fromHTTPResponse(req.HTTPResponse, maxBodySize)
 	}
 
 	return sr
 }
 
-// GenerateRequestID generates a unique request ID based on the timestamp.
-// Format: "req-YYYYMMDD-NNN" where NNN is a sequence number.
+func fromHTTPRequest(msg *icap.HTTPMessage, maxBodySize int64) *HTTPMessageRecord {
+	record := &HTTPMessageRecord{Method: msg.Method, URI: msg.URI, Proto: msg.Proto, Headers: copyHeaders(msg.Header)}
+	copyHTTPBody(record, msg, maxBodySize)
+	return record
+}
+
+func fromHTTPResponse(msg *icap.HTTPMessage, maxBodySize int64) *HTTPMessageRecord {
+	record := &HTTPMessageRecord{Status: msg.Status, StatusText: msg.StatusText, Proto: msg.Proto, Headers: copyHeaders(msg.Header)}
+	copyHTTPBody(record, msg, maxBodySize)
+	return record
+}
+
+func copyHeaders(headers icap.Header) map[string][]string {
+	copied := make(map[string][]string)
+	for k, v := range headers {
+		copied[k] = append([]string(nil), v...)
+	}
+	return copied
+}
+
+func copyHTTPBody(record *HTTPMessageRecord, msg *icap.HTTPMessage, maxBodySize int64) {
+	body, err := getHTTPBodyForStorage(msg, maxBodySize)
+	if err != nil {
+		markBodyOmitted(record, err, maxBodySize)
+		return
+	}
+	if len(body) > 0 {
+		record.Body = string(body)
+	}
+}
+
+func getHTTPBodyForStorage(msg *icap.HTTPMessage, maxBodySize int64) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return msg.GetBodyLimited(unlimitedBodyLimit)
+	}
+	return msg.GetBodyLimited(maxBodySize)
+}
+
+func markBodyOmitted(record *HTTPMessageRecord, err error, maxBodySize int64) {
+	if maxBodySize > 0 {
+		record.BodyLimit = maxBodySize
+	}
+	if errors.Is(err, icap.ErrBodyTooLarge) {
+		record.BodyTruncated = true
+		record.BodyOmittedReason = bodyOmittedTooLarge
+		return
+	}
+	record.BodyOmittedReason = bodyOmittedReadError
+}
+
+// GenerateRequestID generates a unique request ID based on timestamp plus a process-local sequence.
 func GenerateRequestID(t time.Time) string {
-	return "req-" + t.Format("20060102-150405.000")
+	seq := requestIDSequence.Add(1)
+	return fmt.Sprintf("req-%s-%06d", t.Format("20060102-150405.000"), seq)
 }

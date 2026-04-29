@@ -170,6 +170,7 @@ func cloneHTTPMessage(m *HTTPMessage) *HTTPMessage {
 		Status:     m.Status,
 		StatusText: m.StatusText,
 		Proto:      m.Proto,
+		BodyStream: m.BodyStream.Clone(),
 	}
 
 	if m.Header != nil {
@@ -186,6 +187,10 @@ func cloneHTTPMessage(m *HTTPMessage) *HTTPMessage {
 
 // WriteTo writes the response to an io.Writer.
 func (r *Response) WriteTo(w io.Writer) (int64, error) {
+	if r.hasBodyStream() {
+		return r.writeStreamingTo(w)
+	}
+
 	buf := pool.ResponseBufferPool.Get()
 	defer pool.ResponseBufferPool.Put(buf)
 
@@ -245,29 +250,7 @@ func (r *Response) writeToBuffer(buf *bytes.Buffer) {
 // inline; the body (if any) is serialized in HTTP chunked transfer encoding,
 // which is what ICAP mandates for req-body / res-body sections per RFC 3507.
 func (r *Response) writeHTTPMessage(buf *bytes.Buffer, m *HTTPMessage, isRequest bool) {
-	if isRequest {
-		// Write request line
-		buf.WriteString(m.Method)
-		buf.WriteByte(' ')
-		buf.WriteString(m.URI)
-		buf.WriteByte(' ')
-		buf.WriteString(m.Proto)
-		buf.WriteString("\r\n")
-	} else {
-		// Write status line
-		buf.WriteString(m.Proto)
-		buf.WriteByte(' ')
-		buf.WriteString(m.Status)
-		buf.WriteByte(' ')
-		buf.WriteString(m.StatusText)
-		buf.WriteString("\r\n")
-	}
-
-	// Write headers
-	if m.Header != nil {
-		m.Header.WriteToBuffer(buf)
-	}
-	buf.WriteString("\r\n")
+	r.writeHTTPMessageHead(buf, m, isRequest)
 
 	// Write body in chunked encoding when present. BuildEncapsulatedHeader
 	// already advertises req-body / res-body at the offset right after this
@@ -275,6 +258,28 @@ func (r *Response) writeHTTPMessage(buf *bytes.Buffer, m *HTTPMessage, isRequest
 	if len(m.Body) > 0 {
 		_ = WriteChunkedBody(buf, m.Body)
 	}
+}
+
+func (r *Response) writeHTTPMessageHead(buf *bytes.Buffer, m *HTTPMessage, isRequest bool) {
+	if isRequest {
+		buf.WriteString(m.Method)
+		buf.WriteByte(' ')
+		buf.WriteString(m.URI)
+		buf.WriteByte(' ')
+		buf.WriteString(m.Proto)
+		buf.WriteString("\r\n")
+	} else {
+		buf.WriteString(m.Proto)
+		buf.WriteByte(' ')
+		buf.WriteString(m.Status)
+		buf.WriteByte(' ')
+		buf.WriteString(m.StatusText)
+		buf.WriteString("\r\n")
+	}
+	if m.Header != nil {
+		m.Header.WriteToBuffer(buf)
+	}
+	buf.WriteString("\r\n")
 }
 
 // BuildEncapsulatedHeader builds the Encapsulated header value based on content.
@@ -286,7 +291,7 @@ func (r *Response) BuildEncapsulatedHeader() string {
 		parts = append(parts, fmt.Sprintf("req-hdr=%d", offset))
 		// Calculate offset for body
 		offset += r.calculateHTTPMessageSize(r.HTTPRequest, true)
-		if len(r.HTTPRequest.Body) > 0 {
+		if hasHTTPMessageBody(r.HTTPRequest) {
 			parts = append(parts, fmt.Sprintf("req-body=%d", offset))
 		}
 	}
@@ -294,7 +299,7 @@ func (r *Response) BuildEncapsulatedHeader() string {
 	if r.HTTPResponse != nil {
 		parts = append(parts, fmt.Sprintf("res-hdr=%d", offset))
 		offset += r.calculateHTTPMessageSize(r.HTTPResponse, false)
-		if len(r.HTTPResponse.Body) > 0 {
+		if hasHTTPMessageBody(r.HTTPResponse) {
 			parts = append(parts, fmt.Sprintf("res-body=%d", offset))
 		}
 	}
@@ -331,6 +336,66 @@ func (r *Response) calculateHTTPMessageSize(m *HTTPMessage, isRequest bool) int 
 	size += 2
 
 	return size
+}
+
+func (r *Response) hasBodyStream() bool {
+	return (r.HTTPRequest != nil && r.HTTPRequest.BodyStream != nil) ||
+		(r.HTTPResponse != nil && r.HTTPResponse.BodyStream != nil)
+}
+
+func hasHTTPMessageBody(m *HTTPMessage) bool {
+	return len(m.Body) > 0 || m.BodyStream != nil
+}
+
+func (r *Response) writeStreamingTo(w io.Writer) (int64, error) {
+	cw := &countingWriter{w: w}
+	buf := pool.ResponseBufferPool.Get()
+	defer pool.ResponseBufferPool.Put(buf)
+
+	r.writeEnvelopeToBuffer(buf)
+	if err := r.writeStreamingMessage(cw, buf, r.HTTPRequest, true); err != nil {
+		return cw.n, err
+	}
+	if err := r.writeStreamingMessage(cw, buf, r.HTTPResponse, false); err != nil {
+		return cw.n, err
+	}
+	_, err := cw.Write(buf.Bytes())
+	return cw.n, err
+}
+
+func (r *Response) writeEnvelopeToBuffer(buf *bytes.Buffer) {
+	proto := r.Proto
+	if proto == "" {
+		proto = Version
+	}
+	buf.WriteString(proto + " " + strconv.Itoa(r.StatusCode) + " ")
+	buf.WriteString(StatusText(r.StatusCode) + "\r\n")
+	if r.Header != nil {
+		r.Header.WriteToBuffer(buf)
+	}
+	if encap := r.BuildEncapsulatedHeader(); encap != "" {
+		buf.WriteString("Encapsulated: " + encap + "\r\n")
+	}
+	buf.WriteString("\r\n")
+}
+
+func (r *Response) writeStreamingMessage(cw *countingWriter, buf *bytes.Buffer, m *HTTPMessage, isReq bool) error {
+	if m == nil {
+		return nil
+	}
+	r.writeHTTPMessageHead(buf, m, isReq)
+	if m.BodyStream == nil {
+		if len(m.Body) > 0 {
+			return WriteChunkedBody(buf, m.Body)
+		}
+		return nil
+	}
+	if _, err := cw.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	buf.Reset()
+	_, err := m.BodyStream.WriteTo(cw)
+	return err
 }
 
 // WriteChunkedBody writes the body using chunked transfer encoding.

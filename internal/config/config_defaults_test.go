@@ -73,6 +73,20 @@ func TestConfigDefaults_MaxBodySize_Megabytes(t *testing.T) {
 	}
 }
 
+func TestConfigDefaults_ClientIdentityHeadersNotTrusted(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	cfg.SetDefaults()
+
+	if cfg.Server.TrustClientIPHeader {
+		t.Fatal("Server.TrustClientIPHeader should be false by default")
+	}
+	if cfg.Preview.TrustClientIDHeader {
+		t.Fatal("Preview.TrustClientIDHeader should be false by default")
+	}
+}
+
 // TestConfigDefaults_PprofConfig_Disabled verifies PprofConfig defaults.
 // WAVE-002: Security - pprof disabled by default.
 func TestConfigDefaults_PprofConfig_Disabled(t *testing.T) {

@@ -51,6 +51,36 @@ func TestPreviewRateLimiter_BasicRateLimiting(t *testing.T) {
 	}
 }
 
+func TestPreviewRateLimiter_AllExpiredRequestsAllowed(t *testing.T) {
+	config := PreviewRateLimiterConfig{Enabled: true, MaxRequests: 2, WindowSeconds: 1, MaxClients: 100}
+	limiter := NewPreviewRateLimiter(config, nil, nil)
+	defer limiter.Shutdown()
+	clientID := "127.0.0.8"
+	limiter.clients[clientID] = &ClientTracker{
+		clientID: clientID,
+		requests: []time.Time{
+			time.Now().Add(-3 * time.Second),
+			time.Now().Add(-2 * time.Second),
+		},
+		lastAccess: time.Now().Add(-2 * time.Second),
+	}
+	req := &icap.Request{Preview: 100, ClientIP: clientID, Header: icap.Header{}}
+
+	exceeded, remaining, resetIn := limiter.CheckLimit(req)
+	if exceeded {
+		t.Fatal("request after all timestamps expired should be allowed")
+	}
+	if remaining != config.MaxRequests {
+		t.Fatalf("remaining = %d, want %d", remaining, config.MaxRequests)
+	}
+	if resetIn != 0 {
+		t.Fatalf("resetIn = %v, want 0", resetIn)
+	}
+	if got := len(limiter.clients[clientID].requests); got != 1 {
+		t.Fatalf("tracked requests = %d, want only current request", got)
+	}
+}
+
 // TestPreviewRateLimiter_SlidingWindow tests the sliding window behavior.
 // This test is skipped due to timing/synchronization issues in test environment.
 // The sliding window logic is implemented correctly but timing-sensitive tests
@@ -110,10 +140,11 @@ func TestPreviewRateLimiter_SlidingWindow(t *testing.T) {
 // TestPreviewRateLimiter_MultipleClients tests rate limiting for multiple clients.
 func TestPreviewRateLimiter_MultipleClients(t *testing.T) {
 	config := PreviewRateLimiterConfig{
-		Enabled:       true,
-		MaxRequests:   2,
-		WindowSeconds: 10,
-		MaxClients:    100,
+		Enabled:             true,
+		MaxRequests:         2,
+		WindowSeconds:       10,
+		MaxClients:          100,
+		TrustClientIDHeader: true,
 	}
 	limiter := NewPreviewRateLimiter(config, nil, nil)
 
@@ -156,6 +187,28 @@ func TestPreviewRateLimiter_MultipleClients(t *testing.T) {
 	if !exceeded {
 		t.Error("Client 2 should be rate limited")
 	}
+}
+
+func TestPreviewRateLimiter_IgnoresClientIDHeaderByDefault(t *testing.T) {
+	config := PreviewRateLimiterConfig{Enabled: true, MaxRequests: 2, WindowSeconds: 10, MaxClients: 100}
+	limiter := NewPreviewRateLimiter(config, nil, nil)
+	req1 := previewRequestWithClientID("client-123")
+	req2 := previewRequestWithClientID("client-456")
+
+	for i := 0; i < 2; i++ {
+		if exceeded, _, _ := limiter.CheckLimit(req1); exceeded {
+			t.Fatalf("request %d should be allowed", i+1)
+		}
+	}
+	if exceeded, _, _ := limiter.CheckLimit(req2); !exceeded {
+		t.Fatal("spoofed X-Client-ID should not bypass ClientIP rate limit")
+	}
+}
+
+func previewRequestWithClientID(clientID string) *icap.Request {
+	req := &icap.Request{Preview: 100, ClientIP: "127.0.0.5", Header: icap.Header{}}
+	req.Header.Set("X-Client-ID", clientID)
+	return req
 }
 
 // TestPreviewRateLimiter_Disabled tests behavior when rate limiting is disabled.

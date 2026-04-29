@@ -109,6 +109,7 @@ type StorageMiddlewareConfig struct {
 	CircuitBreaker CircuitBreakerConfig
 	Workers        int
 	QueueSize      int
+	MaxBodySize    int64
 }
 
 // DefaultStorageMiddlewareConfig returns the default configuration.
@@ -133,6 +134,7 @@ type StorageMiddleware struct {
 	jobsMu         sync.Mutex // protects send-on-jobs and close(jobs) from racing
 	rejectedCount  int64
 	maxQueueSize   int
+	maxBodySize    int64
 	stopped        bool // protected by jobsMu
 }
 
@@ -165,6 +167,7 @@ func StorageMiddlewareWithPool(store storage.Storage, logger *slog.Logger, cfg S
 		circuitBreaker: cb,
 		metrics:        cfg.Metrics,
 		maxQueueSize:   cfg.QueueSize,
+		maxBodySize:    cfg.MaxBodySize,
 	}
 
 	for i := 0; i < cfg.Workers; i++ {
@@ -177,6 +180,11 @@ func StorageMiddlewareWithPool(store storage.Storage, logger *slog.Logger, cfg S
 
 // Wrap returns a handler.Middleware function that wraps handlers with storage functionality.
 func (m *StorageMiddleware) Wrap(next handler.Handler) handler.Handler {
+	return m.WrapWithBodyLimit(next, m.maxBodySize)
+}
+
+// WrapWithBodyLimit wraps a handler and snapshots bodies with the supplied limit.
+func (m *StorageMiddleware) WrapWithBodyLimit(next handler.Handler, maxBodySize int64) handler.Handler {
 	return handler.WrapHandler(handler.Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 		start := time.Now()
 		resp, err := next.Handle(ctx, req)
@@ -186,7 +194,7 @@ func (m *StorageMiddleware) Wrap(next handler.Handler) handler.Handler {
 			status = resp.StatusCode
 		}
 		processingTime := time.Since(start)
-		sr := storage.FromICAPRequest(req, status, processingTime)
+		sr := storage.FromICAPRequestWithBodyLimit(req, status, processingTime, maxBodySize)
 
 		m.trySendJob(ctx, req, sr)
 

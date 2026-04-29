@@ -5,6 +5,7 @@ package processor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -51,13 +52,14 @@ func DefaultScriptSecurityConfig() ScriptSecurityConfig {
 //
 // ScriptProcessor is thread-safe and can be used concurrently.
 type ScriptProcessor struct {
-	registry  storage.ScenarioRegistry
-	logger    *logger.Logger
-	pool      *ScriptWorkerPool
-	validator *StaticScriptValidator
-	security  ScriptSecurityConfig
-	timeout   time.Duration
-	mu        sync.RWMutex
+	registry    storage.ScenarioRegistry
+	logger      *logger.Logger
+	pool        *ScriptWorkerPool
+	validator   *StaticScriptValidator
+	security    ScriptSecurityConfig
+	timeout     time.Duration
+	maxBodySize int64
+	mu          sync.RWMutex
 }
 
 // NewScriptProcessor creates a new ScriptProcessor with the given registry, logger, and timeout.
@@ -71,11 +73,21 @@ type ScriptProcessor struct {
 // It creates a worker pool with default configuration to prevent goroutine explosion.
 // Security defaults are applied (timeout, memory limit, function whitelist/blacklist).
 func NewScriptProcessor(registry storage.ScenarioRegistry, log *logger.Logger, timeout time.Duration) *ScriptProcessor {
+	return NewScriptProcessorWithMaxBodySize(registry, log, timeout, 0)
+}
+
+// NewScriptProcessorWithMaxBodySize creates a script processor with a body read limit.
+func NewScriptProcessorWithMaxBodySize(
+	registry storage.ScenarioRegistry,
+	log *logger.Logger,
+	timeout time.Duration,
+	maxBodySize int64,
+) *ScriptProcessor {
 	secConfig := DefaultScriptSecurityConfig()
 	if timeout != 0 {
 		secConfig.Timeout = timeout
 	}
-	return NewScriptProcessorWithSecurity(registry, log, secConfig)
+	return NewScriptProcessorWithSecurityAndMaxBodySize(registry, log, secConfig, maxBodySize)
 }
 
 // NewScriptProcessorWithSecurity creates a new ScriptProcessor with custom security settings.
@@ -97,6 +109,16 @@ func NewScriptProcessor(registry storage.ScenarioRegistry, log *logger.Logger, t
 //	sec.AllowedFunctions = []string{"Math.*", "JSON.*"}
 //	proc := NewScriptProcessorWithSecurity(registry, log, sec)
 func NewScriptProcessorWithSecurity(registry storage.ScenarioRegistry, log *logger.Logger, security ScriptSecurityConfig) *ScriptProcessor {
+	return NewScriptProcessorWithSecurityAndMaxBodySize(registry, log, security, 0)
+}
+
+// NewScriptProcessorWithSecurityAndMaxBodySize creates a script processor with security and body limits.
+func NewScriptProcessorWithSecurityAndMaxBodySize(
+	registry storage.ScenarioRegistry,
+	log *logger.Logger,
+	security ScriptSecurityConfig,
+	maxBodySize int64,
+) *ScriptProcessor {
 	// Apply defaults for zero values
 	if security.Timeout == 0 {
 		security.Timeout = 5 * time.Second
@@ -112,11 +134,12 @@ func NewScriptProcessorWithSecurity(registry storage.ScenarioRegistry, log *logg
 	}
 
 	processor := &ScriptProcessor{
-		registry:  registry,
-		logger:    log,
-		timeout:   security.Timeout,
-		security:  security,
-		validator: NewStaticScriptValidator(security.BlockedFunctions, log),
+		registry:    registry,
+		logger:      log,
+		timeout:     security.Timeout,
+		security:    security,
+		maxBodySize: maxBodySize,
+		validator:   NewStaticScriptValidator(security.BlockedFunctions, log),
 	}
 
 	// Create worker pool with default configuration
@@ -163,6 +186,10 @@ func (p *ScriptProcessor) Process(ctx context.Context, req *icap.Request) (*icap
 	// Execute script via worker pool
 	resp, err := p.pool.Execute(ctx, req, scenario.Response.Script)
 	if err != nil {
+		var icapErr *apperrors.Error
+		if errors.As(err, &icapErr) {
+			return nil, icapErr
+		}
 		return nil, apperrors.NewICAPError(
 			apperrors.ErrInternalServerError.Code,
 			fmt.Sprintf("script execution failed: %v", err),
@@ -175,7 +202,7 @@ func (p *ScriptProcessor) Process(ctx context.Context, req *icap.Request) (*icap
 }
 
 // executeScript executes a JavaScript script and returns the ICAP response.
-func (p *ScriptProcessor) executeScript(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) { //nolint:gocyclo // script execution pipeline: validate, sandbox, setup, monitor, execute, check limits
+func (p *ScriptProcessor) executeScript(ctx context.Context, req *icap.Request, script string) (*icap.Response, error) { //nolint:gocyclo // script execution pipeline: validate, isolate, setup, monitor, execute, check limits
 	// Step 1: Static validation BEFORE execution (defense in depth)
 	if err := p.validateScript(script); err != nil {
 		if p.logger != nil {
@@ -192,15 +219,23 @@ func (p *ScriptProcessor) executeScript(ctx context.Context, req *icap.Request, 
 		)
 	}
 
-	// Step 2: Create sandboxed VM with security restrictions
-	vm, err := p.createSandboxedVM()
+	// Step 2: Create isolated VM with security restrictions
+	vm, err := p.createIsolatedVM()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create sandboxed VM: %w", err)
+		return nil, fmt.Errorf("failed to create isolated VM: %w", err)
 	}
 
 	// Step 3: Setup script context with request data
 	err = p.setupScriptContext(vm, req)
 	if err != nil {
+		if errors.Is(err, icap.ErrBodyTooLarge) {
+			return nil, apperrors.NewICAPError(
+				apperrors.ErrBodyTooLarge.Code,
+				"script body too large",
+				apperrors.ErrBodyTooLarge.ICAPStatus,
+				err,
+			)
+		}
 		return nil, fmt.Errorf("failed to setup script context: %w", err)
 	}
 
@@ -317,10 +352,10 @@ func (p *ScriptProcessor) executeScript(ctx context.Context, req *icap.Request, 
 	}
 }
 
-// createSandboxedVM creates a new JavaScript VM with security restrictions.
+// createIsolatedVM creates a new JavaScript VM with security restrictions.
 // It blocks dangerous functions and enforces function whitelist/blacklist.
 // Uses safe error returns instead of panic to prevent try-catch bypass.
-func (p *ScriptProcessor) createSandboxedVM() (*goja.Runtime, error) {
+func (p *ScriptProcessor) createIsolatedVM() (*goja.Runtime, error) {
 	vm := goja.New()
 
 	// Block dangerous functions using SAFE method (returns error instead of panic)
@@ -390,13 +425,11 @@ func (p *ScriptProcessor) setupScriptContext(vm *goja.Runtime, req *icap.Request
 		}
 	}
 
-	var bodyStr string
-	if req.HTTPRequest != nil {
-		body, err := req.HTTPRequest.GetBody()
-		if err == nil {
-			bodyStr = string(body)
-		}
+	body, err := p.scriptBody(req)
+	if err != nil {
+		return fmt.Errorf("reading script body: %w", err)
 	}
+	bodyStr := string(body)
 
 	reqData := map[string]interface{}{
 		"method": req.Method,
@@ -436,6 +469,30 @@ func (p *ScriptProcessor) setupScriptContext(vm *goja.Runtime, req *icap.Request
 	}
 
 	return nil
+}
+
+func (p *ScriptProcessor) scriptBody(req *icap.Request) ([]byte, error) {
+	msg := scriptBodyMessage(req)
+	if msg == nil {
+		return nil, nil
+	}
+	p.mu.RLock()
+	limit := p.maxBodySize
+	p.mu.RUnlock()
+	if limit <= 0 {
+		return msg.GetBody()
+	}
+	return msg.GetBodyLimited(limit)
+}
+
+func scriptBodyMessage(req *icap.Request) *icap.HTTPMessage {
+	if req.Method == icap.MethodRESPMOD && req.HTTPResponse != nil {
+		return req.HTTPResponse
+	}
+	if req.HTTPRequest != nil {
+		return req.HTTPRequest
+	}
+	return req.HTTPResponse
 }
 
 // parseScriptResult parses the script result and builds an ICAP response.

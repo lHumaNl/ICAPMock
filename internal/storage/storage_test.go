@@ -3,13 +3,17 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/icap-mock/icap-mock/internal/config"
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 // TestGenerateRequestID_Basic tests request ID generation.
@@ -21,9 +25,99 @@ func TestGenerateRequestID_Basic(t *testing.T) {
 		t.Error("GenerateRequestID() returned empty string")
 	}
 
-	expected := "req-20240115-103000.123"
-	if id != expected {
-		t.Errorf("GenerateRequestID() = %v, want %v", id, expected)
+	expectedPrefix := "req-20240115-103000.123-"
+	if !strings.HasPrefix(id, expectedPrefix) {
+		t.Errorf("GenerateRequestID() = %v, want prefix %v", id, expectedPrefix)
+	}
+}
+
+func TestGenerateRequestID_UniqueWithinSameMillisecond(t *testing.T) {
+	t1 := time.Date(2024, 1, 15, 10, 30, 0, 123456789, time.UTC)
+	seen := make(map[string]bool)
+	for i := 0; i < 1000; i++ {
+		id := GenerateRequestID(t1)
+		if seen[id] {
+			t.Fatalf("GenerateRequestID() duplicate = %s", id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestFromICAPRequestWithBodyLimit_PreservesNormalBody(t *testing.T) {
+	req := requestWithLazyHTTPBody(bytes.NewReader([]byte("normal")))
+
+	sr := FromICAPRequestWithBodyLimit(req, 204, time.Millisecond, 16)
+
+	if got := sr.HTTPRequest.Body; got != "normal" {
+		t.Fatalf("Body = %q, want normal", got)
+	}
+	if sr.HTTPRequest.BodyTruncated {
+		t.Fatal("BodyTruncated = true, want false")
+	}
+}
+
+func TestFromICAPRequestWithBodyLimit_ReadsAtMostLimitPlusOne(t *testing.T) {
+	const limit int64 = 8
+	reader := &storageCountingReader{remaining: limit + 64}
+	req := requestWithLazyHTTPBody(reader)
+
+	_ = FromICAPRequestWithBodyLimit(req, 204, time.Millisecond, limit)
+
+	if reader.read > limit+1 {
+		t.Fatalf("read %d bytes, want at most %d", reader.read, limit+1)
+	}
+}
+
+func TestFromICAPRequestWithBodyLimit_OmitsOversizedBody(t *testing.T) {
+	const limit int64 = 8
+	req := requestWithLazyHTTPBody(bytes.NewReader([]byte("0123456789")))
+
+	sr := FromICAPRequestWithBodyLimit(req, 204, time.Millisecond, limit)
+
+	if sr.HTTPRequest.Body != "" {
+		t.Fatalf("Body = %q, want omitted", sr.HTTPRequest.Body)
+	}
+	if !sr.HTTPRequest.BodyTruncated {
+		t.Fatal("BodyTruncated = false, want true")
+	}
+	if sr.HTTPRequest.BodyLimit != limit {
+		t.Fatalf("BodyLimit = %d, want %d", sr.HTTPRequest.BodyLimit, limit)
+	}
+	if sr.HTTPRequest.BodyOmittedReason != bodyOmittedTooLarge {
+		t.Fatalf("BodyOmittedReason = %q, want %q", sr.HTTPRequest.BodyOmittedReason, bodyOmittedTooLarge)
+	}
+}
+
+type storageCountingReader struct {
+	remaining int64
+	read      int64
+}
+
+func (r *storageCountingReader) Read(p []byte) (int, error) {
+	if r.remaining == 0 {
+		return 0, io.EOF
+	}
+	n := min(int64(len(p)), r.remaining)
+	for i := int64(0); i < n; i++ {
+		p[i] = 'x'
+	}
+	r.remaining -= n
+	r.read += n
+	return int(n), nil
+}
+
+func requestWithLazyHTTPBody(body io.Reader) *icap.Request {
+	return &icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://localhost/reqmod",
+		Header: icap.NewHeader(),
+		HTTPRequest: &icap.HTTPMessage{
+			Method:     "POST",
+			URI:        "http://example.test/upload",
+			Proto:      "HTTP/1.1",
+			Header:     icap.NewHeader(),
+			BodyReader: body,
+		},
 	}
 }
 
@@ -365,6 +459,79 @@ func TestRequestWriter_Flush(t *testing.T) {
 	if len(files) == 0 {
 		t.Error("No files found after flush")
 	}
+}
+
+func TestRequestWriter_FlushWaitsForQueuedWrites(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := newTestFileStorage(t, tmpDir)
+	defer store.Close()
+
+	ctx := context.Background()
+	const requestCount = 200
+	for i := 0; i < requestCount; i++ {
+		if err := store.SaveRequest(ctx, testStoredRequest("REQMOD")); err != nil {
+			t.Fatalf("SaveRequest() error = %v", err)
+		}
+	}
+	if err := store.Flush(ctx); err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+	requests, err := store.ListRequests(ctx, RequestFilter{})
+	if err != nil {
+		t.Fatalf("ListRequests() error = %v", err)
+	}
+	if len(requests) != requestCount {
+		t.Fatalf("ListRequests() = %d, want %d", len(requests), requestCount)
+	}
+}
+
+func TestRequestWriter_DestructiveOpsDrainQueuedWrites(t *testing.T) {
+	t.Run("Clear", func(t *testing.T) {
+		store := newTestFileStorage(t, t.TempDir())
+		defer store.Close()
+		queueStoredRequests(t, store, 50, "REQMOD")
+		cleared, err := store.Clear(context.Background())
+		if err != nil {
+			t.Fatalf("Clear() error = %v", err)
+		}
+		if cleared != 50 {
+			t.Fatalf("Clear() = %d, want 50", cleared)
+		}
+	})
+	t.Run("DeleteRequests", func(t *testing.T) {
+		store := newTestFileStorage(t, t.TempDir())
+		defer store.Close()
+		queueStoredRequests(t, store, 50, "REQMOD")
+		deleted, err := store.DeleteRequests(context.Background(), RequestFilter{Method: "REQMOD"})
+		if err != nil {
+			t.Fatalf("DeleteRequests() error = %v", err)
+		}
+		if deleted != 50 {
+			t.Fatalf("DeleteRequests() = %d, want 50", deleted)
+		}
+	})
+}
+
+func newTestFileStorage(t *testing.T, dir string) *FileStorage {
+	t.Helper()
+	store, err := NewFileStorage(config.StorageConfig{Enabled: true, RequestsDir: dir, RotateAfter: 1000}, nil)
+	if err != nil {
+		t.Fatalf("NewFileStorage() error = %v", err)
+	}
+	return store
+}
+
+func queueStoredRequests(t *testing.T, store *FileStorage, count int, method string) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		if err := store.SaveRequest(context.Background(), testStoredRequest(method)); err != nil {
+			t.Fatalf("SaveRequest() error = %v", err)
+		}
+	}
+}
+
+func testStoredRequest(method string) *StoredRequest {
+	return &StoredRequest{ID: GenerateRequestID(time.Now()), Timestamp: time.Now(), Method: method, URI: "icap://localhost/test", ResponseStatus: 204}
 }
 
 // TestDisabledStorage_ISPCompliance verifies ISP compliance for disabled storage.

@@ -85,6 +85,7 @@ func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 		l.recordMetrics(false, time.Since(startTime))
 		return nil, fmt.Errorf("failed to load from environment: %w", err)
 	}
+	normalizeLoadedConfig(cfg)
 
 	// Validate servers map
 	for name, entry := range cfg.Servers {
@@ -137,7 +138,7 @@ func applyServerDefaults(defaults *DefaultsConfig) {
 	if defaults.MaxConnections == 0 {
 		defaults.MaxConnections = 15000
 	}
-	if defaults.MaxBodySize == 0 {
+	if defaults.MaxBodySize == 0 && !defaults.maxBodySizeSet {
 		defaults.MaxBodySize = 10 * 1024 * 1024
 	}
 	if defaults.IdleTimeout == 0 {
@@ -193,9 +194,16 @@ func (l *Loader) LoadFromEnv(cfg *Config) error {
 	l.loadStorageEnv(cfg)
 	l.loadRateLimitEnv(cfg)
 	l.loadHealthEnv(cfg)
+	l.loadManagementEnv(cfg)
 	l.loadReplayEnv(cfg)
+	l.loadShardingEnv(cfg)
+	l.loadPreviewEnv(cfg)
 	l.loadPprofEnv(cfg)
 	return nil
+}
+
+func normalizeLoadedConfig(cfg *Config) {
+	cfg.Mock.Matching.BodyPatternLimitAction = strings.ToLower(strings.TrimSpace(cfg.Mock.Matching.BodyPatternLimitAction))
 }
 
 // envStr reads an environment variable and sets dst if non-empty.
@@ -203,6 +211,23 @@ func (l *Loader) envStr(key string, dst *string) {
 	if v := os.Getenv(l.envPrefix + key); v != "" {
 		*dst = v
 	}
+}
+
+func (l *Loader) envStrSlice(key string, dst *[]string) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		*dst = splitEnvList(v)
+	}
+}
+
+func splitEnvList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // envInt reads an environment variable, parses as int, sets dst if valid.
@@ -221,6 +246,16 @@ func (l *Loader) envInt64ByteSize(key string, dst *int64) {
 	if v := os.Getenv(l.envPrefix + key); v != "" {
 		if i, err := ParseByteSize(v); err == nil {
 			*dst = i
+		} else {
+			warnEnvParse(l.envPrefix+key, v, err)
+		}
+	}
+}
+
+func (l *Loader) envBodySizeLimit(key string, dst *BodySizeLimit) {
+	if v := os.Getenv(l.envPrefix + key); v != "" {
+		if limit, err := ParseBodySizeLimit(v); err == nil {
+			*dst = limit
 		} else {
 			warnEnvParse(l.envPrefix+key, v, err)
 		}
@@ -268,6 +303,8 @@ func (l *Loader) loadServerEnv(cfg *Config) {
 	l.envInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
 	l.envInt64ByteSize("SERVER_MAX_BODY_SIZE", &cfg.Server.MaxBodySize)
 	l.envBool("SERVER_STREAMING", &cfg.Server.Streaming)
+	l.envBool("SERVER_TRUST_CLIENT_IP_HEADER", &cfg.Server.TrustClientIPHeader)
+	l.envStrSlice("SERVER_TRUSTED_PROXIES", &cfg.Server.TrustedProxies)
 }
 
 func (l *Loader) loadTLSEnv(cfg *Config) {
@@ -298,6 +335,8 @@ func (l *Loader) loadMockEnv(cfg *Config) {
 	l.envStr("MOCK_DEFAULT_MODE", &cfg.Mock.DefaultMode)
 	l.envStr("MOCK_SCENARIOS_DIR", &cfg.Mock.ScenariosDir)
 	l.envDuration("MOCK_DEFAULT_TIMEOUT", &cfg.Mock.DefaultTimeout)
+	l.envBodySizeLimit("MOCK_MATCHING_BODY_PATTERN_LIMIT", &cfg.Mock.Matching.BodyPatternLimit)
+	l.envStr("MOCK_MATCHING_BODY_PATTERN_LIMIT_ACTION", &cfg.Mock.Matching.BodyPatternLimitAction)
 }
 
 func (l *Loader) loadChaosEnv(cfg *Config) {
@@ -333,10 +372,29 @@ func (l *Loader) loadHealthEnv(cfg *Config) {
 	l.envStr("API_TOKEN", &cfg.Health.APIToken)
 }
 
+func (l *Loader) loadManagementEnv(cfg *Config) {
+	l.envBool("MANAGEMENT_ENABLED", &cfg.Management.Enabled)
+	l.envBool("MANAGEMENT_SCENARIO_RELOAD_ENABLED", &cfg.Management.ScenarioReloadEnabled)
+	l.envBool("MANAGEMENT_CONFIG_RELOAD_ENABLED", &cfg.Management.ConfigReloadEnabled)
+	l.envStr("MANAGEMENT_TOKEN", &cfg.Management.Token)
+	l.envStr("MANAGEMENT_TOKEN_ENV", &cfg.Management.TokenEnv)
+}
+
 func (l *Loader) loadReplayEnv(cfg *Config) {
 	l.envBool("REPLAY_ENABLED", &cfg.Replay.Enabled)
 	l.envStr("REPLAY_REQUESTS_DIR", &cfg.Replay.RequestsDir)
 	l.envFloat64("REPLAY_SPEED", &cfg.Replay.Speed)
+}
+
+func (l *Loader) loadShardingEnv(cfg *Config) {
+	l.envBool("SHARDING_ENABLED", &cfg.Sharding.Enabled)
+	l.envInt("SHARDING_SHARD_COUNT", &cfg.Sharding.ShardCount)
+	l.envInt("SHARDING_CACHE_SIZE", &cfg.Sharding.CacheSize)
+	l.envBool("SHARDING_ENABLE_CACHE", &cfg.Sharding.EnableCache)
+}
+
+func (l *Loader) loadPreviewEnv(cfg *Config) {
+	l.envBool("PREVIEW_TRUST_CLIENT_ID_HEADER", &cfg.Preview.TrustClientIDHeader)
 }
 
 func (l *Loader) loadPprofEnv(cfg *Config) {
@@ -360,8 +418,11 @@ func (l *Loader) mergeConfigs(dst, src *Config) {
 	mergeStorageConfig(dst, src)
 	mergeRateLimitConfig(dst, src)
 	mergeHealthConfig(dst, src)
+	mergeManagementConfig(dst, src)
 	mergeReplayConfig(dst, src)
 	mergePluginConfig(dst, src)
+	mergeShardingConfig(dst, src)
+	dst.Preview.TrustClientIDHeader = src.Preview.TrustClientIDHeader
 	dst.Pprof.Enabled = src.Pprof.Enabled
 	mergeMultiServerConfig(dst, src)
 }
@@ -374,9 +435,17 @@ func mergeMultiServerConfig(dst, src *Config) {
 	mergeDuration(&dst.Defaults.ReadTimeout, src.Defaults.ReadTimeout)
 	mergeDuration(&dst.Defaults.WriteTimeout, src.Defaults.WriteTimeout)
 	mergeInt(&dst.Defaults.MaxConnections, src.Defaults.MaxConnections)
-	mergeInt64(&dst.Defaults.MaxBodySize, src.Defaults.MaxBodySize)
+	if src.Defaults.maxBodySizeSet {
+		dst.Defaults.MaxBodySize = src.Defaults.MaxBodySize
+		dst.Defaults.maxBodySizeSet = true
+	} else {
+		mergeInt64(&dst.Defaults.MaxBodySize, src.Defaults.MaxBodySize)
+	}
 	mergeDuration(&dst.Defaults.IdleTimeout, src.Defaults.IdleTimeout)
 	mergeDuration(&dst.Defaults.ShutdownTimeout, src.Defaults.ShutdownTimeout)
+	if src.Defaults.streamingSet {
+		dst.Defaults.SetStreaming(src.Defaults.Streaming)
+	}
 }
 
 // mergeStr sets dst to src if src is non-empty.
@@ -420,8 +489,16 @@ func mergeServerConfig(dst, src *Config) {
 	mergeDuration(&dst.Server.ReadTimeout, src.Server.ReadTimeout)
 	mergeDuration(&dst.Server.WriteTimeout, src.Server.WriteTimeout)
 	mergeInt(&dst.Server.MaxConnections, src.Server.MaxConnections)
-	mergeInt64(&dst.Server.MaxBodySize, src.Server.MaxBodySize)
+	if len(src.Server.TrustedProxies) > 0 {
+		dst.Server.TrustedProxies = src.Server.TrustedProxies
+	}
+	if src.Server.maxBodySizeSet {
+		dst.Server.MaxBodySize = src.Server.MaxBodySize
+	} else {
+		mergeInt64(&dst.Server.MaxBodySize, src.Server.MaxBodySize)
+	}
 	dst.Server.Streaming = src.Server.Streaming
+	dst.Server.TrustClientIPHeader = src.Server.TrustClientIPHeader
 
 	// TLS
 	mergeStr(&dst.Server.TLS.CertFile, src.Server.TLS.CertFile)
@@ -451,6 +528,14 @@ func mergeMockConfig(dst, src *Config) {
 	mergeStr(&dst.Mock.DefaultMode, src.Mock.DefaultMode)
 	mergeStr(&dst.Mock.ScenariosDir, src.Mock.ScenariosDir)
 	mergeDuration(&dst.Mock.DefaultTimeout, src.Mock.DefaultTimeout)
+	mergeMockMatchingConfig(&dst.Mock.Matching, src.Mock.Matching)
+}
+
+func mergeMockMatchingConfig(dst *MockMatchingConfig, src MockMatchingConfig) {
+	if src.BodyPatternLimit.isSet() {
+		dst.BodyPatternLimit = src.BodyPatternLimit
+	}
+	mergeStr(&dst.BodyPatternLimitAction, src.BodyPatternLimitAction)
 }
 
 func mergeChaosConfig(dst, src *Config) {
@@ -482,6 +567,21 @@ func mergeHealthConfig(dst, src *Config) {
 	mergeInt(&dst.Health.Port, src.Health.Port)
 	mergeStr(&dst.Health.HealthPath, src.Health.HealthPath)
 	mergeStr(&dst.Health.ReadyPath, src.Health.ReadyPath)
+	mergeStr(&dst.Health.APIToken, src.Health.APIToken)
+}
+
+func mergeManagementConfig(dst, src *Config) {
+	if src.Management.enabledSet {
+		dst.Management.Enabled = src.Management.Enabled
+	}
+	if src.Management.scenarioReloadSet {
+		dst.Management.ScenarioReloadEnabled = src.Management.ScenarioReloadEnabled
+	}
+	if src.Management.configReloadSet {
+		dst.Management.ConfigReloadEnabled = src.Management.ConfigReloadEnabled
+	}
+	mergeStr(&dst.Management.Token, src.Management.Token)
+	mergeStr(&dst.Management.TokenEnv, src.Management.TokenEnv)
 }
 
 func mergeReplayConfig(dst, src *Config) {
@@ -496,4 +596,15 @@ func mergePluginConfig(dst, src *Config) {
 	if len(src.Plugin.Names) > 0 {
 		dst.Plugin.Names = src.Plugin.Names
 	}
+}
+
+func mergeShardingConfig(dst, src *Config) {
+	if src.Sharding.enabledSet {
+		dst.Sharding.Enabled = src.Sharding.Enabled
+	}
+	if src.Sharding.cacheSet {
+		dst.Sharding.EnableCache = src.Sharding.EnableCache
+	}
+	mergeInt(&dst.Sharding.ShardCount, src.Sharding.ShardCount)
+	mergeInt(&dst.Sharding.CacheSize, src.Sharding.CacheSize)
 }

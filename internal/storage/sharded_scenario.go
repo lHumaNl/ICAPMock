@@ -5,6 +5,7 @@ package storage
 import (
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,14 +66,17 @@ func DefaultShardingConfig() ShardingConfig {
 //   - Graceful degradation при ошибках индекса
 //   - Интеграция с Prometheus metrics
 type ShardedScenarioRegistry struct {
-	cache            *ScenarioMatchCache
-	metrics          *shardingMetrics
-	metricsCollector *metrics.Collector
-	filePath         string
-	shards           []*ScenarioShard
-	config           ShardingConfig
-	shardCount       int
-	mu               sync.RWMutex
+	cache                        *ScenarioMatchCache
+	metrics                      *shardingMetrics
+	metricsCollector             *metrics.Collector
+	bodyPattern                  BodyPatternOptions
+	filePath                     string
+	globalScenarios              []*Scenario
+	shards                       []*ScenarioShard
+	config                       ShardingConfig
+	cacheDisabledForComplexMatch atomic.Bool
+	shardCount                   int
+	mu                           sync.RWMutex
 }
 
 // ScenarioShard представляет один shard в шардированном индексе.
@@ -124,12 +128,33 @@ type ShardingMetrics struct {
 
 // NewShardedScenarioRegistry создает новый шардированный реестр сценариев.
 func NewShardedScenarioRegistry() ScenarioRegistry {
-	return newShardedScenarioRegistryWithConfig(DefaultShardingConfig())
+	return NewShardedScenarioRegistryWithBodyPatternOptions(DefaultBodyPatternOptions())
+}
+
+// NewShardedScenarioRegistryWithBodyPatternOptions creates a sharded registry with body_pattern limits.
+func NewShardedScenarioRegistryWithBodyPatternOptions(options BodyPatternOptions) ScenarioRegistry {
+	return newShardedScenarioRegistryWithConfig(DefaultShardingConfig(), options)
+}
+
+// NewShardedScenarioRegistryWithConfig creates a sharded registry with explicit sharding settings.
+func NewShardedScenarioRegistryWithConfig(config ShardingConfig, options ...BodyPatternOptions) ScenarioRegistry {
+	return newShardedScenarioRegistryWithConfig(config, options...)
+}
+
+// Config returns the normalized sharding configuration used by this registry.
+func (r *ShardedScenarioRegistry) Config() ShardingConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.config
 }
 
 // newShardedScenarioRegistryWithConfig создает шардированный реестр
 // с указанной конфигурацией.
-func newShardedScenarioRegistryWithConfig(config ShardingConfig) *ShardedScenarioRegistry {
+func newShardedScenarioRegistryWithConfig(config ShardingConfig, options ...BodyPatternOptions) *ShardedScenarioRegistry {
+	bodyPattern := DefaultBodyPatternOptions()
+	if len(options) > 0 {
+		bodyPattern = options[0]
+	}
 	// Валидация ShardCount
 	if config.ShardCount < MinShardCount {
 		config.ShardCount = DefaultShardCount
@@ -147,10 +172,11 @@ func newShardedScenarioRegistryWithConfig(config ShardingConfig) *ShardedScenari
 	}
 
 	reg := &ShardedScenarioRegistry{
-		shardCount: config.ShardCount,
-		config:     config,
-		shards:     make([]*ScenarioShard, config.ShardCount),
-		metrics:    &shardingMetrics{},
+		bodyPattern: bodyPattern.normalized(),
+		shardCount:  config.ShardCount,
+		config:      config,
+		shards:      make([]*ScenarioShard, config.ShardCount),
+		metrics:     &shardingMetrics{},
 	}
 
 	// Инициализация shard-ов
@@ -196,12 +222,13 @@ func newScenarioMatchCache(capacity int) *ScenarioMatchCache {
 // Load загружает сценарии из YAML файла и индексирует их по shard-ам.
 func (r *ShardedScenarioRegistry) Load(path string) error {
 	// Загружаем сценарии через базовый registry для валидации
-	baseReg := &scenarioRegistry{}
+	baseReg := &scenarioRegistry{bodyPattern: r.bodyPattern}
 	if err := baseReg.Load(path); err != nil {
 		return err
 	}
 
 	scenarios := baseReg.List()
+	r.cacheDisabledForComplexMatch.Store(scenariosDisableMatchCache(scenarios))
 
 	// Очищаем старые индексы
 	for _, shard := range r.shards {
@@ -210,6 +237,9 @@ func (r *ShardedScenarioRegistry) Load(path string) error {
 		shard.index = make(map[string][]*Scenario)
 		shard.mu.Unlock()
 	}
+	r.mu.Lock()
+	r.globalScenarios = nil
+	r.mu.Unlock()
 
 	// Индексируем сценарии по shard-ам
 	for _, s := range scenarios {
@@ -230,6 +260,11 @@ func (r *ShardedScenarioRegistry) Load(path string) error {
 
 // indexScenario добавляет сценарий в соответствующий shard и индекс.
 func (r *ShardedScenarioRegistry) indexScenario(s *Scenario) {
+	if scenarioRequiresGlobalPriorityCheck(s) {
+		r.addGlobalScenario(s)
+		return
+	}
+
 	// Определяем shard для сценария
 	shardIdx := r.getShardForScenario(s)
 	shard := r.shards[shardIdx]
@@ -247,9 +282,37 @@ func (r *ShardedScenarioRegistry) indexScenario(s *Scenario) {
 	}
 }
 
+func (r *ShardedScenarioRegistry) addGlobalScenario(s *Scenario) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.globalScenarios = append(r.globalScenarios, s)
+}
+
+func scenarioRequiresGlobalPriorityCheck(s *Scenario) bool {
+	_, ok := shardSafePath(s)
+	return !ok
+}
+
+func shardSafePath(s *Scenario) (string, bool) {
+	if len(s.Match.Paths) != 1 {
+		return "", false
+	}
+	path := s.Match.Paths[0]
+	if path == "" || strings.HasPrefix(path, "re:") {
+		return "", false
+	}
+	if strings.ContainsAny(path, "{}") {
+		return "", false
+	}
+	return path, true
+}
+
 // getShardForScenario определяет shard для сценария.
 // Использует hash от первого endpoint'а (если есть) или path_pattern, иначе от имени.
 func (r *ShardedScenarioRegistry) getShardForScenario(s *Scenario) int {
+	if path, ok := shardSafePath(s); ok {
+		return r.hashString(path)
+	}
 	if len(s.Match.Paths) > 0 {
 		return r.hashString(s.Match.Paths[0])
 	}
@@ -262,8 +325,16 @@ func (r *ShardedScenarioRegistry) getShardForScenario(s *Scenario) int {
 // getShardForRequest определяет shard для запроса.
 // Использует hash от extracted path.
 func (r *ShardedScenarioRegistry) getShardForRequest(req *icap.Request) int {
-	path := extractPath(req.URI)
+	path := shardLookupPath(req.URI)
 	return r.hashString(path)
+}
+
+func shardLookupPath(uri string) string {
+	path := extractPath(uri)
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		return path[:i]
+	}
+	return path
 }
 
 // hashString вычисляет hash строки для определения shard-а.
@@ -360,42 +431,21 @@ func (r *ShardedScenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 	// Обновляем метрики
 	r.metrics.totalMatches.Add(1)
 
-	// Проверяем кэш
-	if r.cache != nil {
-		cacheKey := r.buildCacheKey(req)
-		if cached := r.cache.Get(cacheKey); cached != nil {
-			r.metrics.cacheHits.Add(1)
-			// Интеграция с Prometheus metrics
-			if r.metricsCollector != nil {
-				r.metricsCollector.RecordScenarioShardingCacheHit()
-			}
-			return cached, nil
-		}
-		r.metrics.cacheMisses.Add(1)
-		// Интеграция с Prometheus metrics
-		if r.metricsCollector != nil {
-			r.metricsCollector.RecordScenarioShardingCacheMiss()
-		}
+	cacheEnabled := r.matchCacheEnabled()
+	if cached, ok := r.cachedMatch(req, cacheEnabled); ok {
+		return cached, nil
 	}
 
-	// Определяем shard для запроса
-	shardIdx := r.getShardForRequest(req)
-	shard := r.shards[shardIdx]
-
-	// Пытаемся найти через индекс
-	scenario, found := r.matchInShard(shard, req)
-
-	// Если не нашли в shard, пробуем полный поиск по всем shard-ам
-	if !found {
-		scenario, found = r.fallbackMatch(req)
+	scenario, found, err := r.matchShardedAndFallback(req)
+	if err != nil {
+		return nil, err
+	}
+	if scenario, found, err = r.applyGlobalPriorityCandidate(req, scenario, found); err != nil {
+		return nil, err
 	}
 
 	if found {
-		// Сохраняем в кэш
-		if r.cache != nil {
-			cacheKey := r.buildCacheKey(req)
-			r.cache.Put(cacheKey, scenario)
-		}
+		r.storeMatchCache(req, scenario, cacheEnabled)
 		return scenario, nil
 	}
 
@@ -404,8 +454,68 @@ func (r *ShardedScenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 	return defaultScenario, nil
 }
 
+func (r *ShardedScenarioRegistry) matchCacheEnabled() bool {
+	return r.cache != nil && !r.cacheDisabledForComplexMatch.Load()
+}
+
+func (r *ShardedScenarioRegistry) cachedMatch(req *icap.Request, enabled bool) (*Scenario, bool) {
+	if !enabled {
+		return nil, false
+	}
+	if cached := r.cache.Get(r.buildCacheKey(req)); cached != nil {
+		r.recordCacheHit()
+		return cached, true
+	}
+	r.recordCacheMiss()
+	return nil, false
+}
+
+func (r *ShardedScenarioRegistry) recordCacheHit() {
+	r.metrics.cacheHits.Add(1)
+	if r.metricsCollector != nil {
+		r.metricsCollector.RecordScenarioShardingCacheHit()
+	}
+}
+
+func (r *ShardedScenarioRegistry) recordCacheMiss() {
+	r.metrics.cacheMisses.Add(1)
+	if r.metricsCollector != nil {
+		r.metricsCollector.RecordScenarioShardingCacheMiss()
+	}
+}
+
+func (r *ShardedScenarioRegistry) storeMatchCache(req *icap.Request, scenario *Scenario, enabled bool) {
+	if enabled {
+		r.cache.Put(r.buildCacheKey(req), scenario)
+	}
+}
+
+func (r *ShardedScenarioRegistry) matchShardedAndFallback(req *icap.Request) (*Scenario, bool, error) {
+	shard := r.shards[r.getShardForRequest(req)]
+	scenario, found, err := r.matchInShard(shard, req)
+	if err != nil || found {
+		return scenario, found, err
+	}
+	return r.fallbackMatch(req)
+}
+
+func (r *ShardedScenarioRegistry) applyGlobalPriorityCandidate(
+	req *icap.Request,
+	current *Scenario,
+	found bool,
+) (*Scenario, bool, error) {
+	global, globalFound, err := r.matchGlobalPriorityCandidates(req)
+	if err != nil || !globalFound {
+		return current, found, err
+	}
+	if !found || global.Priority > current.Priority {
+		return global, true, nil
+	}
+	return current, found, nil
+}
+
 // matchInShard ищет сценарий в указанном shard используя индекс.
-func (r *ShardedScenarioRegistry) matchInShard(shard *ScenarioShard, req *icap.Request) (*Scenario, bool) {
+func (r *ShardedScenarioRegistry) matchInShard(shard *ScenarioShard, req *icap.Request) (*Scenario, bool, error) {
 	shard.mu.RLock()
 	defer shard.mu.RUnlock()
 
@@ -426,7 +536,11 @@ func (r *ShardedScenarioRegistry) matchInShard(shard *ScenarioShard, req *icap.R
 		// Проверяем сценарии из индекса
 		for _, s := range scenarios {
 			checkedCount++
-			if r.matches(s, req) && s.Priority > bestPriority {
+			matched, err := r.matches(s, req)
+			if err != nil {
+				return nil, false, err
+			}
+			if matched && s.Priority > bestPriority {
 				bestMatch = s
 				bestPriority = s.Priority
 			}
@@ -437,10 +551,10 @@ func (r *ShardedScenarioRegistry) matchInShard(shard *ScenarioShard, req *icap.R
 	r.updateAvgScenariosChecked(checkedCount)
 
 	if bestMatch != nil {
-		return bestMatch, true
+		return bestMatch, true, nil
 	}
 
-	return nil, false
+	return nil, false, nil
 }
 
 // buildSearchKeys строит ключи для поиска в индексе.
@@ -451,7 +565,7 @@ func (r *ShardedScenarioRegistry) buildSearchKeys(req *icap.Request) []string {
 		method = "*"
 	}
 
-	path := extractPath(req.URI)
+	path := shardLookupPath(req.URI)
 
 	// Строим возможные ключи: самый конкретный к наиболее общему
 	keys := []string{
@@ -470,6 +584,25 @@ func (r *ShardedScenarioRegistry) buildSearchKeys(req *icap.Request) []string {
 	}
 
 	return keys
+}
+
+func (r *ShardedScenarioRegistry) matchGlobalPriorityCandidates(req *icap.Request) (*Scenario, bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var bestMatch *Scenario
+	bestPriority := -9999
+	for _, s := range r.globalScenarios {
+		matched, err := r.matches(s, req)
+		if err != nil {
+			return nil, false, err
+		}
+		if matched && s.Priority > bestPriority {
+			bestMatch = s
+			bestPriority = s.Priority
+		}
+	}
+	return bestMatch, bestMatch != nil, nil
 }
 
 // buildCacheKey строит ключ для кэша на основе запроса. Ключ включает
@@ -501,9 +634,42 @@ func (r *ShardedScenarioRegistry) buildCacheKey(req *icap.Request) string {
 	return req.Method + "|" + req.URI + "|" + httpMethod + "|" + httpURI + "|" + contentType
 }
 
+func scenariosDisableMatchCache(scenarios []*Scenario) bool {
+	for _, s := range scenarios {
+		if scenarioDisablesMatchCache(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func scenarioDisablesMatchCache(s *Scenario) bool {
+	if s == nil {
+		return false
+	}
+	return hasDynamicMatchRule(s) || hasEndpointCaptures(s.compiledPaths) || len(s.Branches) > 0
+}
+
+func hasDynamicMatchRule(s *Scenario) bool {
+	return len(s.Match.Headers) > 0 ||
+		len(s.Match.HTTPHeaders) > 0 ||
+		s.Match.ClientIP != "" ||
+		len(s.Match.CIDRRanges) > 0 ||
+		s.Match.BodyPattern != ""
+}
+
+func hasEndpointCaptures(paths []compiledEndpoint) bool {
+	for _, path := range paths {
+		if len(path.captures) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // fallbackMatch выполняет полный поиск по всем shard-ам.
 // Используется как graceful degradation когда индекс не сработал.
-func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, bool) {
+func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, bool, error) {
 	r.metrics.fallbackMatches.Add(1)
 
 	// Интеграция с Prometheus metrics
@@ -518,7 +684,12 @@ func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, b
 	for _, shard := range r.shards {
 		shard.mu.RLock()
 		for _, s := range shard.scenarios {
-			if r.matches(s, req) && s.Priority > bestPriority {
+			matched, err := r.matches(s, req)
+			if err != nil {
+				shard.mu.RUnlock()
+				return nil, false, err
+			}
+			if matched && s.Priority > bestPriority {
 				bestMatch = s
 				bestPriority = s.Priority
 			}
@@ -527,16 +698,16 @@ func (r *ShardedScenarioRegistry) fallbackMatch(req *icap.Request) (*Scenario, b
 	}
 
 	if bestMatch != nil {
-		return bestMatch, true
+		return bestMatch, true, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 // matches проверяет соответствует ли сценарий запросу.
-func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //nolint:gocyclo // scenario matching checks each rule field sequentially
+func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	// Check ICAP method
 	if !methodMatches(s.Match.Methods, req.Method) {
-		return false
+		return false, nil
 	}
 
 	// Check endpoint(s). Any one match is enough; capture names from the
@@ -545,7 +716,7 @@ func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
 	if len(s.compiledPaths) > 0 {
 		caps, ok := matchEndpoint(s.compiledPaths, extractPath(req.URI))
 		if !ok {
-			return false
+			return false, nil
 		}
 		if len(caps) > 0 {
 			if req.Captures == nil {
@@ -561,24 +732,24 @@ func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
 	for key, value := range s.Match.Headers {
 		h, ok := req.Header.Get(key)
 		if !ok {
-			return false
+			return false, nil
 		}
 		if compiled, hasRegex := s.compiledHeaders[key]; hasRegex {
 			if !compiled.MatchString(h) {
-				return false
+				return false, nil
 			}
 		} else if h != value {
-			return false
+			return false, nil
 		}
 	}
 
 	// Check HTTP method
 	if s.Match.HTTPMethod != "" {
 		if req.HTTPRequest == nil {
-			return false
+			return false, nil
 		}
 		if req.HTTPRequest.Method != s.Match.HTTPMethod {
-			return false
+			return false, nil
 		}
 	}
 
@@ -587,19 +758,19 @@ func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
 	// picks the right side by ICAP method and falls back to the other side.
 	if len(s.Match.HTTPHeaders) > 0 {
 		if !hasEncapsulatedHTTP(req) {
-			return false
+			return false, nil
 		}
 		for key, value := range s.Match.HTTPHeaders {
 			h, ok := httpHeaderLookup(req, key)
 			if !ok {
-				return false
+				return false, nil
 			}
 			if compiled, hasRegex := s.compiledHTTPHeaders[key]; hasRegex {
 				if !compiled.MatchString(h) {
-					return false
+					return false, nil
 				}
 			} else if h != value {
-				return false
+				return false, nil
 			}
 		}
 	}
@@ -608,41 +779,49 @@ func (r *ShardedScenarioRegistry) matches(s *Scenario, req *icap.Request) bool {
 	// even for RESPMOD (req-hdr part of Encapsulated).
 	if s.Match.HTTPURL != "" {
 		if req.HTTPRequest == nil {
-			return false
+			return false, nil
 		}
 		if s.compiledHTTPURL != nil {
 			if !s.compiledHTTPURL.MatchString(req.HTTPRequest.URI) {
-				return false
+				return false, nil
 			}
 		} else if req.HTTPRequest.URI != s.Match.HTTPURL {
-			return false
+			return false, nil
 		}
 	}
 
 	// Check body pattern
-	if s.compiledBody != nil && req.HTTPRequest != nil {
-		body, err := req.HTTPRequest.GetBody()
-		if err != nil {
-			return false
+	if s.compiledBody != nil {
+		msg := bodyPatternMessage(req)
+		if msg == nil {
+			return false, nil
 		}
-		if !s.compiledBody.MatchString(string(body)) {
-			return false
+		matched, err := bodyPatternMatches(s.compiledBody, msg, r.bodyPattern)
+		if err != nil || !matched {
+			return false, err
 		}
 	}
 
 	// Check client IP
 	if s.Match.ClientIP != "" {
 		if !matchClientIP(s.Match.ClientIP, req.ClientIP) {
-			return false
+			return false, nil
+		}
+	}
+
+	// Check CIDR ranges
+	if len(s.compiledCIDRs) > 0 {
+		if !matchByCIDR(s.compiledCIDRs, req.ClientIP) {
+			return false, nil
 		}
 	}
 
 	// If the scenario has branches, require at least one branch to match.
 	if len(s.Branches) > 0 && s.SelectBranch(req) < 0 {
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, nil
 }
 
 // Reload перезагружает сценарии из последнего загруженного файла.
@@ -668,6 +847,9 @@ func (r *ShardedScenarioRegistry) List() []*Scenario {
 		all = append(all, shard.scenarios...)
 		shard.mu.RUnlock()
 	}
+	r.mu.RLock()
+	all = append(all, r.globalScenarios...)
+	r.mu.RUnlock()
 
 	// Удаляем дубликаты default scenario
 	unique := make(map[string]bool)
@@ -699,7 +881,7 @@ func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 	}
 
 	// Валидация через базовый registry
-	baseReg := &scenarioRegistry{}
+	baseReg := &scenarioRegistry{bodyPattern: r.bodyPattern}
 	if err := baseReg.validateAndCompile(scenario); err != nil {
 		var se *ScenarioError
 		if AsScenarioError(err, &se) {
@@ -719,6 +901,9 @@ func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 
 	// Индексируем новый сценарий
 	r.indexScenario(scenario)
+	if scenarioDisablesMatchCache(scenario) {
+		r.cacheDisabledForComplexMatch.Store(true)
+	}
 
 	// Очищаем кэш
 	if r.cache != nil {
@@ -758,15 +943,56 @@ func (r *ShardedScenarioRegistry) Remove(name string) error {
 		shard.mu.Unlock()
 
 		if found {
-			// Очищаем кэш
-			if r.cache != nil {
-				r.cache.Clear()
-			}
+			r.afterScenarioRemoved()
 			return nil
 		}
 	}
+	if r.removeGlobalScenario(name) {
+		r.afterScenarioRemoved()
+		return nil
+	}
 
 	return ErrNoMatch
+}
+
+func (r *ShardedScenarioRegistry) removeGlobalScenario(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, s := range r.globalScenarios {
+		if s.Name == name {
+			r.globalScenarios = append(r.globalScenarios[:i], r.globalScenarios[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func (r *ShardedScenarioRegistry) afterScenarioRemoved() {
+	r.cacheDisabledForComplexMatch.Store(r.registryDisablesMatchCache())
+	if r.cache != nil {
+		r.cache.Clear()
+	}
+}
+
+func (r *ShardedScenarioRegistry) registryDisablesMatchCache() bool {
+	for _, shard := range r.shards {
+		if r.shardDisablesMatchCache(shard) {
+			return true
+		}
+	}
+	return r.globalScenariosDisableMatchCache()
+}
+
+func (r *ShardedScenarioRegistry) globalScenariosDisableMatchCache() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return scenariosDisableMatchCache(r.globalScenarios)
+}
+
+func (r *ShardedScenarioRegistry) shardDisablesMatchCache(shard *ScenarioShard) bool {
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+	return scenariosDisableMatchCache(shard.scenarios)
 }
 
 // GetMetrics возвращает snapshot метрик производительности шардирования.

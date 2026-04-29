@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -31,8 +32,9 @@ import (
 //
 // MockProcessor is thread-safe and can be used concurrently.
 type MockProcessor struct {
-	registry storage.ScenarioRegistry
-	logger   *logger.Logger
+	registry          storage.ScenarioRegistry
+	logger            *logger.Logger
+	maxStreamBodySize int64
 }
 
 // NewMockProcessor creates a new MockProcessor with the given registry and logger.
@@ -44,9 +46,19 @@ type MockProcessor struct {
 // The processor uses the registry to find matching scenarios and returns
 // responses based on the scenario's response template.
 func NewMockProcessor(registry storage.ScenarioRegistry, log *logger.Logger) *MockProcessor {
+	return NewMockProcessorWithMaxBodySize(registry, log, defaultStreamBodyLimit)
+}
+
+// NewMockProcessorWithMaxBodySize creates a processor with an explicit stream body limit.
+func NewMockProcessorWithMaxBodySize(
+	registry storage.ScenarioRegistry,
+	log *logger.Logger,
+	maxBodySize int64,
+) *MockProcessor {
 	return &MockProcessor{
-		registry: registry,
-		logger:   log,
+		registry:          registry,
+		logger:            log,
+		maxStreamBodySize: maxBodySize,
 	}
 }
 
@@ -127,11 +139,17 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		if wr.HTTPBodyFile != "" {
 			merged.HTTPBodyFile = wr.HTTPBodyFile
 		}
+		if wr.Error != "" {
+			merged.Error = wr.Error
+		}
 		if len(wr.Headers) > 0 {
 			merged.Headers = wr.Headers
 		}
 		if len(wr.HTTPHeaders) > 0 {
 			merged.HTTPHeaders = wr.HTTPHeaders
+		}
+		if wr.Stream != nil {
+			merged.Stream = wr.Stream
 		}
 		if wr.Delay.Min > 0 || wr.Delay.Max > 0 {
 			selectedDelay = &wr.Delay
@@ -163,22 +181,22 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		}
 	}
 
+	// Handle the effective selected response error before building bodies/files.
+	if selectedResponse.Error != "" {
+		return nil, apperrors.NewICAPError(
+			apperrors.ErrInternalServerError.Code,
+			selectedResponse.Error,
+			apperrors.ErrInternalServerError.ICAPStatus,
+			nil,
+		)
+	}
+
 	// Build response
 	effectiveScenario := *scenario
 	effectiveScenario.Response = *selectedResponse
 	resp, err := p.buildResponse(&effectiveScenario, req)
 	if err != nil {
 		return nil, err
-	}
-
-	// Handle scenario-defined error
-	if scenario.Response.Error != "" {
-		return nil, apperrors.NewICAPError(
-			apperrors.ErrInternalServerError.Code,
-			scenario.Response.Error,
-			apperrors.ErrInternalServerError.ICAPStatus,
-			nil,
-		)
 	}
 
 	return resp, nil
@@ -222,15 +240,13 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 
 	// Handle REQMOD with HTTP request modification
 	if req.IsREQMOD() && req.HTTPRequest != nil {
-		httpReq := p.cloneHTTPMessage(req.HTTPRequest)
-
 		// Modify HTTP status if specified
 		if scenario.Response.HTTPStatus > 0 {
 			// For REQMOD, return an HTTP response instead of a modified request
 			// This is typically used to return an error page or block the request
 			httpResp := &icap.HTTPMessage{
 				Status:     statusToString(scenario.Response.HTTPStatus),
-				StatusText: icap.StatusText(scenario.Response.HTTPStatus),
+				StatusText: http.StatusText(scenario.Response.HTTPStatus),
 				Proto:      "HTTP/1.1",
 				Header:     make(icap.Header),
 			}
@@ -246,6 +262,11 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 
 			resp.SetHTTPResponse(httpResp)
 		} else {
+			httpReq, err := p.cloneHTTPMessageForResponse(req.HTTPRequest, scenario.Response.Stream != nil)
+			if err != nil {
+				return nil, cloneICAPError(err)
+			}
+
 			// Add/modify HTTP headers on the request
 			for key, value := range scenario.Response.HTTPHeaders {
 				httpReq.Header.Set(key, value)
@@ -261,12 +282,15 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 
 	// Handle RESPMOD with HTTP response modification
 	if req.IsRESPMOD() && req.HTTPResponse != nil {
-		httpResp := p.cloneHTTPMessage(req.HTTPResponse)
+		httpResp, err := p.cloneHTTPMessageForResponse(req.HTTPResponse, scenario.Response.Stream != nil)
+		if err != nil {
+			return nil, cloneICAPError(err)
+		}
 
 		// Modify HTTP status if specified
 		if scenario.Response.HTTPStatus > 0 {
 			httpResp.Status = statusToString(scenario.Response.HTTPStatus)
-			httpResp.StatusText = icap.StatusText(scenario.Response.HTTPStatus)
+			httpResp.StatusText = http.StatusText(scenario.Response.HTTPStatus)
 		}
 
 		// Add/modify HTTP headers
@@ -280,6 +304,10 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 		}
 
 		resp.SetHTTPResponse(httpResp)
+	}
+
+	if err := p.attachStream(resp, &scenario.Response, req); err != nil {
+		return nil, err
 	}
 
 	return resp, nil
@@ -316,13 +344,23 @@ func setBodyContentLength(h icap.Header, userHTTPSet map[string]string, n int) {
 	h.Set("Content-Length", strconv.Itoa(n))
 }
 
-// cloneHTTPMessage creates a deep copy of an HTTPMessage.
-// It lazily loads the body only if it's available.
-func (p *MockProcessor) cloneHTTPMessage(msg *icap.HTTPMessage) *icap.HTTPMessage {
+// cloneHTTPMessageForResponse creates a bounded copy of an HTTPMessage.
+// Streaming responses only need HTTP metadata; attachStream installs the body.
+func (p *MockProcessor) cloneHTTPMessageForResponse(msg *icap.HTTPMessage, stream bool) (*icap.HTTPMessage, error) {
+	clone := cloneHTTPMessageMetadata(msg)
+	if clone == nil || stream {
+		return clone, nil
+	}
+	if err := p.cloneHTTPMessageBody(clone, msg); err != nil {
+		return nil, err
+	}
+	return clone, nil
+}
+
+func cloneHTTPMessageMetadata(msg *icap.HTTPMessage) *icap.HTTPMessage {
 	if msg == nil {
 		return nil
 	}
-
 	clone := &icap.HTTPMessage{
 		Method:     msg.Method,
 		URI:        msg.URI,
@@ -334,16 +372,37 @@ func (p *MockProcessor) cloneHTTPMessage(msg *icap.HTTPMessage) *icap.HTTPMessag
 	if msg.Header != nil {
 		clone.Header = msg.Header.Clone()
 	}
-
-	// Lazy load body for cloning
-	if body, err := msg.GetBody(); err == nil && len(body) > 0 {
-		// Create a copy of the body and mark it as loaded
-		bodyCopy := make([]byte, len(body))
-		copy(bodyCopy, body)
-		clone.SetLoadedBody(bodyCopy)
-	}
-
 	return clone
+}
+
+func (p *MockProcessor) cloneHTTPMessageBody(clone, msg *icap.HTTPMessage) error {
+	body, err := getHTTPMessageBodyForClone(msg, p.maxStreamBodySize)
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	bodyCopy := make([]byte, len(body))
+	copy(bodyCopy, body)
+	clone.SetLoadedBody(bodyCopy)
+	return nil
+}
+
+func getHTTPMessageBodyForClone(msg *icap.HTTPMessage, maxBodySize int64) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return msg.GetBody()
+	}
+	return msg.GetBodyLimited(maxBodySize)
+}
+
+func cloneICAPError(err error) error {
+	return apperrors.NewICAPError(
+		apperrors.ErrInternalServerError.Code,
+		"failed to clone HTTP message body",
+		apperrors.ErrInternalServerError.ICAPStatus,
+		err,
+	)
 }
 
 // Name returns "MockProcessor" as the processor name.
@@ -375,12 +434,62 @@ var capturePlaceholder = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 func substituteCaptures(resp storage.ResponseTemplate, vars map[string]string) storage.ResponseTemplate {
 	out := resp
 	out.Body = substituteString(resp.Body, vars)
+	out.BodyFile = substituteString(resp.BodyFile, vars)
 	out.HTTPBody = substituteString(resp.HTTPBody, vars)
+	out.HTTPBodyFile = substituteString(resp.HTTPBodyFile, vars)
+	out.Error = substituteString(resp.Error, vars)
+	if resp.Stream != nil {
+		out.Stream = substituteStream(resp.Stream, vars)
+	}
 	if len(resp.Headers) > 0 {
 		out.Headers = substituteMap(resp.Headers, vars)
 	}
 	if len(resp.HTTPHeaders) > 0 {
 		out.HTTPHeaders = substituteMap(resp.HTTPHeaders, vars)
+	}
+	return out
+}
+
+func substituteStream(stream *storage.StreamConfig, vars map[string]string) *storage.StreamConfig {
+	out := *stream
+	out.Body = substituteString(stream.Body, vars)
+	out.BodyFile = substituteString(stream.BodyFile, vars)
+	out.Source.Body = substituteString(stream.Source.Body, vars)
+	out.Source.BodyFile = substituteString(stream.Source.BodyFile, vars)
+	out.Parts = substituteStreamParts(stream.Parts, vars)
+	out.Fallback = substituteStreamFallback(stream.Fallback, vars)
+	out.Multipart.Fields = substituteStringSlice(stream.Multipart.Fields, vars)
+	out.Multipart.Files.Filename = substituteStringSlice(stream.Multipart.Files.Filename, vars)
+	return &out
+}
+
+func substituteStreamParts(parts []storage.StreamPartConfig, vars map[string]string) []storage.StreamPartConfig {
+	if len(parts) == 0 {
+		return parts
+	}
+	out := make([]storage.StreamPartConfig, len(parts))
+	for i, part := range parts {
+		out[i] = part
+		out[i].Body = substituteString(part.Body, vars)
+		out[i].BodyFile = substituteString(part.BodyFile, vars)
+	}
+	return out
+}
+
+func substituteStreamFallback(fallback storage.StreamFallbackConfig, vars map[string]string) storage.StreamFallbackConfig {
+	fallback.Body = substituteString(fallback.Body, vars)
+	fallback.BodyFile = substituteString(fallback.BodyFile, vars)
+	fallback.RawFile.Filename = substituteStringSlice(fallback.RawFile.Filename, vars)
+	return fallback
+}
+
+func substituteStringSlice(in []string, vars map[string]string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]string, len(in))
+	for i, value := range in {
+		out[i] = substituteString(value, vars)
 	}
 	return out
 }

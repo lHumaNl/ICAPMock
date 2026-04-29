@@ -43,11 +43,52 @@ func unmarshalYAMLWithByteSize(value *yaml.Node, alias interface{}, fieldName st
 	return nil
 }
 
+func unmarshalYAMLMaxBodySize(value *yaml.Node, alias interface{}, present *bool) error {
+	hasMaxBodySize := yamlNodeHasKey(value, "max_body_size")
+	err := unmarshalYAMLWithByteSize(value, alias, "max_body_size")
+	*present = hasMaxBodySize
+	return err
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for DefaultsConfig.
+func (d *DefaultsConfig) UnmarshalYAML(value *yaml.Node) error {
+	type Alias DefaultsConfig
+	d.streamingSet = yamlNodeHasKey(value, "streaming")
+	return unmarshalYAMLMaxBodySize(value, (*Alias)(d), &d.maxBodySizeSet)
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for ServerEntryConfig.
+func (e *ServerEntryConfig) UnmarshalYAML(value *yaml.Node) error {
+	type Alias ServerEntryConfig
+	e.streamingSet = yamlNodeHasKey(value, "streaming")
+	return unmarshalYAMLMaxBodySize(value, (*Alias)(e), &e.maxBodySizeSet)
+}
+
 // UnmarshalYAML implements custom YAML unmarshaling for ServerConfig.
 // It handles MaxBodySize as either a number or a human-readable string like "10MB".
 func (c *ServerConfig) UnmarshalYAML(value *yaml.Node) error {
 	type Alias ServerConfig
-	return unmarshalYAMLWithByteSize(value, (*Alias)(c), "max_body_size")
+	return unmarshalYAMLMaxBodySize(value, (*Alias)(c), &c.maxBodySizeSet)
+}
+
+func yamlNodeHasKey(value *yaml.Node, key string) bool {
+	if value.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i < len(value.Content)-1; i += 2 {
+		if value.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
+}
+
+// UnmarshalYAML tracks explicitly provided sharding boolean fields.
+func (c *ShardingConfig) UnmarshalYAML(value *yaml.Node) error {
+	type Alias ShardingConfig
+	c.enabledSet = yamlNodeHasKey(value, "enabled")
+	c.cacheSet = yamlNodeHasKey(value, "enable_cache")
+	return value.Decode((*Alias)(c))
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for StorageConfig.

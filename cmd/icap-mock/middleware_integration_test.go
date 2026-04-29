@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -51,7 +52,7 @@ func TestRegisterHandlers_RateLimiterIntegration(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, limiter, nil, cfg, log, nil); err != nil {
+	if err := registerHandlers(rtr, proc, collector, limiter, nil, cfg, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -109,7 +110,7 @@ func TestRegisterHandlers_StorageMiddlewareIntegration(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, nil, storageMiddleware, cfg, log, nil); err != nil {
+	if err := registerHandlers(rtr, proc, collector, nil, storageMiddleware, cfg, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -141,7 +142,7 @@ func TestRegisterHandlers_DisabledMiddleware(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, nil, nil, cfg, log, nil); err != nil {
+	if err := registerHandlers(rtr, proc, collector, nil, nil, cfg, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -199,7 +200,7 @@ func TestRegisterHandlers_AllMiddleware(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, nil); err != nil {
+	if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -296,6 +297,93 @@ func TestMiddlewareChain_StorageSavesRequests(t *testing.T) {
 	if savedCount != 1 {
 		t.Errorf("Expected 1 saved request, got %d", savedCount)
 	}
+}
+
+func TestRegisterHandlers_StorageUsesPerServerMaxBodySize(t *testing.T) {
+	const serverMaxBodySize int64 = 8
+	cfg := &config.Config{}
+	cfg.SetDefaults()
+	cfg.Server.MaxBodySize = 1024
+	log, err := logger.New(cfg.Logging)
+	if err != nil {
+		t.Fatalf("Failed to create logger: %v", err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	store := &mockStorage{requests: make([]*storage.StoredRequest, 0)}
+	storageMW := testStorageMiddleware(t, store, log)
+	rtr := router.NewRouter()
+	proc := processor.NewEchoProcessor()
+
+	entry := testServerEntry(cfg)
+	entry.serverCfg.MaxBodySize = serverMaxBodySize
+	err = registerHandlers(rtr, proc, nil, nil, storageMW, cfg, log, nil, entry)
+	if err != nil {
+		t.Fatalf("registerHandlers() failed: %v", err)
+	}
+	_, err = rtr.Serve(context.Background(), requestWithHTTPBody("0123456789"))
+	if err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+	saved := waitForStoredRequest(t, store)
+
+	if saved.HTTPRequest.BodyLimit != serverMaxBodySize {
+		t.Fatalf("BodyLimit = %d, want %d", saved.HTTPRequest.BodyLimit, serverMaxBodySize)
+	}
+	if !saved.HTTPRequest.BodyTruncated {
+		t.Fatal("BodyTruncated = false, want true")
+	}
+}
+
+func testStorageMiddleware(t *testing.T, store storage.Storage, log *logger.Logger) *middleware.StorageMiddleware {
+	t.Helper()
+	cfg := middleware.StorageMiddlewareConfig{
+		Workers:        1,
+		QueueSize:      10,
+		CircuitBreaker: middleware.CircuitBreakerConfig{Enabled: false},
+	}
+	storageMW, err := middleware.NewStorageMiddlewareWithPool(store, log.Logger, cfg)
+	if err != nil {
+		t.Fatalf("NewStorageMiddlewareWithPool() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = storageMW.Shutdown(ctx)
+	})
+	return storageMW
+}
+
+func testServerEntry(cfg *config.Config) serverEntry {
+	return serverEntry{name: "default", serviceID: cfg.Mock.ServiceID, serverCfg: cfg.Server}
+}
+
+func requestWithHTTPBody(body string) *icap.Request {
+	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/reqmod")
+	req.HTTPRequest = &icap.HTTPMessage{Method: "POST", URI: "/upload", Proto: "HTTP/1.1", Header: icap.NewHeader()}
+	req.HTTPRequest.BodyReader = bytes.NewReader([]byte(body))
+	return req
+}
+
+func waitForStoredRequest(t *testing.T, store *mockStorage) *storage.StoredRequest {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if req := lastStoredRequest(store); req != nil {
+			return req
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for stored request")
+	return nil
+}
+
+func lastStoredRequest(store *mockStorage) *storage.StoredRequest {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	if len(store.requests) == 0 {
+		return nil
+	}
+	return store.requests[len(store.requests)-1]
 }
 
 // mockStorage is a simple in-memory storage for testing.

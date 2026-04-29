@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/icap-mock/icap-mock/internal/config"
+	"github.com/icap-mock/icap-mock/internal/storage"
 )
 
 // TestNewChecker tests creating a new health checker.
@@ -225,6 +226,34 @@ func TestServer_GetChecker(t *testing.T) {
 	if checker == nil {
 		t.Error("Checker() returned nil")
 	}
+}
+
+func TestServer_SetupAPIManagementDisabledByDefault(t *testing.T) {
+	server := newHealthServerForAPITest(t, "")
+	mux := setupServerAPIMux(t, server)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 while management is disabled, got %d", rec.Code)
+	}
+}
+
+func TestServer_SetupAPIUsesHealthAPITokenFallback(t *testing.T) {
+	server := newHealthServerForAPITest(t, "fallback-token")
+	server.ConfigureManagement(config.ManagementConfig{Enabled: true}, "")
+	mux := setupServerAPIMux(t, server)
+	assertServerAPIStatus(t, mux, "", http.StatusUnauthorized)
+	assertServerAPIStatus(t, mux, "wrong-token", http.StatusUnauthorized)
+	assertServerAPIStatus(t, mux, "fallback-token", http.StatusOK)
+}
+
+func TestServer_SetupAPIWithoutTokenAllowsUnauthenticated(t *testing.T) {
+	server := newHealthServerForAPITest(t, "")
+	server.ConfigureManagement(config.ManagementConfig{Enabled: true}, "")
+	mux := setupServerAPIMux(t, server)
+	assertServerAPIStatus(t, mux, "", http.StatusOK)
 }
 
 // TestServer_HealthEndpoint tests the /health endpoint.
@@ -627,5 +656,38 @@ func TestServer_MethodNotAllowed(t *testing.T) {
 		if rec.Code != http.StatusMethodNotAllowed {
 			t.Errorf("handleHealth() with %s status = %d, want %d", method, rec.Code, http.StatusMethodNotAllowed)
 		}
+	}
+}
+
+func newHealthServerForAPITest(t *testing.T, apiToken string) *Server {
+	t.Helper()
+	server, err := NewServer(&config.HealthConfig{Enabled: true, APIToken: apiToken})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	return server
+}
+
+func setupServerAPIMux(t *testing.T, server *Server) *http.ServeMux {
+	t.Helper()
+	server.SetupAPI(storage.NewScenarioRegistry())
+	if server.apiHandler == nil {
+		t.Fatalf("SetupAPI did not configure API handler")
+	}
+	mux := http.NewServeMux()
+	server.apiHandler.RegisterRoutes(mux)
+	return mux
+}
+
+func assertServerAPIStatus(t *testing.T, mux *http.ServeMux, token string, want int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != want {
+		t.Fatalf("expected %d with token %q, got %d", want, token, rec.Code)
 	}
 }

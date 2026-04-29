@@ -17,8 +17,34 @@ const (
 	// MaxChunkSize limits the maximum size of a single chunk.
 	MaxChunkSize = 1 << 20 // 1MB
 
+	// MaxChunkHeaderLength limits a chunk-size line, including the line terminator.
+	MaxChunkHeaderLength = 4096
+
+	// MaxTrailerLineLength limits one trailer line, including the line terminator.
+	MaxTrailerLineLength = 8192
+
+	// MaxTrailerCount limits the number of trailer header lines.
+	MaxTrailerCount = 100
+
+	// MaxTrailerBytes limits aggregate trailer bytes, including line terminators.
+	MaxTrailerBytes = 32 * 1024
+
 	// ChunkBufferSize is the default buffer size for chunked reading.
 	ChunkBufferSize = 4096
+)
+
+var (
+	// ErrChunkHeaderTooLong indicates that a chunk-size line exceeded the limit.
+	ErrChunkHeaderTooLong = errors.New("chunk header line exceeds maximum length")
+
+	// ErrTrailerLineTooLong indicates that one trailer line exceeded the limit.
+	ErrTrailerLineTooLong = errors.New("trailer line exceeds maximum length")
+
+	// ErrTooManyTrailers indicates that the trailer count exceeded the limit.
+	ErrTooManyTrailers = errors.New("too many trailer headers")
+
+	// ErrTrailersTooLarge indicates that aggregate trailer bytes exceeded the limit.
+	ErrTrailersTooLarge = errors.New("trailer headers exceed maximum size")
 )
 
 // crlfBytes is a pre-allocated CRLF byte slice to avoid repeated []byte("\r\n") conversions.
@@ -101,7 +127,7 @@ func (cr *ChunkedReader) Read(p []byte) (n int, err error) {
 
 // readChunkHeader reads and parses a chunk header line.
 func (cr *ChunkedReader) readChunkHeader() (int64, error) {
-	line, err := cr.r.ReadString('\n')
+	line, err := cr.readBoundedLine(MaxChunkHeaderLength, ErrChunkHeaderTooLong)
 	if err != nil {
 		return 0, err
 	}
@@ -124,6 +150,21 @@ func (cr *ChunkedReader) readChunkHeader() (int64, error) {
 	return size, nil
 }
 
+func (cr *ChunkedReader) readBoundedLine(limit int, limitErr error) (string, error) {
+	line := make([]byte, 0, limit)
+	for len(line) < limit {
+		b, err := cr.r.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		line = append(line, b)
+		if b == '\n' {
+			return string(line), nil
+		}
+	}
+	return "", limitErr
+}
+
 // readCRLF reads the trailing \r\n after chunk data.
 func (cr *ChunkedReader) readCRLF() error {
 	bp := crlfPool.Get().(*[]byte) //nolint:errcheck
@@ -142,10 +183,13 @@ func (cr *ChunkedReader) readCRLF() error {
 
 // readTrailer reads any trailer headers after the final chunk.
 func (cr *ChunkedReader) readTrailer() error {
+	trailerCount := 0
+	trailerBytes := 0
+
 	for {
-		line, err := cr.r.ReadString('\n')
+		line, err := cr.readBoundedLine(MaxTrailerLineLength, ErrTrailerLineTooLong)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return io.ErrUnexpectedEOF
 			}
 			return err
@@ -154,6 +198,17 @@ func (cr *ChunkedReader) readTrailer() error {
 		if line == "\r\n" || line == "\n" {
 			return nil
 		}
+
+		trailerCount++
+		if trailerCount > MaxTrailerCount {
+			return ErrTooManyTrailers
+		}
+
+		trailerBytes += len(line)
+		if trailerBytes > MaxTrailerBytes {
+			return ErrTrailersTooLarge
+		}
+
 		// Skip trailer headers for now
 	}
 }

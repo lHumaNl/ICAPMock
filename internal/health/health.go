@@ -166,10 +166,11 @@ func (c *Checker) GetStatus() Status {
 // Server provides HTTP endpoints for health and readiness checks.
 // It is designed to work with Kubernetes liveness and readiness probes.
 type Server struct {
-	config     *config.HealthConfig
 	server     *http.Server
 	checker    *Checker
 	apiHandler *APIHandler
+	config     *config.HealthConfig
+	mgmtConfig config.ManagementConfig
 }
 
 // NewServer creates a new Server with the given configuration.
@@ -184,8 +185,9 @@ func NewServer(cfg *config.HealthConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:  cfg,
-		checker: NewChecker(),
+		config:     cfg,
+		checker:    NewChecker(),
+		mgmtConfig: config.ManagementConfig{},
 	}, nil
 }
 
@@ -197,12 +199,25 @@ func (s *Server) Checker() *Checker {
 
 // SetupAPI configures the REST API for scenario management.
 // Must be called before Start(). If registry is nil, API endpoints are not registered.
-func (s *Server) SetupAPI(registry storage.ScenarioRegistry) {
+func (s *Server) SetupAPI(registry storage.ScenarioRegistry, managers ...RuntimeManager) {
 	if registry == nil {
 		return
 	}
 	token := s.config.APIToken
 	s.apiHandler = NewAPIHandler(registry, token)
+	s.apiHandler.SetScenarioCountUpdater(s.checker.SetScenariosCount)
+	s.apiHandler.ConfigureManagement(s.mgmtConfig, token)
+	if len(managers) > 0 {
+		s.apiHandler.SetManager(managers[0])
+	}
+}
+
+// ConfigureManagement sets management controls and authentication.
+func (s *Server) ConfigureManagement(cfg config.ManagementConfig, fallbackToken string) {
+	s.mgmtConfig = cfg
+	if s.apiHandler != nil {
+		s.apiHandler.ConfigureManagement(cfg, fallbackToken)
+	}
 }
 
 // Start starts the health check HTTP server.

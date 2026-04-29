@@ -4,6 +4,9 @@ package processor
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/icap-mock/icap-mock/internal/config"
+	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/logger"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
@@ -20,6 +24,17 @@ import (
 type mockScenarioRegistry struct {
 	scenario *storage.Scenario
 	err      error
+}
+
+type countingReader struct {
+	r     io.Reader
+	bytes int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	r.bytes += int64(n)
+	return n, err
 }
 
 func (m *mockScenarioRegistry) Match(_ *icap.Request) (*storage.Scenario, error) {
@@ -470,6 +485,47 @@ return result;
 	assert.NotNil(t, resp.Body)
 	assert.Contains(t, string(resp.Body), "reqMethod")
 	assert.Contains(t, string(resp.Body), "REQMOD")
+}
+
+func TestScriptProcessor_RequestBodyLimitReturnsControlledError(t *testing.T) {
+	registry := scriptRegistry(`return {status: 200, body: body};`)
+	reader := &countingReader{r: strings.NewReader("123456789")}
+	proc := NewScriptProcessorWithMaxBodySize(registry, nil, 5*time.Second, 5)
+	req := scriptBodyRequest(icap.MethodREQMOD, reader)
+
+	resp, err := proc.Process(context.Background(), req)
+
+	assert.Nil(t, resp)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperrors.ErrBodyTooLarge))
+	assert.LessOrEqual(t, reader.bytes, int64(6))
+}
+
+func TestScriptProcessor_ResponseBodyIsExposedToScript(t *testing.T) {
+	registry := scriptRegistry(`return {status: 200, body: body};`)
+	proc := NewScriptProcessorWithMaxBodySize(registry, nil, 5*time.Second, 0)
+	req := scriptBodyRequest(icap.MethodRESPMOD, strings.NewReader("response-body"))
+
+	resp, err := proc.Process(context.Background(), req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, []byte("response-body"), resp.Body)
+}
+
+func scriptRegistry(script string) storage.ScenarioRegistry {
+	return &mockScenarioRegistry{scenario: &storage.Scenario{Response: storage.ResponseTemplate{Script: script}}}
+}
+
+func scriptBodyRequest(method string, body io.Reader) *icap.Request {
+	req := &icap.Request{Method: method, URI: "icap://localhost/script", Header: icap.NewHeader()}
+	msg := &icap.HTTPMessage{Header: icap.NewHeader(), BodyReader: body}
+	if method == icap.MethodRESPMOD {
+		req.HTTPResponse = msg
+		return req
+	}
+	req.HTTPRequest = msg
+	return req
 }
 
 func TestScriptProcessor_InvalidResultType(t *testing.T) {

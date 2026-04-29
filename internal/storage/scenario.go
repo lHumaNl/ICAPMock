@@ -38,7 +38,44 @@ var (
 
 	// ErrInvalidCIDR is returned when a CIDR range is invalid.
 	ErrInvalidCIDR = errors.New("invalid CIDR range")
+
+	// ErrBodyPatternLimitExceeded is returned when body_pattern matching hits its configured limit.
+	ErrBodyPatternLimitExceeded = errors.New("body_pattern limit exceeded")
 )
+
+const defaultBodyPatternLimit int64 = 10 * 1024 * 1024
+
+// BodyPatternLimitAction controls behavior when body_pattern input exceeds the configured limit.
+type BodyPatternLimitAction string
+
+const (
+	// BodyPatternLimitActionNoMatch treats oversized bodies as a non-match.
+	BodyPatternLimitActionNoMatch BodyPatternLimitAction = "no_match"
+	// BodyPatternLimitActionError surfaces oversized bodies as controlled match errors.
+	BodyPatternLimitActionError BodyPatternLimitAction = "error"
+)
+
+// BodyPatternOptions configures body_pattern matching reads. Limit < 0 means unlimited.
+type BodyPatternOptions struct {
+	LimitAction BodyPatternLimitAction
+	Limit       int64
+}
+
+// DefaultBodyPatternOptions returns the legacy 10 MiB no-match behavior.
+func DefaultBodyPatternOptions() BodyPatternOptions {
+	return BodyPatternOptions{Limit: defaultBodyPatternLimit, LimitAction: BodyPatternLimitActionNoMatch}
+}
+
+func (o BodyPatternOptions) normalized() BodyPatternOptions {
+	if o.Limit == 0 {
+		o.Limit = defaultBodyPatternLimit
+	}
+	o.LimitAction = BodyPatternLimitAction(strings.ToLower(strings.TrimSpace(string(o.LimitAction))))
+	if o.LimitAction == "" {
+		o.LimitAction = BodyPatternLimitActionNoMatch
+	}
+	return o
+}
 
 // ScenarioRegistry manages mock scenarios for request matching.
 // It supports loading scenarios from YAML files and hot-reloading.
@@ -106,10 +143,12 @@ type Branch struct {
 type WeightedResponse struct {
 	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	HTTPHeaders  map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
+	Stream       *StreamConfig     `yaml:"stream,omitempty" json:"stream,omitempty"`
 	Body         string            `yaml:"body,omitempty" json:"body,omitempty"`
 	BodyFile     string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
 	HTTPBody     string            `yaml:"http_body,omitempty" json:"http_body,omitempty"`
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty" json:"http_body_file,omitempty"`
+	Error        string            `yaml:"error,omitempty" json:"error,omitempty"`
 	Delay        DelayConfig       `yaml:"-" json:"-"`
 	Weight       int               `yaml:"weight" json:"weight"`
 	ICAPStatus   int               `yaml:"icap_status,omitempty" json:"icap_status,omitempty"`
@@ -275,12 +314,15 @@ type ResponseTemplate struct {
 	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	HTTPHeaders  map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
 	DelayRange   *DelayConfig      `yaml:"-" json:"-"`
+	Stream       *StreamConfig     `yaml:"stream,omitempty" json:"stream,omitempty"`
+	Use          string            `yaml:"use,omitempty" json:"use,omitempty"`
 	Body         string            `yaml:"body,omitempty" json:"body,omitempty"`
 	BodyFile     string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
 	HTTPBody     string            `yaml:"http_body,omitempty" json:"http_body,omitempty"`
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty" json:"http_body_file,omitempty"`
 	Error        string            `yaml:"error,omitempty" json:"error,omitempty"`
 	Script       string            `yaml:"script,omitempty" json:"script,omitempty"`
+	Status       int               `yaml:"status,omitempty" json:"status,omitempty"`
 	ICAPStatus   int               `yaml:"icap_status" json:"icap_status"`
 	HTTPStatus   int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 	Delay        time.Duration     `yaml:"delay,omitempty" json:"delay,omitempty"`
@@ -288,7 +330,8 @@ type ResponseTemplate struct {
 
 // ScenarioFile represents the YAML structure for scenario files.
 type ScenarioFile struct {
-	Scenarios []Scenario `yaml:"scenarios"`
+	Responses map[string]ResponseTemplate `yaml:"responses,omitempty"`
+	Scenarios []Scenario                  `yaml:"scenarios"`
 }
 
 // DefaultScenario returns a default scenario that returns 204 No Content.
@@ -304,15 +347,22 @@ func DefaultScenario() *Scenario {
 
 // scenarioRegistry implements the ScenarioRegistry interface.
 type scenarioRegistry struct {
-	filePath  string
-	scenarios []*Scenario
-	mu        sync.RWMutex
+	bodyPattern BodyPatternOptions
+	filePath    string
+	scenarios   []*Scenario
+	mu          sync.RWMutex
 }
 
 // NewScenarioRegistry creates a new scenario registry.
 func NewScenarioRegistry() ScenarioRegistry {
+	return NewScenarioRegistryWithBodyPatternOptions(DefaultBodyPatternOptions())
+}
+
+// NewScenarioRegistryWithBodyPatternOptions creates a registry with body_pattern limits.
+func NewScenarioRegistryWithBodyPatternOptions(options BodyPatternOptions) ScenarioRegistry {
 	return &scenarioRegistry{
-		scenarios: []*Scenario{DefaultScenario()},
+		bodyPattern: options.normalized(),
+		scenarios:   []*Scenario{DefaultScenario()},
 	}
 }
 
@@ -351,11 +401,11 @@ func (r *scenarioRegistry) Load(path string) error {
 			scenarios = append(scenarios, *s)
 		}
 	} else {
-		var sf ScenarioFile
-		if err := yaml.Unmarshal(data, &sf); err != nil {
-			return NewScenarioParseError(path, err)
+		loaded, loadErr := loadScenarioFileV1(data, path)
+		if loadErr != nil {
+			return loadErr
 		}
-		scenarios = sf.Scenarios
+		scenarios = loaded
 	}
 
 	// Validate and compile regex patterns
@@ -445,6 +495,22 @@ func detectV2Format(data []byte) (isV2 bool, names []string, err error) {
 	return false, nil, nil
 }
 
+func loadScenarioFileV1(data []byte, path string) ([]Scenario, error) {
+	var sf ScenarioFile
+	if err := yaml.Unmarshal(data, &sf); err != nil {
+		return nil, NewScenarioParseError(path, err)
+	}
+	if err := resolveScenarioResponseRefs(sf.Scenarios, sf.Responses); err != nil {
+		return nil, &ScenarioError{
+			Operation:  "resolve_responses",
+			FilePath:   path,
+			Message:    err.Error(),
+			Suggestion: "check response use references",
+		}
+	}
+	return sf.Scenarios, nil
+}
+
 // validateAndCompile validates a scenario and compiles regex patterns.
 // It returns detailed ScenarioError instances with suggestions for fixes.
 func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocyclo // validation requires checking each field independently
@@ -497,6 +563,9 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 	}
 
 	// Validate ICAP status
+	if s.Response.ICAPStatus == 0 && s.Response.Status != 0 {
+		s.Response.ICAPStatus = s.Response.Status
+	}
 	if s.Response.ICAPStatus == 0 {
 		s.Response.ICAPStatus = 204 // Default to No Content
 	}
@@ -511,6 +580,12 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 				err,
 			)
 		}
+	}
+	if err := validateResponseStreaming(s.Name+" response", &s.Response, s.Match.Methods); err != nil {
+		return err
+	}
+	if err := validateWeightedStreaming(s.Name, s.WeightedResponses, s.Match.Methods); err != nil {
+		return err
 	}
 
 	// Compile header patterns with re: prefix
@@ -577,6 +652,16 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 	// and the HTTP URL. Endpoints/methods are not per-branch.
 	for idx := range s.Branches {
 		b := &s.Branches[idx]
+		where := fmt.Sprintf("%s branch #%d", s.Name, idx+1)
+		if b.Response.ICAPStatus == 0 && b.Response.Status != 0 {
+			b.Response.ICAPStatus = b.Response.Status
+		}
+		if err := validateResponseStreaming(where, &b.Response, s.Match.Methods); err != nil {
+			return err
+		}
+		if err := validateWeightedStreaming(where, b.WeightedResponses, s.Match.Methods); err != nil {
+			return err
+		}
 		for key, value := range b.Match.Headers {
 			if !strings.HasPrefix(value, "re:") {
 				continue
@@ -632,7 +717,11 @@ func (r *scenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 	checkedCount := 0
 	for _, s := range r.scenarios {
 		checkedCount++
-		if r.matches(s, req) {
+		matched, err := r.matches(s, req)
+		if err != nil {
+			return nil, err
+		}
+		if matched {
 			return s, nil
 		}
 	}
@@ -646,10 +735,10 @@ func (r *scenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 }
 
 // matches checks if a scenario matches the given request.
-func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //nolint:gocyclo // scenario matching checks each rule field sequentially
+func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	// Check ICAP method
 	if !methodMatches(s.Match.Methods, req.Method) {
-		return false
+		return false, nil
 	}
 
 	// Check endpoint(s). Any one match is enough; capture names from the
@@ -658,7 +747,7 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 	if len(s.compiledPaths) > 0 {
 		caps, ok := matchEndpoint(s.compiledPaths, extractPath(req.URI))
 		if !ok {
-			return false
+			return false, nil
 		}
 		if len(caps) > 0 {
 			if req.Captures == nil {
@@ -674,15 +763,15 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 	for key, value := range s.Match.Headers {
 		h, ok := req.Header.Get(key)
 		if !ok {
-			return false
+			return false, nil
 		}
 		if compiled, hasRegex := s.compiledHeaders[key]; hasRegex {
 			if !compiled.MatchString(h) {
-				return false
+				return false, nil
 			}
 		} else {
 			if h != value {
-				return false
+				return false, nil
 			}
 		}
 	}
@@ -690,10 +779,10 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 	// Check HTTP method - if scenario specifies HTTP method, request must have HTTP request
 	if s.Match.HTTPMethod != "" {
 		if req.HTTPRequest == nil {
-			return false
+			return false, nil
 		}
 		if req.HTTPRequest.Method != s.Match.HTTPMethod {
-			return false
+			return false, nil
 		}
 	}
 
@@ -702,19 +791,19 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 	// the right side by ICAP method and falls back to the other side.
 	if len(s.Match.HTTPHeaders) > 0 {
 		if !hasEncapsulatedHTTP(req) {
-			return false
+			return false, nil
 		}
 		for key, value := range s.Match.HTTPHeaders {
 			h, ok := httpHeaderLookup(req, key)
 			if !ok {
-				return false
+				return false, nil
 			}
 			if compiled, hasRegex := s.compiledHTTPHeaders[key]; hasRegex {
 				if !compiled.MatchString(h) {
-					return false
+					return false, nil
 				}
 			} else if h != value {
-				return false
+				return false, nil
 			}
 		}
 	}
@@ -723,50 +812,88 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) bool { //noli
 	// even for RESPMOD (req-hdr part of Encapsulated).
 	if s.Match.HTTPURL != "" {
 		if req.HTTPRequest == nil {
-			return false
+			return false, nil
 		}
 		if s.compiledHTTPURL != nil {
 			if !s.compiledHTTPURL.MatchString(req.HTTPRequest.URI) {
-				return false
+				return false, nil
 			}
 		} else if req.HTTPRequest.URI != s.Match.HTTPURL {
-			return false
+			return false, nil
 		}
 	}
 
 	// Check body pattern - load body only if pattern exists (lazy loading)
-	if s.compiledBody != nil && req.HTTPRequest != nil {
-		body, err := req.HTTPRequest.GetBody()
-		if err != nil {
-			// Log error but don't fail the match
-			return false
+	if s.compiledBody != nil {
+		msg := bodyPatternMessage(req)
+		if msg == nil {
+			return false, nil
 		}
-		if !s.compiledBody.MatchString(string(body)) {
-			return false
+		matched, err := bodyPatternMatches(s.compiledBody, msg, r.bodyPattern)
+		if err != nil || !matched {
+			return false, err
 		}
 	}
 
 	// Check client IP (exact match)
 	if s.Match.ClientIP != "" {
 		if !matchClientIP(s.Match.ClientIP, req.ClientIP) {
-			return false
+			return false, nil
 		}
 	}
 
 	// Check CIDR ranges
 	if len(s.compiledCIDRs) > 0 {
 		if !matchByCIDR(s.compiledCIDRs, req.ClientIP) {
-			return false
+			return false, nil
 		}
 	}
 
 	// If the scenario has branches, require at least one to match; otherwise
 	// treat the scenario as non-matching so the registry tries the next one.
 	if len(s.Branches) > 0 && s.SelectBranch(req) < 0 {
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, nil
+}
+
+func bodyPatternMatches(pattern *regexp.Regexp, msg *icap.HTTPMessage, options BodyPatternOptions) (bool, error) {
+	body, err := readBodyForPattern(msg, options.normalized())
+	if err != nil {
+		return handleBodyPatternReadError(err, options.normalized())
+	}
+	return pattern.Match(body), nil
+}
+
+func bodyPatternMessage(req *icap.Request) *icap.HTTPMessage {
+	switch req.Method {
+	case icap.MethodRESPMOD:
+		return req.HTTPResponse
+	case icap.MethodREQMOD:
+		return req.HTTPRequest
+	}
+	if req.HTTPRequest != nil {
+		return req.HTTPRequest
+	}
+	return req.HTTPResponse
+}
+
+func readBodyForPattern(msg *icap.HTTPMessage, options BodyPatternOptions) ([]byte, error) {
+	if options.Limit < 0 {
+		return msg.GetBody()
+	}
+	return msg.GetBodyLimited(options.Limit)
+}
+
+func handleBodyPatternReadError(err error, options BodyPatternOptions) (bool, error) {
+	if errors.Is(err, icap.ErrBodyTooLarge) {
+		if options.LimitAction == BodyPatternLimitActionNoMatch {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w: max %d bytes", ErrBodyPatternLimitExceeded, options.Limit)
+	}
+	return false, fmt.Errorf("reading body for body_pattern: %w", err)
 }
 
 // endpointCapturePattern finds "{name}" placeholders in an endpoint string.

@@ -463,10 +463,11 @@ func TestReqmodHandlerRateLimiting(t *testing.T) {
 		m, _ := metrics.NewCollector(reg)
 
 		config := handler.PreviewRateLimiterConfig{
-			Enabled:       true,
-			MaxRequests:   2,
-			WindowSeconds: 10,
-			MaxClients:    100,
+			Enabled:             true,
+			MaxRequests:         2,
+			WindowSeconds:       10,
+			MaxClients:          100,
+			TrustClientIDHeader: true,
 		}
 		previewRateLimiter := handler.NewPreviewRateLimiter(config, m, nil)
 
@@ -611,10 +612,11 @@ func TestReqmodHandlerRateLimiting(t *testing.T) {
 		m, _ := metrics.NewCollector(reg)
 
 		config := handler.PreviewRateLimiterConfig{
-			Enabled:       true,
-			MaxRequests:   2,
-			WindowSeconds: 10,
-			MaxClients:    100,
+			Enabled:             true,
+			MaxRequests:         2,
+			WindowSeconds:       10,
+			MaxClients:          100,
+			TrustClientIDHeader: true,
 		}
 		previewRateLimiter := handler.NewPreviewRateLimiter(config, m, nil)
 

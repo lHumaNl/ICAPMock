@@ -31,6 +31,9 @@ const (
 	VersionMinor = 0
 )
 
+// DefaultMaxPreviewBytes bounds attacker-controlled Preview header values.
+const DefaultMaxPreviewBytes = 1 * 1024 * 1024
+
 // Error definitions for request parsing.
 var (
 	ErrInvalidRequestLine = errors.New("invalid request line")
@@ -39,6 +42,7 @@ var (
 	ErrMissingURI         = errors.New("missing URI")
 	ErrInvalidURIScheme   = errors.New("invalid URI scheme, expected icap://")
 	ErrMissingHost        = errors.New("missing Host header")
+	ErrBodyTooLarge       = errors.New("body too large")
 )
 
 // StreamingBody wraps an io.Reader to provide a streaming body with O(1) memory usage.
@@ -137,11 +141,15 @@ func (e Encapsulated) HasResBody() bool {
 // the result in the provided body slice and error pointers. The errFmt parameter
 // is used to wrap any read error (e.g., "loading body: %w").
 func lazyLoadBody(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]byte, loaded *bool, bodyErr *error, errFmt string) ([]byte, error) { //nolint:gocritic // ptrToRefParam: pointer needed to read from caller's io.Reader field
+	return lazyLoadBodyLimited(once, mu, reader, body, loaded, bodyErr, -1, errFmt)
+}
+
+func lazyLoadBodyLimited(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]byte, loaded *bool, bodyErr *error, maxBytes int64, errFmt string) ([]byte, error) { //nolint:gocritic // ptrToRefParam: pointer needed to read from caller's io.Reader field
 	once.Do(func() {
 		if *reader == nil {
 			return
 		}
-		data, err := io.ReadAll(*reader)
+		data, err := readAllLimited(*reader, maxBytes)
 		mu.Lock()
 		if err != nil {
 			*bodyErr = fmt.Errorf(errFmt, err)
@@ -155,7 +163,28 @@ func lazyLoadBody(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]
 
 	mu.RLock()
 	defer mu.RUnlock()
+	if *bodyErr != nil {
+		return nil, *bodyErr
+	}
+	if maxBytes >= 0 && int64(len(*body)) > maxBytes {
+		return nil, fmt.Errorf("%w: max %d bytes", ErrBodyTooLarge, maxBytes)
+	}
 	return *body, *bodyErr
+}
+
+func readAllLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes < 0 {
+		return io.ReadAll(reader)
+	}
+	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: max %d bytes", ErrBodyTooLarge, maxBytes)
+	}
+	return data, nil
 }
 
 // HTTPMessage represents an embedded HTTP request or response.
@@ -168,6 +197,7 @@ func lazyLoadBody(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]
 // exclusive access to the message.
 type HTTPMessage struct {
 	BodyReader io.Reader
+	BodyStream *BodyStream
 	bodyErr    error
 	Header     Header
 	Method     string
@@ -190,6 +220,14 @@ type HTTPMessage struct {
 // but note that direct BodyReader access bypasses thread-safety.
 func (m *HTTPMessage) GetBody() ([]byte, error) {
 	return lazyLoadBody(&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, "loading body: %w")
+}
+
+// GetBodyLimited returns the body content without reading more than maxBytes+1
+// from BodyReader. It stores ErrBodyTooLarge for oversized lazy-loaded bodies.
+func (m *HTTPMessage) GetBodyLimited(maxBytes int64) ([]byte, error) {
+	return lazyLoadBodyLimited(
+		&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, maxBytes, "loading body: %w",
+	)
 }
 
 // HasBody returns true if the message has a body available.
@@ -245,6 +283,9 @@ func (m *HTTPMessage) GetPreviewBody(previewSize int) ([]byte, error) {
 		// No preview requested, read entire body
 		return m.GetBody()
 	}
+	if previewSize > DefaultMaxPreviewBytes {
+		return nil, fmt.Errorf("preview size exceeds maximum %d bytes: %d", DefaultMaxPreviewBytes, previewSize)
+	}
 
 	// Check if body is already loaded
 	m.mu.RLock()
@@ -260,22 +301,23 @@ func (m *HTTPMessage) GetPreviewBody(previewSize int) ([]byte, error) {
 		return body[:previewSize], nil
 	}
 
-	// Body is not loaded yet, read only preview portion from reader
-	// Note: BodyReader access is not mutex-protected by design (see doc comment on HTTPMessage).
-	// This is safe because preview reading happens before any concurrent GetBody() call.
-	if m.BodyReader == nil {
+	m.mu.RLock()
+	reader := m.BodyReader
+	m.mu.RUnlock()
+	if reader == nil {
 		return nil, nil // No body to preview
 	}
 
-	// Read only previewSize bytes from the reader
-	preview := make([]byte, previewSize)
-	n, err := io.ReadFull(m.BodyReader, preview)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+	boundedReader := io.LimitReader(reader, int64(previewSize))
+	preview, err := io.ReadAll(boundedReader)
+	m.mu.Lock()
+	m.BodyReader = io.MultiReader(bytes.NewReader(preview), reader)
+	m.mu.Unlock()
+	if err != nil {
 		return nil, fmt.Errorf("reading preview body: %w", err)
 	}
 
-	// Return the actual bytes read (may be less than previewSize)
-	return preview[:n], nil
+	return preview, nil
 }
 
 // Request represents an ICAP request.
@@ -421,6 +463,14 @@ func ParseRequest(r *bufio.Reader) (*Request, error) { //nolint:gocyclo // ICAP 
 		Encapsulated: NewEncapsulated(),
 	}
 
+	// Parse Preview header before body setup to reject oversized values early.
+	if previewStr, exists := header.Get("Preview"); exists {
+		req.Preview, err = ParsePreviewHeader(previewStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing Preview header: %w", err)
+		}
+	}
+
 	// Parse Encapsulated header
 	if encapStr, exists := header.Get("Encapsulated"); exists {
 		req.Encapsulated, err = ParseEncapsulatedHeader(encapStr)
@@ -434,21 +484,16 @@ func ParseRequest(r *bufio.Reader) (*Request, error) { //nolint:gocyclo // ICAP 
 		}
 	}
 
-	// Parse Preview header (RFC 3507 Section 4.6)
-	if previewStr, exists := header.Get("Preview"); exists {
-		req.Preview, err = ParsePreviewHeader(previewStr)
-		if err != nil {
-			return nil, fmt.Errorf("parsing Preview header: %w", err)
-		}
-	}
-
 	return req, nil
 }
 
 // parseEncapsulatedMessage parses the embedded HTTP request or response.
-// This implementation uses TRUE O(1) STREAMING - it does NOT buffer the body.
+// This implementation streams the final encapsulated body without buffering.
 // HTTP headers are parsed directly from the stream, and the remaining stream
 // (the chunked HTTP body) is passed to HTTPMessage.BodyReader for lazy consumption.
+// RESPMOD messages with req-body before res-hdr buffer only that bounded
+// request-body section so the response headers can be parsed at the declared
+// Encapsulated offset.
 //
 // Memory usage is constant regardless of body size:
 // - Before: O(body_size) per request (buffered entire body)
@@ -459,6 +504,9 @@ func ParseRequest(r *bufio.Reader) (*Request, error) { //nolint:gocyclo // ICAP 
 func (r *Request) parseEncapsulatedMessage(reader *bufio.Reader) error {
 	if r.Encapsulated.IsEmpty() {
 		return nil
+	}
+	if r.needsRESPMODSegmentation() {
+		return r.parseRESPMODSegmented(reader)
 	}
 
 	// For REQMOD: parse HTTP request
@@ -482,6 +530,152 @@ func (r *Request) parseEncapsulatedMessage(reader *bufio.Reader) error {
 		}
 	}
 
+	return nil
+}
+
+func (r *Request) needsRESPMODSegmentation() bool {
+	return r.Method == MethodRESPMOD && r.Encapsulated.HasReqBody() && r.Encapsulated.ResHdr >= 0
+}
+
+func (r *Request) parseRESPMODSegmented(reader *bufio.Reader) error {
+	encap := r.Encapsulated
+	if err := validateRESPMODOffsets(encap); err != nil {
+		return err
+	}
+	if err := discardSection(reader, encap.ReqHdr, "request offset"); err != nil {
+		return err
+	}
+	requestHeader, err := readSection(reader, encap.ReqBody-encap.ReqHdr, "HTTP request header")
+	if err != nil {
+		return err
+	}
+	if r.HTTPRequest, err = parseHTTPRequestSection(requestHeader); err != nil {
+		return err
+	}
+	return r.parseRESPMODTail(reader)
+}
+
+func (r *Request) parseRESPMODTail(reader *bufio.Reader) error {
+	encap := r.Encapsulated
+	requestBody, err := readSection(reader, encap.ResHdr-encap.ReqBody, "HTTP request body")
+	if err != nil {
+		return err
+	}
+	if len(requestBody) > 0 {
+		r.HTTPRequest.BodyReader = NewChunkedReader(bytes.NewReader(requestBody))
+	}
+	return r.parseSegmentedHTTPResponse(reader)
+}
+
+func (r *Request) parseSegmentedHTTPResponse(reader *bufio.Reader) error {
+	responseEnd := r.segmentedResponseEnd()
+	if responseEnd < 0 {
+		return r.parseHTTPResponseStreaming(reader)
+	}
+	responseHeader, err := readSection(reader, responseEnd-r.Encapsulated.ResHdr, "HTTP response header")
+	if err != nil {
+		return err
+	}
+	if r.HTTPResponse, err = parseHTTPResponseSection(responseHeader); err != nil {
+		return err
+	}
+	if r.Encapsulated.HasResBody() {
+		r.HTTPResponse.BodyReader = NewChunkedReader(reader)
+	}
+	return nil
+}
+
+func (r *Request) segmentedResponseEnd() int {
+	if r.Encapsulated.HasResBody() {
+		return r.Encapsulated.ResBody
+	}
+	return r.Encapsulated.NullBody
+}
+
+func validateRESPMODOffsets(encap Encapsulated) error {
+	if encap.ReqHdr < 0 || encap.ReqBody < encap.ReqHdr || encap.ResHdr < encap.ReqBody {
+		return errors.New("invalid RESPMOD encapsulated offsets")
+	}
+	if encap.HasResBody() && encap.ResBody < encap.ResHdr {
+		return errors.New("invalid RESPMOD response body offset")
+	}
+	if encap.NullBody >= 0 && encap.NullBody < encap.ResHdr {
+		return errors.New("invalid RESPMOD null body offset")
+	}
+	return nil
+}
+
+func readSection(reader io.Reader, size int, name string) ([]byte, error) {
+	if size < 0 {
+		return nil, fmt.Errorf("invalid %s section size: %d", name, size)
+	}
+	data := make([]byte, size)
+	if _, err := io.ReadFull(reader, data); err != nil {
+		return nil, fmt.Errorf("reading %s section: %w", name, err)
+	}
+	return data, nil
+}
+
+func discardSection(reader io.Reader, size int, name string) error {
+	if size < 0 {
+		return fmt.Errorf("invalid %s section size: %d", name, size)
+	}
+	_, err := io.CopyN(io.Discard, reader, int64(size))
+	if err != nil {
+		return fmt.Errorf("reading %s section: %w", name, err)
+	}
+	return nil
+}
+
+func parseHTTPRequestSection(data []byte) (*HTTPMessage, error) {
+	reader := bufio.NewReader(bytes.NewReader(data))
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("reading HTTP request line: %w", err)
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(line, "\r\n"), "\n"), " ")
+	if len(parts) < 3 {
+		return nil, errors.New("invalid HTTP request line")
+	}
+	message := newHTTPMessage(parts[2])
+	message.Method, message.URI = parts[0], parts[1]
+	if err := readHTTPMessageHeaders(reader, message); err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+func parseHTTPResponseSection(data []byte) (*HTTPMessage, error) {
+	reader := bufio.NewReader(bytes.NewReader(data))
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("reading HTTP response line: %w", err)
+	}
+	parts := strings.SplitN(strings.TrimSuffix(strings.TrimSuffix(line, "\r\n"), "\n"), " ", 3)
+	if len(parts) < 3 {
+		return nil, errors.New("invalid HTTP response line")
+	}
+	message := newHTTPMessage(parts[0])
+	message.Status, message.StatusText = parts[1], parts[2]
+	if err := readHTTPMessageHeaders(reader, message); err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+func newHTTPMessage(proto string) *HTTPMessage {
+	hdrPtr := pool.HeaderMapPool.Get()
+	return &HTTPMessage{Proto: proto, Header: Header(*hdrPtr)}
+}
+
+func readHTTPMessageHeaders(reader *bufio.Reader, message *HTTPMessage) error {
+	headerMap, err := textproto.NewReader(reader).ReadMIMEHeader()
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("reading HTTP headers: %w", err)
+	}
+	for k, v := range headerMap {
+		message.Header[k] = v
+	}
 	return nil
 }
 
@@ -783,6 +977,9 @@ func ParsePreviewHeader(s string) (int, error) {
 	// Validate that the value is non-negative
 	if value < 0 {
 		return 0, fmt.Errorf("preview value must be non-negative: %d", value)
+	}
+	if value > DefaultMaxPreviewBytes {
+		return 0, fmt.Errorf("preview value exceeds maximum %d bytes: %d", DefaultMaxPreviewBytes, value)
 	}
 
 	return value, nil

@@ -42,6 +42,21 @@ var (
 	ErrMalformedHeaders = errors.New("malformed headers")
 	// ErrBodyTooLarge indicates the body exceeds the size limit.
 	ErrBodyTooLarge = errors.New("body too large")
+	// ErrLineTooLong indicates a protocol line exceeded the configured limit.
+	ErrLineTooLong = errors.New("protocol line too long")
+	// ErrHeadersTooLarge indicates the aggregate header section exceeded the limit.
+	ErrHeadersTooLarge = errors.New("headers too large")
+)
+
+const (
+	maxProtocolRequestLineBytes = 8 * 1024
+	maxProtocolStatusLineBytes  = 4 * 1024
+	maxProtocolHeaderLineBytes  = 8 * 1024
+	maxProtocolHeaderBytes      = 64 * 1024
+
+	// maxHeaders is the maximum number of headers allowed in a single ICAP request.
+	// This prevents OOM attacks from clients sending excessive headers.
+	maxHeaders = 1000
 )
 
 // parseRequestLine parses an ICAP request line.
@@ -50,14 +65,10 @@ var (
 //
 // Returns the method, URI, version, and any error encountered.
 func parseRequestLine(reader BufferedReader) (method, uri, version string, err error) {
-	line, err := reader.ReadString('\n')
+	line, err := readProtocolLine(reader, maxProtocolRequestLineBytes)
 	if err != nil {
 		return "", "", "", fmt.Errorf("reading request line: %w", err)
 	}
-
-	// Remove trailing \r\n or \n
-	line = strings.TrimSuffix(line, "\r\n")
-	line = strings.TrimSuffix(line, "\n")
 
 	// Split into parts
 	parts := strings.Split(line, " ")
@@ -87,10 +98,6 @@ func parseRequestLine(reader BufferedReader) (method, uri, version string, err e
 	return method, uri, version, nil
 }
 
-// maxHeaders is the maximum number of headers allowed in a single ICAP request.
-// This prevents OOM attacks from clients sending excessive headers.
-const maxHeaders = 1000
-
 // parseHeaders reads and parses ICAP headers from the reader.
 // Headers are read until an empty line is encountered.
 // Returns an error if more than maxHeaders headers are received.
@@ -99,9 +106,10 @@ const maxHeaders = 1000
 func parseHeaders(reader BufferedReader) (icap.Header, error) {
 	headers := make(icap.Header)
 	count := 0
+	totalBytes := 0
 
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := readProtocolLine(reader, maxProtocolHeaderLineBytes)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -109,9 +117,10 @@ func parseHeaders(reader BufferedReader) (icap.Header, error) {
 			return nil, fmt.Errorf("reading headers: %w", err)
 		}
 
-		// Remove trailing \r\n or \n
-		line = strings.TrimSuffix(line, "\r\n")
-		line = strings.TrimSuffix(line, "\n")
+		totalBytes += len(line) + len("\r\n")
+		if totalBytes > maxProtocolHeaderBytes {
+			return nil, fmt.Errorf("%w: max %d bytes", ErrHeadersTooLarge, maxProtocolHeaderBytes)
+		}
 
 		// Empty line signals end of headers
 		if line == "" {
@@ -132,6 +141,44 @@ func parseHeaders(reader BufferedReader) (icap.Header, error) {
 	}
 
 	return headers, nil
+}
+
+func readProtocolLine(reader io.Reader, maxBytes int) (string, error) {
+	buf := make([]byte, 0, 256)
+	var one [1]byte
+	for {
+		n, err := reader.Read(one[:])
+		if n > 0 {
+			line, done, lineErr := appendProtocolLineByte(buf, one[0], maxBytes)
+			buf = line
+			if done || lineErr != nil {
+				return string(trimProtocolLineEnding(buf)), lineErr
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) && len(buf) > 0 {
+				return string(trimProtocolLineEnding(buf)), nil
+			}
+			return "", err
+		}
+	}
+}
+
+func appendProtocolLineByte(buf []byte, b byte, maxBytes int) (line []byte, done bool, err error) {
+	if b == '\n' {
+		return buf, true, nil
+	}
+	if len(buf) >= maxBytes {
+		return buf, false, fmt.Errorf("%w: max %d bytes", ErrLineTooLong, maxBytes)
+	}
+	return append(buf, b), false, nil
+}
+
+func trimProtocolLineEnding(line []byte) []byte {
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		return line[:len(line)-1]
+	}
+	return line
 }
 
 // parseHeaderLine parses a single header line.
@@ -180,6 +227,12 @@ func parseICAPRequest(reader BufferedReader) (*icap.Request, error) {
 		Proto:  proto,
 		Header: headers,
 	}
+	if previewStr, ok := headers.Get("Preview"); ok {
+		req.Preview, err = icap.ParsePreviewHeader(previewStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing Preview header: %w", err)
+		}
+	}
 
 	// Parse Encapsulated header if present
 	if encapStr, ok := headers.Get("Encapsulated"); ok {
@@ -223,6 +276,9 @@ func parseEmbeddedHTTP(req *icap.Request) error {
 	if req.BodyReader == nil {
 		return nil
 	}
+	if needsSegmentedRESPMODParsing(req) {
+		return parseSegmentedRESPMOD(req)
+	}
 
 	// For REQMOD: parse HTTP request
 	// For RESPMOD: parse HTTP request first (it's at the start), then HTTP response
@@ -264,7 +320,7 @@ func parseEmbeddedHTTPRequestStreaming(req *icap.Request) error {
 	}
 
 	// Parse HTTP request line
-	line, err := reader.ReadString('\n')
+	line, err := readProtocolLine(reader, maxProtocolRequestLineBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// No body content, nothing to parse
@@ -273,8 +329,6 @@ func parseEmbeddedHTTPRequestStreaming(req *icap.Request) error {
 		return fmt.Errorf("reading HTTP request line: %w", err)
 	}
 
-	line = strings.TrimSuffix(line, "\r\n")
-	line = strings.TrimSuffix(line, "\n")
 	parts := strings.Split(line, " ")
 	if len(parts) < 3 {
 		return errors.New("invalid embedded HTTP request line")
@@ -320,7 +374,7 @@ func parseEmbeddedHTTPResponseStreaming(req *icap.Request) error {
 	}
 
 	// Parse HTTP status line
-	line, err := reader.ReadString('\n')
+	line, err := readProtocolLine(reader, maxProtocolStatusLineBytes)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			// No body content, nothing to parse
@@ -329,8 +383,6 @@ func parseEmbeddedHTTPResponseStreaming(req *icap.Request) error {
 		return fmt.Errorf("reading HTTP response line: %w", err)
 	}
 
-	line = strings.TrimSuffix(line, "\r\n")
-	line = strings.TrimSuffix(line, "\n")
 	parts := strings.SplitN(line, " ", 3)
 	if len(parts) < 3 {
 		return errors.New("invalid embedded HTTP response line")
@@ -372,27 +424,64 @@ func writeResponseFromICAP(writer BufferedWriter, resp *icap.Response) error {
 	return writer.Flush()
 }
 
-// extractClientIP extracts the client IP address from headers or remote address.
-// The X-Client-IP header takes precedence over the remote address.
+// extractClientIP extracts the canonical client IP address.
+// X-Client-IP is honored only when explicitly enabled and sent by a trusted proxy.
 //
 // Parameters:
 //   - headers: The request headers
 //   - remoteAddr: The remote address string (e.g., "192.168.1.1:12345")
 //
 // Returns the extracted IP address.
-func extractClientIP(headers icap.Header, remoteAddr string) string {
-	// Check X-Client-IP header first (used by proxies)
-	if clientIP, ok := headers.Get("X-Client-IP"); ok && clientIP != "" {
-		return clientIP
+func extractClientIP(headers icap.Header, remoteAddr string, trustHeader bool, trustedProxies []string) string {
+	peerIP := extractPeerIP(remoteAddr)
+	if trustHeader && isTrustedProxy(peerIP, trustedProxies) {
+		if clientIP, ok := validClientIPHeader(headers); ok {
+			return clientIP
+		}
 	}
+	return peerIP
+}
 
-	// Fall back to remote address
+func extractPeerIP(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		return remoteAddr
 	}
-
 	return host
+}
+
+func validClientIPHeader(headers icap.Header) (string, bool) {
+	clientIP, ok := headers.Get("X-Client-IP")
+	if !ok {
+		return "", false
+	}
+	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
+	return clientIP, net.ParseIP(clientIP) != nil
+}
+
+func isTrustedProxy(peerIP string, trustedProxies []string) bool {
+	if len(trustedProxies) == 0 {
+		return true
+	}
+	ip := net.ParseIP(peerIP)
+	return ip != nil && proxyListContainsIP(ip, trustedProxies)
+}
+
+func proxyListContainsIP(ip net.IP, trustedProxies []string) bool {
+	for _, proxy := range trustedProxies {
+		if proxyMatchesIP(ip, strings.TrimSpace(proxy)) {
+			return true
+		}
+	}
+	return false
+}
+
+func proxyMatchesIP(ip net.IP, proxy string) bool {
+	if proxyIP := net.ParseIP(proxy); proxyIP != nil {
+		return proxyIP.Equal(ip)
+	}
+	_, network, err := net.ParseCIDR(proxy)
+	return err == nil && network.Contains(ip)
 }
 
 // isValidICAPMethod checks if the method is a valid ICAP method.

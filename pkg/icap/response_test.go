@@ -4,6 +4,7 @@ package icap_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -286,6 +287,28 @@ func TestResponseClone(t *testing.T) {
 	}
 }
 
+func TestResponseClone_ReplayableBodyStreamIsIndependent(t *testing.T) {
+	original := responseWithBodyStream(icap.NewBytesStreamPayload([]byte("abcd")))
+	clone := original.Clone()
+	clone.HTTPResponse.BodyStream.ChunkSize = 1
+
+	if original.HTTPResponse.BodyStream == clone.HTTPResponse.BodyStream {
+		t.Fatal("BodyStream was shallow-copied")
+	}
+	assertResponseContains(t, original, "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n")
+	assertResponseContains(t, clone, "1\r\na\r\n1\r\nb\r\n1\r\nc\r\n1\r\nd\r\n0\r\n\r\n")
+}
+
+func TestResponseClone_OneShotBodyStreamReuseFailsClearly(t *testing.T) {
+	original := responseWithBodyStream(icap.NewOneShotStreamPayload(io.NopCloser(strings.NewReader("abc")), 3))
+	clone := original.Clone()
+
+	assertResponseContains(t, original, "2\r\nab\r\n1\r\nc\r\n0\r\n\r\n")
+	if _, err := clone.WriteTo(&bytes.Buffer{}); !errors.Is(err, icap.ErrStreamPayloadConsumed) {
+		t.Fatalf("clone WriteTo() error = %v, want ErrStreamPayloadConsumed", err)
+	}
+}
+
 // TestResponseError tests creating error responses.
 func TestResponseError(t *testing.T) {
 	tests := []struct {
@@ -552,6 +575,26 @@ func TestReadResponse(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func responseWithBodyStream(payload icap.StreamPayload) *icap.Response {
+	resp := icap.NewResponse(icap.StatusOK)
+	resp.HTTPResponse = &icap.HTTPMessage{
+		Proto: "HTTP/1.1", Status: "200", StatusText: "OK", Header: icap.NewHeader(),
+		BodyStream: &icap.BodyStream{Payload: payload, ChunkSize: 2, FinishMode: icap.StreamFinishComplete},
+	}
+	return resp
+}
+
+func assertResponseContains(t *testing.T, resp *icap.Response, want string) {
+	t.Helper()
+	var buf bytes.Buffer
+	if _, err := resp.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), want) {
+		t.Fatalf("response missing %q: %q", want, buf.String())
 	}
 }
 

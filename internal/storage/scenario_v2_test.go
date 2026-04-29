@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -137,7 +138,7 @@ func TestDelayConfig_Duration_RangeEqual(t *testing.T) {
 // --- ParseMatch tests ---
 
 func TestParseMatch_Exact(t *testing.T) {
-	cases := []string{"hello", "exact value", "Worm.BAT.Autorun.u", ""}
+	cases := []string{"hello", "exact value", "synthetic-test-token", ""}
 
 	for _, input := range cases {
 		t.Run(input, func(t *testing.T) {
@@ -164,8 +165,8 @@ func TestParseMatch_Regex(t *testing.T) {
 		pattern string
 	}{
 		{"re:^hello.*", "^hello.*"},
-		{"re:(?i)worm\\.bat\\..*", "(?i)worm\\.bat\\..*"},
-		{"re:[a-f0-9]{64}", "[a-f0-9]{64}"},
+		{"re:(?i)^synthetic\\.[a-z0-9.-]+$", "(?i)^synthetic\\.[a-z0-9.-]+$"},
+		{"re:^[a-f0-9]{64}$", "^[a-f0-9]{64}$"},
 	}
 
 	for _, tc := range cases {
@@ -244,11 +245,11 @@ func TestMatchValue_Matches_Regex(t *testing.T) {
 	}{
 		{"re:^hello.*", "hello world", true},
 		{"re:^hello.*", "world hello", false},
-		{"re:(?i)worm\\.bat\\..*", "Worm.BAT.Autorun.u", true},
-		{"re:(?i)worm\\.bat\\..*", "worm.bat.coparer", true},
-		{"re:(?i)worm\\.bat\\..*", "safe.file.exe", false},
-		{"re:[a-f0-9]{64}", "a3f1b2c4d5e6a3f1b2c4d5e6a3f1b2c4d5e6a3f1b2c4d5e6a3f1b2c4d5e6a3f1", true},
-		{"re:[a-f0-9]{64}", "short", false},
+		{"re:(?i)^synthetic\\.[a-z0-9.-]+$", "Synthetic.sample-token", true},
+		{"re:(?i)^synthetic\\.[a-z0-9.-]+$", "synthetic.test-case", true},
+		{"re:(?i)^synthetic\\.[a-z0-9.-]+$", "safe.file.exe", false},
+		{"re:^[a-f0-9]{64}$", strings.Repeat("0", 64), true},
+		{"re:^[a-f0-9]{64}$", "short", false},
 	}
 
 	for _, tc := range cases {
@@ -454,7 +455,7 @@ func TestConvertV2ToScenarios_WhenHeaders(t *testing.T) {
 		Scenarios: map[string]ScenarioEntryV2{
 			"with-when": {
 				When: map[string]string{
-					"X-Filename": "malware.exe",
+					"X-Filename": "synthetic-block.exe",
 					"X-Other":    "re:^value.*",
 				},
 			},
@@ -467,8 +468,8 @@ func TestConvertV2ToScenarios_WhenHeaders(t *testing.T) {
 	}
 
 	s := scenarios[0]
-	if s.Match.Headers["X-Filename"] != "malware.exe" {
-		t.Errorf("X-Filename header: got %q, want malware.exe", s.Match.Headers["X-Filename"])
+	if s.Match.Headers["X-Filename"] != "synthetic-block.exe" {
+		t.Errorf("X-Filename header: got %q, want synthetic-block.exe", s.Match.Headers["X-Filename"])
 	}
 	if s.Match.Headers["X-Other"] != "re:^value.*" {
 		t.Errorf("X-Other header: got %q, want re:^value.*", s.Match.Headers["X-Other"])

@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/pprof"
 	"os"
-	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/health"
 	"github.com/icap-mock/icap-mock/internal/logger"
+	"github.com/icap-mock/icap-mock/internal/management"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/middleware"
 	"github.com/icap-mock/icap-mock/internal/processor"
@@ -238,6 +240,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Determine server entries: use Servers map if present, otherwise fall back to legacy config
 	serverEntries := buildServerEntries(cfg)
+	runtimeManager := management.NewRuntimeManager(cfg, cfg.SourcePath)
 
 	// Load plugins if enabled
 	pluginLoader := tryLoadPlugins(cfg, log)
@@ -257,13 +260,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	launchMetricsServer(ctx, cfg, log, metricsRegistry, collector)
 
 	// Start all ICAP servers
-	allServers, firstRegistry, err := startAllServers(ctx, cfg, serverEntries, collector, limiter, storageMiddleware, log)
+	allServers, firstRegistry, err := startAllServers(ctx, cfg, serverEntries, collector, limiter, storageMiddleware, log, runtimeManager)
 	if err != nil {
 		return err
 	}
 
 	// Start health server (after ICAP servers are up)
-	startHealthServer(ctx, cfg, healthServer, firstRegistry, log)
+	startHealthServer(ctx, cfg, healthServer, firstRegistry, runtimeManager, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
@@ -300,21 +303,29 @@ func startAllServers(
 	limiter ratelimit.Limiter,
 	storageMiddleware *middleware.StorageMiddleware,
 	log *logger.Logger,
+	runtimeManager *management.RuntimeManager,
 ) ([]*server.ICAPServer, storage.ScenarioRegistry, error) {
 	var allServers []*server.ICAPServer
 	var firstRegistry storage.ScenarioRegistry
 
 	for _, entry := range serverEntries {
-		registry := storage.NewShardedScenarioRegistry()
+		warnUnlimitedBodyPattern(cfg.Mock.Matching, entry.serverCfg.MaxBodySize, entry.name, log)
+		newRegistry := newScenarioRegistryFactory(cfg.Mock.Matching, entry.serverCfg.MaxBodySize, cfg.Sharding)
+		registry := management.NewManagedScenarioRegistry(newRegistry())
 		if firstRegistry == nil {
 			firstRegistry = registry
 		}
+		runtimeManager.RegisterScenarioSet(management.ScenarioSet{
+			Name:        entry.name,
+			Dir:         entry.scenariosDir,
+			Registry:    registry,
+			Server:      entry.serverCfg,
+			NewRegistry: newRegistry,
+			Apply:       inlineScenarioApplier(entry),
+		})
 
 		if entry.scenariosDir != "" {
-			entryCfg := &config.Config{
-				Mock: config.MockConfig{ScenariosDir: entry.scenariosDir},
-			}
-			if err := loadScenarios(entryCfg, registry, log); err != nil {
+			if err := loadScenarios(entry.scenariosDir, registry, log, newRegistry); err != nil {
 				log.Warn("failed to load scenarios", "server", entry.name, "error", err)
 			}
 		}
@@ -323,11 +334,11 @@ func startAllServers(
 			loadInlineScenarios(entry, registry, log)
 		}
 
-		proc, _ := createProcessorChain(cfg, registry, log)
+		proc, _ := createProcessorChain(cfg, registry, log, entry.serverCfg.MaxBodySize)
 
 		rtr := router.NewRouter()
 		rtr.SetLogger(log.Logger)
-		if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, registry); err != nil {
+		if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, registry, entry); err != nil {
 			return nil, nil, fmt.Errorf("registering handlers for %s: %w", entry.name, err)
 		}
 
@@ -366,13 +377,27 @@ func startAllServers(
 }
 
 // startHealthServer starts the health check server if enabled and configured.
-func startHealthServer(ctx context.Context, _ *config.Config, healthServer *health.Server, firstRegistry storage.ScenarioRegistry, log *logger.Logger) {
+func startHealthServer(
+	ctx context.Context,
+	cfg *config.Config,
+	healthServer *health.Server,
+	firstRegistry storage.ScenarioRegistry,
+	runtimeManager *management.RuntimeManager,
+	log *logger.Logger,
+) {
 	if healthServer == nil {
 		return
 	}
+	healthServer.ConfigureManagement(cfg.Management, cfg.Health.APIToken)
+	warnUnauthenticatedManagement(cfg.Management, cfg.Health.APIToken, log)
+	runtimeManager.RegisterConfigApplyFunc(func(updated *config.Config) {
+		healthServer.ConfigureManagement(updated.Management, updated.Health.APIToken)
+		healthServer.Checker().SetScenariosCount(runtimeManager.ScenarioCount())
+		warnUnauthenticatedManagement(updated.Management, updated.Health.APIToken, log)
+	})
 	if firstRegistry != nil {
-		healthServer.SetupAPI(firstRegistry)
-		healthServer.Checker().SetScenariosCount(len(firstRegistry.List()))
+		healthServer.SetupAPI(firstRegistry, runtimeManager)
+		healthServer.Checker().SetScenariosCount(runtimeManager.ScenarioCount())
 	}
 	healthServer.Checker().SetICAPReady(true)
 	healthServer.Checker().SetStorageReady(true)
@@ -389,6 +414,65 @@ func startHealthServer(ctx context.Context, _ *config.Config, healthServer *heal
 	}()
 }
 
+func warnUnauthenticatedManagement(cfg config.ManagementConfig, fallbackToken string, log *logger.Logger) {
+	if log == nil || !cfg.Enabled || cfg.ResolvedToken() != "" || fallbackToken != "" {
+		return
+	}
+	log.Warn("management API enabled without authentication token",
+		"recommendation", "configure management.token or management.token_env")
+}
+
+func newScenarioRegistryFactory(
+	matching config.MockMatchingConfig,
+	serverMaxBodySize int64,
+	sharding config.ShardingConfig,
+) func() storage.ScenarioRegistry {
+	options := bodyPatternOptions(matching, serverMaxBodySize)
+	return func() storage.ScenarioRegistry {
+		if !sharding.Enabled {
+			return storage.NewScenarioRegistryWithBodyPatternOptions(options)
+		}
+		return storage.NewShardedScenarioRegistryWithConfig(storageShardingConfig(sharding), options)
+	}
+}
+
+func storageShardingConfig(sharding config.ShardingConfig) storage.ShardingConfig {
+	return storage.ShardingConfig{
+		ShardCount:  sharding.ShardCount,
+		CacheSize:   sharding.CacheSize,
+		EnableCache: sharding.EnableCache,
+	}
+}
+
+func bodyPatternOptions(matching config.MockMatchingConfig, serverMaxBodySize int64) storage.BodyPatternOptions {
+	limit := config.EffectiveBodyPatternLimit(matching.BodyPatternLimit, serverMaxBodySize)
+	return storage.BodyPatternOptions{
+		Limit:       storageBodyPatternLimit(limit),
+		LimitAction: storage.BodyPatternLimitAction(strings.ToLower(strings.TrimSpace(matching.BodyPatternLimitAction))),
+	}
+}
+
+func warnUnlimitedBodyPattern(
+	matching config.MockMatchingConfig,
+	serverMaxBodySize int64,
+	serverName string,
+	log *logger.Logger,
+) {
+	if log == nil || !config.EffectiveBodyPatternLimit(matching.BodyPatternLimit, serverMaxBodySize).Unlimited {
+		return
+	}
+	log.Warn("body_pattern matching configured with unlimited body reads",
+		"server", serverName,
+		"recommendation", "set mock.matching.body_pattern_limit or server.max_body_size")
+}
+
+func storageBodyPatternLimit(limit config.BodySizeLimit) int64 {
+	if limit.Unlimited {
+		return -1
+	}
+	return limit.Bytes
+}
+
 // serverEntry represents a single ICAP server configuration.
 type serverEntry struct {
 	inlineScenarios map[string]config.InlineScenarioEntry
@@ -402,7 +486,8 @@ type serverEntry struct {
 func buildServerEntries(cfg *config.Config) []serverEntry {
 	if len(cfg.Servers) > 0 {
 		entries := make([]serverEntry, 0, len(cfg.Servers))
-		for name, entry := range cfg.Servers {
+		for _, name := range sortedServerNames(cfg.Servers) {
+			entry := cfg.Servers[name]
 			srvCfg := entry.ToServerConfig(cfg.Defaults)
 			sid := entry.ServiceID
 			if sid == "" {
@@ -426,11 +511,45 @@ func buildServerEntries(cfg *config.Config) []serverEntry {
 	}}
 }
 
+func sortedServerNames(servers map[string]config.ServerEntryConfig) []string {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // loadInlineScenarios converts inline scenario config entries and adds them to the registry.
 func loadInlineScenarios(entry serverEntry, registry storage.ScenarioRegistry, log *logger.Logger) {
+	if err := inlineScenarioApplier(entry)(registry); err != nil {
+		log.Warn("failed to add inline scenarios", "server", entry.name, "error", err)
+	}
+}
+
+func inlineScenarioApplier(entry serverEntry) management.ScenarioApplyFunc {
+	return func(registry storage.ScenarioRegistry) error {
+		scenarios, err := convertInlineScenarios(entry)
+		if err != nil {
+			return err
+		}
+		for _, scenario := range scenarios {
+			if err := registry.Add(scenario); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func convertInlineScenarios(entry serverEntry) ([]*storage.Scenario, error) {
+	if len(entry.inlineScenarios) == 0 {
+		return nil, nil
+	}
 	storageScenarios := make(map[string]storage.ScenarioEntryV2, len(entry.inlineScenarios))
-	orderedNames := make([]string, 0, len(entry.inlineScenarios))
-	for name, e := range entry.inlineScenarios {
+	orderedNames := sortedInlineScenarioNames(entry.inlineScenarios)
+	for _, name := range orderedNames {
+		e := entry.inlineScenarios[name]
 		responses := make([]storage.WeightedResponseV2, len(e.Responses))
 		for i, r := range e.Responses {
 			responses[i] = storage.WeightedResponseV2{
@@ -455,25 +574,27 @@ func loadInlineScenarios(entry serverEntry, registry storage.ScenarioRegistry, l
 			Delay:      e.Delay,
 			Responses:  responses,
 		}
-		orderedNames = append(orderedNames, name)
 	}
 	file := &storage.ScenarioFileV2{
 		Scenarios: storageScenarios,
 	}
 	inlineScenarios, convErr := storage.ConvertV2ToScenarios(file, orderedNames)
 	if convErr != nil {
-		log.Warn("failed to convert inline scenarios", "server", entry.name, "error", convErr)
-		return
+		return nil, convErr
 	}
-	// Give inline scenarios higher priority (2000+)
 	for i, s := range inlineScenarios {
 		s.Priority = 2000 - i
 	}
-	for _, s := range inlineScenarios {
-		if addErr := registry.Add(s); addErr != nil {
-			log.Warn("failed to add inline scenario", "server", entry.name, "scenario", s.Name, "error", addErr)
-		}
+	return inlineScenarios, nil
+}
+
+func sortedInlineScenarioNames(scenarios map[string]config.InlineScenarioEntry) []string {
+	names := make([]string, 0, len(scenarios))
+	for name := range scenarios {
+		names = append(names, name)
 	}
+	sort.Strings(names)
+	return names
 }
 
 // tryLoadPlugins loads plugins if enabled, logging any errors.
@@ -527,8 +648,9 @@ func createStorageStack(cfg *config.Config, collector *metrics.Collector, log *l
 		return store, nil, nil
 	}
 	storageCfg := middleware.StorageMiddlewareConfig{
-		Workers:   cfg.Storage.Workers,
-		QueueSize: cfg.Storage.QueueSize,
+		Workers:     cfg.Storage.Workers,
+		QueueSize:   cfg.Storage.QueueSize,
+		MaxBodySize: cfg.Server.MaxBodySize,
 		CircuitBreaker: middleware.CircuitBreakerConfig{
 			Enabled:          cfg.Storage.CircuitBreaker.Enabled,
 			MaxFailures:      cfg.Storage.CircuitBreaker.MaxFailures,
@@ -582,36 +704,19 @@ func createStorageManager(cfg *config.Config, m *metrics.Collector) (*storage.Fi
 	return storage.NewFileStorage(cfg.Storage, m)
 }
 
-// loadScenarios loads scenarios from the configured directory.
-func loadScenarios(cfg *config.Config, registry storage.ScenarioRegistry, log *logger.Logger) error {
-	// Load scenarios from directory
-	log.Info("loading scenarios", "directory", cfg.Mock.ScenariosDir)
-
-	// Find all YAML files in the scenarios directory
-	entries, err := os.ReadDir(cfg.Mock.ScenariosDir)
+// loadScenarios loads all scenarios from the configured directory.
+func loadScenarios(
+	dir string,
+	registry *management.ManagedScenarioRegistry,
+	log *logger.Logger,
+	newRegistry func() storage.ScenarioRegistry,
+) error {
+	log.Info("loading scenarios", "directory", dir)
+	loaded, err := management.LoadScenarioDirectory(dir, newRegistry)
 	if err != nil {
-		return fmt.Errorf("reading scenarios directory: %w", err)
+		return err
 	}
-
-	loadedCount := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
-			continue
-		}
-
-		path := filepath.Join(cfg.Mock.ScenariosDir, name)
-		if err := registry.Load(path); err != nil {
-			log.Warn("failed to load scenario file", "path", path, "error", err)
-			continue
-		}
-		loadedCount++
-	}
-
+	registry.Replace(loaded)
 	log.Info("loaded scenarios", "count", len(registry.List()))
 	return nil
 }
@@ -647,6 +752,7 @@ func createProcessorChain(
 	cfg *config.Config,
 	registry storage.ScenarioRegistry,
 	log *logger.Logger,
+	maxBodySize int64,
 ) (proc processor.Processor, cleanup func(context.Context)) {
 	// Create processors in order: mock -> plugins -> chaos (if enabled) -> echo
 	var processors []processor.Processor
@@ -654,14 +760,14 @@ func createProcessorChain(
 
 	// Add script processor if script mode is configured
 	if cfg.Mock.DefaultMode == "script" {
-		scriptProc := processor.NewScriptProcessor(registry, log, cfg.Mock.DefaultTimeout)
+		scriptProc := processor.NewScriptProcessorWithMaxBodySize(registry, log, cfg.Mock.DefaultTimeout, maxBodySize)
 		processors = append(processors, scriptProc)
 		cleanups = append(cleanups, func(ctx context.Context) { _ = scriptProc.Shutdown(ctx) })
 		log.Info("script processor added to chain")
 	}
 
 	// Create mock processor with scenario registry
-	mockProc := processor.NewMockProcessor(registry, log)
+	mockProc := processor.NewMockProcessorWithMaxBodySize(registry, log, maxBodySize)
 	processors = append(processors, mockProc)
 
 	// Add plugin processor if plugins are loaded
@@ -711,6 +817,7 @@ func buildMiddlewareChain(
 	limiter ratelimit.Limiter,
 	storageMiddleware *middleware.StorageMiddleware,
 	cfg *config.Config,
+	maxBodySize int64,
 ) func(handler.Handler) handler.Handler {
 	panicRecovery := middleware.PanicRecoveryMiddleware(log.Logger)
 
@@ -721,7 +828,9 @@ func buildMiddlewareChain(
 
 	var storageMW handler.Middleware
 	if storageMiddleware != nil {
-		storageMW = storageMiddleware.Wrap
+		storageMW = func(h handler.Handler) handler.Handler {
+			return storageMiddleware.WrapWithBodyLimit(h, maxBodySize)
+		}
 	}
 
 	return func(h handler.Handler) handler.Handler {
@@ -742,16 +851,18 @@ func createHandlers(
 	collector *metrics.Collector,
 	cfg *config.Config,
 	log *logger.Logger,
+	entry serverEntry,
 	applyMiddleware func(handler.Handler) handler.Handler,
 ) (wrappedReqmod, wrappedRespmod, wrappedOptions handler.Handler) {
 	var previewRateLimiter *handler.PreviewRateLimiter
 	if cfg.Preview.Enabled {
 		previewRateLimiter = handler.NewPreviewRateLimiter(
 			handler.PreviewRateLimiterConfig{
-				Enabled:       cfg.Preview.Enabled,
-				MaxRequests:   cfg.Preview.MaxRequests,
-				WindowSeconds: cfg.Preview.WindowSeconds,
-				MaxClients:    cfg.Preview.MaxClients,
+				Enabled:             cfg.Preview.Enabled,
+				MaxRequests:         cfg.Preview.MaxRequests,
+				WindowSeconds:       cfg.Preview.WindowSeconds,
+				MaxClients:          cfg.Preview.MaxClients,
+				TrustClientIDHeader: cfg.Preview.TrustClientIDHeader,
 			},
 			collector,
 			log.Logger,
@@ -760,15 +871,19 @@ func createHandlers(
 
 	reqmodHandler := handler.NewReqmodHandler(proc, collector, log.Logger, previewRateLimiter)
 	respmodHandler := handler.NewRespmodHandler(proc, collector, log.Logger, previewRateLimiter)
-	optionsHandler := handler.NewOptionsHandler(handler.OptionsHandlerConfig{
-		ServiceTag:     "\"icap-mock-dev\"",
-		ServiceID:      cfg.Mock.ServiceID,
-		Methods:        []string{"REQMOD", "RESPMOD"},
-		MaxConnections: cfg.Server.MaxConnections,
-		OptionsTTL:     3600 * time.Second,
-	})
+	optionsHandler := handler.NewOptionsHandler(optionsHandlerConfig(entry))
 
 	return applyMiddleware(reqmodHandler), applyMiddleware(respmodHandler), applyMiddleware(optionsHandler)
+}
+
+func optionsHandlerConfig(entry serverEntry) handler.OptionsHandlerConfig {
+	return handler.OptionsHandlerConfig{
+		ServiceTag:     "\"icap-mock-dev\"",
+		ServiceID:      entry.serviceID,
+		Methods:        []string{"REQMOD", "RESPMOD"},
+		MaxConnections: entry.serverCfg.MaxConnections,
+		OptionsTTL:     3600 * time.Second,
+	}
 }
 
 // registerHandlers registers all ICAP handlers with the router.
@@ -783,9 +898,11 @@ func registerHandlers(
 	cfg *config.Config,
 	log *logger.Logger,
 	registry storage.ScenarioRegistry,
+	entry serverEntry,
 ) error {
-	applyMiddleware := buildMiddlewareChain(log, limiter, storageMiddleware, cfg)
-	wrappedReqmod, wrappedRespmod, wrappedOptions := createHandlers(proc, collector, cfg, log, applyMiddleware)
+	maxBodySize := entry.serverCfg.MaxBodySize
+	applyMiddleware := buildMiddlewareChain(log, limiter, storageMiddleware, cfg, maxBodySize)
+	wrappedReqmod, wrappedRespmod, wrappedOptions := createHandlers(proc, collector, cfg, log, entry, applyMiddleware)
 
 	// Register default endpoints
 	defaultEndpoints := []string{"/reqmod", "/respmod", "/options"}
@@ -909,18 +1026,8 @@ func startMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Log
 		"path", cfg.Metrics.Path,
 	)
 
-	// Create HTTP handler for metrics
-	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{
-		EnableOpenMetrics: true,
-	})
-
 	// Create HTTP server
-	mux := http.NewServeMux()
-	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
-		// Update goroutine count before serving metrics
-		collector.SetGoroutines(runtime.NumGoroutine())
-		metricsHandler.ServeHTTP(w, r)
-	})
+	mux := newMetricsHTTPHandler(cfg, reg, collector)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Metrics.Host, cfg.Metrics.Port)
 	srv := &http.Server{
@@ -948,4 +1055,31 @@ func startMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Log
 	case err := <-errChan:
 		return err
 	}
+}
+
+func newMetricsHTTPHandler(cfg *config.Config, reg prometheus.Gatherer, collector *metrics.Collector) http.Handler {
+	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{EnableOpenMetrics: true})
+	mux := http.NewServeMux()
+	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
+		collector.SetGoroutines(runtime.NumGoroutine())
+		metricsHandler.ServeHTTP(w, r)
+	})
+	if cfg.Pprof.Enabled {
+		registerPprofHandlers(mux)
+	}
+	return mux
+}
+
+func registerPprofHandlers(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	mux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+	mux.Handle("/debug/pprof/block", pprof.Handler("block"))
+	mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+	mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
 }

@@ -20,12 +20,12 @@ func TestShardedScenarioRegistry_Load(t *testing.T) {
 
 	yamlContent := `
 scenarios:
-  - name: "block-malware"
+  - name: "block-synthetic-marker"
     priority: 100
     match:
       path_pattern: "^/scan.*"
       http_method: "POST"
-      body_pattern: "(?i)(malware|virus)"
+      body_pattern: "(?i)synthetic-threat-marker"
     response:
       icap_status: 200
       http_status: 403
@@ -73,12 +73,12 @@ func TestShardedScenarioRegistry_Match(t *testing.T) {
 
 	yamlContent := `
 scenarios:
-  - name: "block-malware"
+  - name: "block-synthetic-marker"
     priority: 100
     match:
       path_pattern: "^/scan.*"
       http_method: "POST"
-      body_pattern: "(?i)(malware|virus)"
+      body_pattern: "(?i)synthetic-threat-marker"
     response:
       icap_status: 200
 
@@ -111,17 +111,17 @@ scenarios:
 		wantErr      bool
 	}{
 		{
-			name: "match malware pattern",
+			name: "match synthetic marker pattern",
 			req: &icap.Request{
 				Method: icap.MethodREQMOD,
 				URI:    "icap://localhost/scan",
 				HTTPRequest: &icap.HTTPMessage{
 					Method: "POST",
 					URI:    "http://example.com/scan",
-					Body:   []byte("this contains malware"),
+					Body:   []byte("this contains synthetic-threat-marker"),
 				},
 			},
-			wantScenario: "block-malware",
+			wantScenario: "block-synthetic-marker",
 		},
 		{
 			name: "match GET request",
@@ -1099,7 +1099,7 @@ func TestShardedScenarioRegistry_HashFunction(t *testing.T) {
 	paths := []string{
 		"/api/v1/users",
 		"/api/v2/posts",
-		"/scan/malware",
+		"/scan/synthetic-block",
 		"/test/path",
 		"/",
 	}
@@ -1261,13 +1261,13 @@ defaults:
   method: REQMOD
   endpoint: /av/reqmod
 scenarios:
-  kata-dosexec:
+  profile-dosexec:
     when_http:
       headers:
         Content-Type: "re:(?i)application/x-dosexec"
     status: 200
     http_status: 403
-  kata-clean:
+  profile-clean:
     status: 204
 `
 	if err := os.WriteFile(file, []byte(yml), 0o644); err != nil {
@@ -1285,7 +1285,7 @@ scenarios:
 		Header: icap.NewHeader(),
 		HTTPRequest: &icap.HTTPMessage{
 			Method: "GET",
-			URI:    "http://origin/Coparer.c",
+			URI:    "http://origin/synthetic-dosexec.exe",
 			Header: icap.NewHeader(),
 		},
 	}
@@ -1295,11 +1295,11 @@ scenarios:
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
-	if s.Name != "kata-dosexec" {
-		t.Errorf("expected kata-dosexec, got %s", s.Name)
+	if s.Name != "profile-dosexec" {
+		t.Errorf("expected profile-dosexec, got %s", s.Name)
 	}
 
-	// Request without matching Content-Type → fallback to kata-clean.
+	// Request without matching Content-Type → fallback to profile-clean.
 	// NOTE: different ICAP URI so the registry's match-cache (keyed on
 	// method|URI|httpMethod) doesn't return the previous result. In real
 	// traffic each wrapped resource has its own URI anyway.
@@ -1318,8 +1318,8 @@ scenarios:
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
-	if s2.Name != "kata-clean" {
-		t.Errorf("expected kata-clean, got %s", s2.Name)
+	if s2.Name != "profile-clean" {
+		t.Errorf("expected profile-clean, got %s", s2.Name)
 	}
 }
 
@@ -1335,7 +1335,7 @@ defaults:
 scenarios:
   by-filename:
     when_http:
-      url: "re:(?i)/(coparer\\.c|autorun\\.u)(\\?|$)"
+      url: "re:(?i)/(synthetic-block-a\\.bin|synthetic-block-b\\.bin)(\\?|$)"
     status: 200
   clean:
     status: 204
@@ -1353,7 +1353,7 @@ scenarios:
 		Header: icap.NewHeader(),
 		HTTPRequest: &icap.HTTPMessage{
 			Method: "GET",
-			URI:    "http://origin/path/Coparer.c",
+			URI:    "http://origin/path/synthetic-block-a.bin",
 			Header: icap.NewHeader(),
 		},
 	}
@@ -1377,9 +1377,9 @@ defaults:
   method: REQMOD
   endpoint: /av/reqmod
 scenarios:
-  internal-net:
+  test-net-match:
     when:
-      X-Client-IP: "re:^10\\."
+      X-Client-IP: "re:^192\\.0\\.2\\."
     status: 200
   other:
     status: 204
@@ -1396,13 +1396,13 @@ scenarios:
 		URI:    "icap://localhost/av/reqmod",
 		Header: icap.NewHeader(),
 	}
-	req.Header.Set("X-Client-IP", "10.0.189.78")
+	req.Header.Set("X-Client-IP", "192.0.2.78")
 	s, err := registry.Match(req)
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
-	if s.Name != "internal-net" {
-		t.Errorf("expected internal-net (regex match on ICAP header), got %s", s.Name)
+	if s.Name != "test-net-match" {
+		t.Errorf("expected test-net-match (regex match on ICAP header), got %s", s.Name)
 	}
 }
 
@@ -1481,4 +1481,133 @@ scenarios:
 			t.Errorf("Match %s: got %s, want both", m, s.Name)
 		}
 	}
+}
+
+func TestShardedScenarioRegistry_HeaderMatchDoesNotUseStaleCache(t *testing.T) {
+	registry := NewShardedScenarioRegistry()
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "header-match", Match: MatchRule{Headers: map[string]string{"X-Mode": "scan"}}, Priority: 100,
+	})
+	requireScenarioAdd(t, registry, &Scenario{Name: "fallback", Match: MatchRule{}, Priority: 1})
+
+	first := shardedTestRequest("icap://localhost/cache")
+	first.Header.Set("X-Mode", "scan")
+	requireScenarioName(t, registry, first, "header-match")
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/cache"), "fallback")
+}
+
+func TestShardedScenarioRegistry_CapturesAreSetAfterRepeatedMatch(t *testing.T) {
+	registry := NewShardedScenarioRegistry()
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "capture", Match: MatchRule{Paths: []string{"/env/{id}/scan"}}, Priority: 100,
+	})
+
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/env/abc/scan"), "capture")
+	second := shardedTestRequest("icap://localhost/env/abc/scan")
+	requireScenarioName(t, registry, second, "capture")
+	if second.Captures["id"] != "abc" {
+		t.Fatalf("capture id = %q, want abc", second.Captures["id"])
+	}
+}
+
+func TestShardedScenarioRegistry_CIDRRangesMustMatchClientIP(t *testing.T) {
+	registry := NewShardedScenarioRegistry()
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "selected-range", Match: MatchRule{CIDRRanges: []string{"198.51.100.0/24"}}, Priority: 100,
+	})
+	requireScenarioAdd(t, registry, &Scenario{Name: "outside-range", Match: MatchRule{}, Priority: 1})
+
+	req := shardedTestRequest("icap://localhost/cidr")
+	req.ClientIP = "192.0.2.10"
+	requireScenarioName(t, registry, req, "outside-range")
+	req.ClientIP = "198.51.100.4"
+	requireScenarioName(t, registry, req, "selected-range")
+}
+
+func TestShardedScenarioRegistry_GlobalCatchAllPriorityBeatsShardLocal(t *testing.T) {
+	registry := NewShardedScenarioRegistry()
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "path-local", Match: MatchRule{Paths: []string{"/scan"}}, Priority: 10,
+	})
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "global-catch-all", Match: MatchRule{}, Priority: 100,
+	})
+
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/scan"), "global-catch-all")
+}
+
+func TestShardedScenarioRegistry_MultiPathSecondPathMatchesWithPriority(t *testing.T) {
+	registry := NewShardedScenarioRegistry()
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "second-path-local", Match: MatchRule{Paths: []string{"/second"}}, Priority: 10,
+	})
+	requireScenarioAdd(t, registry, &Scenario{
+		Name: "multi-path", Match: MatchRule{Paths: []string{"/first", "/second"}}, Priority: 100,
+	})
+
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/second"), "multi-path")
+}
+
+func TestShardedScenarioRegistry_GlobalPriorityPreservedAfterReloadAndAdd(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "scenarios.yaml")
+	writeShardedPriorityScenarios(t, file, 100)
+	registry := NewShardedScenarioRegistry()
+	if err := registry.Load(file); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/reload"), "global-catch-all")
+
+	writeShardedPriorityScenarios(t, file, 5)
+	if err := registry.Reload(); err != nil {
+		t.Fatalf("Reload() error = %v", err)
+	}
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/reload"), "path-local")
+
+	requireScenarioAdd(t, registry, &Scenario{Name: "added-catch-all", Match: MatchRule{}, Priority: 200})
+	requireScenarioName(t, registry, shardedTestRequest("icap://localhost/reload"), "added-catch-all")
+}
+
+func writeShardedPriorityScenarios(t *testing.T, path string, catchAllPriority int) {
+	t.Helper()
+	yamlContent := `
+scenarios:
+  - name: "path-local"
+    priority: 50
+    match:
+      paths:
+        - "/reload"
+    response:
+      icap_status: 204
+  - name: "global-catch-all"
+    priority: ` + strconv.Itoa(catchAllPriority) + `
+    match: {}
+    response:
+      icap_status: 200
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
+func requireScenarioAdd(t *testing.T, registry ScenarioRegistry, scenario *Scenario) {
+	t.Helper()
+	if err := registry.Add(scenario); err != nil {
+		t.Fatalf("Add(%s) error = %v", scenario.Name, err)
+	}
+}
+
+func requireScenarioName(t *testing.T, registry ScenarioRegistry, req *icap.Request, want string) {
+	t.Helper()
+	scenario, err := registry.Match(req)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if scenario.Name != want {
+		t.Fatalf("Match() scenario = %s, want %s", scenario.Name, want)
+	}
+}
+
+func shardedTestRequest(uri string) *icap.Request {
+	return &icap.Request{Method: icap.MethodREQMOD, URI: uri, Header: icap.NewHeader()}
 }

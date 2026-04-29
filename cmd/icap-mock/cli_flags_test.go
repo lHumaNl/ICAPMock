@@ -4,6 +4,9 @@ package main
 
 import (
 	"testing"
+	"time"
+
+	"github.com/icap-mock/icap-mock/internal/config"
 )
 
 // TestBuildInfoDefaults tests that build info variables have expected default values.
@@ -283,5 +286,73 @@ func TestServerCommand_FlagWasSet(t *testing.T) {
 	}
 	if cmd.flagWasSet("server.port") {
 		t.Error("flagWasSet('server.port') = true (not parsed), want false")
+	}
+}
+
+func TestServerCommand_ApplyOverridesAppliesRegisteredFlags(t *testing.T) {
+	cmd := NewServerCommand()
+	err := cmd.Parse([]string{
+		"--logging.max-size", "0",
+		"--logging.max-backups", "0",
+		"--logging.max-age", "0",
+		"--mock.timeout", "0s",
+		"--chaos.timeout-rate", "0",
+		"--chaos.min-latency-ms", "0",
+		"--chaos.max-latency-ms", "0",
+		"--chaos.connection-drop-rate", "0",
+		"--storage.max-size", "0",
+		"--storage.rotate", "0",
+		"--rate-limit.burst", "0",
+		"--rate-limit.algorithm", "token_bucket",
+		"--health.path", "/live",
+		"--health.ready-path", "/startup",
+		"--replay.enabled",
+		"--replay.speed", "0",
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.SetDefaults()
+	cmd.applyOverrides(cfg)
+
+	assertAppliedOverrides(t, cfg)
+}
+
+func assertAppliedOverrides(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	if cfg.Logging.MaxSize != 0 || cfg.Logging.MaxBackups != 0 || cfg.Logging.MaxAge != 0 {
+		t.Fatalf("logging rotation = %d/%d/%d, want zeros", cfg.Logging.MaxSize, cfg.Logging.MaxBackups, cfg.Logging.MaxAge)
+	}
+	if cfg.Mock.DefaultTimeout != 0*time.Second || cfg.Chaos.TimeoutRate != 0 {
+		t.Fatalf("timeout overrides were not applied: mock=%v chaos=%v", cfg.Mock.DefaultTimeout, cfg.Chaos.TimeoutRate)
+	}
+	if cfg.Storage.MaxFileSize != 0 || cfg.Storage.RotateAfter != 0 || cfg.RateLimit.Burst != 0 {
+		t.Fatalf("zero numeric overrides were not applied")
+	}
+	if cfg.RateLimit.Algorithm != "token_bucket" || cfg.Health.HealthPath != "/live" || cfg.Health.ReadyPath != "/startup" {
+		t.Fatalf("string overrides were not applied: %+v %+v", cfg.RateLimit, cfg.Health)
+	}
+	if !cfg.Replay.Enabled || cfg.Replay.Speed != 0 {
+		t.Fatalf("replay overrides = enabled %v speed %v, want true/0", cfg.Replay.Enabled, cfg.Replay.Speed)
+	}
+}
+
+func TestConvertInlineScenariosSortsMapNames(t *testing.T) {
+	entry := serverEntry{inlineScenarios: map[string]config.InlineScenarioEntry{
+		"zeta":  {Method: []string{"REQMOD"}, Endpoint: []string{"/zeta"}, Status: 204},
+		"alpha": {Method: []string{"REQMOD"}, Endpoint: []string{"/alpha"}, Status: 204},
+	}}
+
+	scenarios, err := convertInlineScenarios(entry)
+	if err != nil {
+		t.Fatalf("convertInlineScenarios() error = %v", err)
+	}
+	if scenarios[0].Name != "alpha" || scenarios[0].Priority != 2000 {
+		t.Fatalf("first scenario = %s/%d, want alpha/2000", scenarios[0].Name, scenarios[0].Priority)
+	}
+	if scenarios[1].Name != "zeta" || scenarios[1].Priority != 1999 {
+		t.Fatalf("second scenario = %s/%d, want zeta/1999", scenarios[1].Name, scenarios[1].Priority)
 	}
 }
