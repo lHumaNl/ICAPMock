@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,8 @@ type ScriptProcessor struct {
 	logger      *logger.Logger
 	pool        *ScriptWorkerPool
 	validator   *StaticScriptValidator
+	metrics     *metrics.Collector
+	server      string
 	security    ScriptSecurityConfig
 	timeout     time.Duration
 	maxBodySize int64
@@ -138,6 +141,7 @@ func NewScriptProcessorWithSecurityAndMaxBodySize(
 		logger:      log,
 		timeout:     security.Timeout,
 		security:    security,
+		server:      "default",
 		maxBodySize: maxBodySize,
 		validator:   NewStaticScriptValidator(security.BlockedFunctions, log),
 	}
@@ -161,6 +165,8 @@ func NewScriptProcessorWithSecurityAndMaxBodySize(
 // If the script execution fails, it returns an error with details.
 // If the worker pool queue is full, it returns an error.
 func (p *ScriptProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
+	start := time.Now()
+
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -184,7 +190,9 @@ func (p *ScriptProcessor) Process(ctx context.Context, req *icap.Request) (*icap
 	}
 
 	// Execute script via worker pool
-	resp, err := p.pool.Execute(ctx, req, scenario.Response.Script)
+	var resp *icap.Response
+	defer p.recordScriptScenarioMetrics(scenario, &scenario.Response, &resp, start)
+	resp, err = p.pool.Execute(ctx, req, scenario.Response.Script)
 	if err != nil {
 		var icapErr *apperrors.Error
 		if errors.As(err, &icapErr) {
@@ -615,12 +623,50 @@ func (p *ScriptProcessor) GetSecurityConfig() ScriptSecurityConfig {
 	return p.security
 }
 
-// SetMetrics sets the Prometheus metrics collector for tracking script pool metrics.
+// SetMetrics sets the Prometheus metrics collector for script and scenario metrics.
 // This allows enabling or disabling metrics after the processor is created.
 func (p *ScriptProcessor) SetMetrics(collector *metrics.Collector) {
+	p.metrics = collector
+	if p.server == "" {
+		p.server = "default"
+	}
 	if p.pool != nil {
 		p.pool.SetMetrics(collector)
 	}
+}
+
+// SetMetricsForServer sets the metrics collector and server label.
+func (p *ScriptProcessor) SetMetricsForServer(collector *metrics.Collector, server string) {
+	p.metrics = collector
+	p.server = server
+	if p.pool != nil {
+		p.pool.SetMetrics(collector)
+	}
+}
+
+func (p *ScriptProcessor) recordScriptScenarioMetrics(
+	scenario *storage.Scenario,
+	template *storage.ResponseTemplate,
+	resp **icap.Response,
+	start time.Time,
+) {
+	if p.metrics == nil || scenario == nil || template == nil {
+		return
+	}
+	p.metrics.RecordScenarioRequestForServer(p.server, scenario.Name, scriptResponseLabel(template, resp), time.Since(start))
+}
+
+func scriptResponseLabel(template *storage.ResponseTemplate, resp **icap.Response) string {
+	if template.ResponseName != "" {
+		return template.ResponseName
+	}
+	if resp != nil && *resp != nil {
+		return strconv.Itoa((*resp).StatusCode)
+	}
+	if code := responseStatusCode(template); code != 0 {
+		return strconv.Itoa(code)
+	}
+	return strconv.Itoa(icap.StatusInternalServerError)
 }
 
 // Shutdown gracefully stops the script worker pool.

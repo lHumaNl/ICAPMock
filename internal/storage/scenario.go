@@ -144,6 +144,7 @@ type WeightedResponse struct {
 	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	HTTPHeaders  map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
 	Stream       *StreamConfig     `yaml:"stream,omitempty" json:"stream,omitempty"`
+	ResponseName string            `yaml:"-" json:"-"`
 	Body         string            `yaml:"body,omitempty" json:"body,omitempty"`
 	BodyFile     string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`
 	HTTPBody     string            `yaml:"http_body,omitempty" json:"http_body,omitempty"`
@@ -315,6 +316,7 @@ type ResponseTemplate struct {
 	HTTPHeaders  map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
 	DelayRange   *DelayConfig      `yaml:"-" json:"-"`
 	Stream       *StreamConfig     `yaml:"stream,omitempty" json:"stream,omitempty"`
+	ResponseName string            `yaml:"-" json:"-"`
 	Use          string            `yaml:"use,omitempty" json:"use,omitempty"`
 	Body         string            `yaml:"body,omitempty" json:"body,omitempty"`
 	BodyFile     string            `yaml:"body_file,omitempty" json:"body_file,omitempty"`

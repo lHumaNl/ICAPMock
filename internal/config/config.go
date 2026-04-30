@@ -295,6 +295,7 @@ type Config struct {
 func (c *Config) SetDefaults() {
 	// Server defaults
 	c.Server.Host = defaultHost //nolint:goconst
+	c.Server.Name = "default"
 	c.Server.Port = 1344
 	c.Server.ReadTimeout = 30 * time.Second
 	c.Server.WriteTimeout = 30 * time.Second
@@ -462,6 +463,7 @@ type ServerConfig struct {
 	MaxBodySize     int64         `yaml:"max_body_size" json:"max_body_size"`
 	IdleTimeout     time.Duration `yaml:"idle_timeout" json:"idle_timeout"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout"`
+	Name            string        `yaml:"name" json:"name"`
 	Port            int           `yaml:"port" json:"port"`
 	MaxConnections  int           `yaml:"max_connections" json:"max_connections"`
 	Streaming       bool          `yaml:"streaming" json:"streaming"`

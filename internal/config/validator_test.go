@@ -21,6 +21,21 @@ func TestValidator_Validate_ValidConfig(t *testing.T) {
 	}
 }
 
+// TestValidator_Validate_ServerNameOptional verifies single-server configs do
+// not need an explicit name for metrics labels.
+func TestValidator_Validate_ServerNameOptional(t *testing.T) {
+	cfg := &Config{}
+	cfg.SetDefaults()
+	cfg.Server.Name = ""
+
+	errors := NewValidator().Validate(cfg)
+	for _, err := range errors {
+		if err.Field == "server.name" {
+			t.Fatalf("server.name should be optional, got validation error: %v", err)
+		}
+	}
+}
+
 // TestValidator_Validate_ServerPort tests port validation.
 func TestValidator_Validate_ServerPort(t *testing.T) {
 	tests := []struct {

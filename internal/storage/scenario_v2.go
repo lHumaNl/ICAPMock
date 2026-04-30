@@ -512,7 +512,7 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 		if inline.Use != "" {
 			return ResponseTemplate{}, nil, fmt.Errorf("%s: responses cannot be combined with use: on the same level", where)
 		}
-		out, err := buildWeightedList(where, weighted, inline, file)
+		out, err := buildWeightedList(where, weighted, inline, file, "")
 		if err != nil {
 			return ResponseTemplate{}, nil, err
 		}
@@ -551,7 +551,7 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 	}
 
 	if len(baseWt) > 0 {
-		out, err := buildWeightedList(where, baseWt, InlineResponseV2{}, file)
+		out, err := buildWeightedList(where, baseWt, InlineResponseV2{}, file, useRef)
 		if err != nil {
 			return ResponseTemplate{}, nil, err
 		}
@@ -560,14 +560,22 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 
 	// Inline merge: base < inline overlay.
 	merged := mergeInline(base, inline)
-	return inlineToTemplate(where, merged, file.Defaults.Headers, file.Defaults.Status, file.Defaults.HTTPStatus)
+	resolved, err := inlineToTemplate(where, merged, file.Defaults.Headers, file.Defaults.Status, file.Defaults.HTTPStatus)
+	resolved.ResponseName = useRef
+	return resolved, nil, err
 }
 
 // buildWeightedList resolves each WeightedResponseV2 variant to a concrete
 // WeightedResponse, expanding any "use:" refs. The base InlineResponseV2
 // carries scenario/branch-level inline defaults (delay, status, set, …) that
 // variants inherit; each variant can override any field.
-func buildWeightedList(where string, variants []WeightedResponseV2, base InlineResponseV2, file *ScenarioFileV2) ([]WeightedResponse, error) {
+func buildWeightedList(
+	where string,
+	variants []WeightedResponseV2,
+	base InlineResponseV2,
+	file *ScenarioFileV2,
+	baseName string,
+) ([]WeightedResponse, error) {
 	out := make([]WeightedResponse, 0, len(variants))
 	for i, wr := range variants {
 		inl := InlineResponseV2{
@@ -602,6 +610,7 @@ func buildWeightedList(where string, variants []WeightedResponseV2, base InlineR
 			Headers:      tpl.Headers,
 			HTTPHeaders:  tpl.HTTPHeaders,
 			Stream:       tpl.Stream,
+			ResponseName: selectedResponseName(wr.Use, baseName),
 			ICAPStatus:   tpl.ICAPStatus,
 			HTTPStatus:   tpl.HTTPStatus,
 			Body:         tpl.Body,
@@ -621,10 +630,23 @@ func buildWeightedList(where string, variants []WeightedResponseV2, base InlineR
 	return out, nil
 }
 
+func selectedResponseName(variantName, baseName string) string {
+	if variantName != "" {
+		return variantName
+	}
+	return baseName
+}
+
 // inlineToTemplate turns a resolved InlineResponseV2 + file defaults into a
 // concrete ResponseTemplate, parsing delay and merging headers with
 // defaults.headers overlaid by the inline "set:" map.
-func inlineToTemplate(where string, inline InlineResponseV2, defHeaders map[string]string, defStatus, defHTTPStatus int) (ResponseTemplate, []WeightedResponse, error) {
+func inlineToTemplate(
+	where string,
+	inline InlineResponseV2,
+	defHeaders map[string]string,
+	defStatus int,
+	defHTTPStatus int,
+) (ResponseTemplate, error) {
 	status := inline.Status
 	if status == 0 {
 		status = defStatus
@@ -652,12 +674,12 @@ func inlineToTemplate(where string, inline InlineResponseV2, defHeaders map[stri
 	if inline.Delay != "" {
 		dc, err := ParseDelay(inline.Delay)
 		if err != nil {
-			return ResponseTemplate{}, nil, fmt.Errorf("%s delay: %w", where, err)
+			return ResponseTemplate{}, fmt.Errorf("%s delay: %w", where, err)
 		}
 		resp.Delay = dc.Min
 		resp.DelayRange = &dc
 	}
-	return resp, nil, nil
+	return resp, nil
 }
 
 // mergeInline overlays "over" onto "base". Scalars override when non-zero;

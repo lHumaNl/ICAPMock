@@ -8,10 +8,53 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+func metricValue(t *testing.T, reg prometheus.Gatherer, name string, labels map[string]string) float64 {
+	t.Helper()
+	for _, metric := range metricFamily(t, reg, name).GetMetric() {
+		if metricMatchesLabels(metric, labels) {
+			return metricSampleValue(metric)
+		}
+	}
+	t.Fatalf("metric %s with labels %v not found", name, labels)
+	return 0
+}
+
+func metricFamily(t *testing.T, reg prometheus.Gatherer, name string) *dto.MetricFamily {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == name {
+			return mf
+		}
+	}
+	t.Fatalf("metric %s not found", name)
+	return nil
+}
+
+func metricMatchesLabels(metric *dto.Metric, labels map[string]string) bool {
+	for _, label := range metric.GetLabel() {
+		if labels[label.GetName()] != label.GetValue() {
+			return false
+		}
+	}
+	return len(metric.GetLabel()) == len(labels)
+}
+
+func metricSampleValue(metric *dto.Metric) float64 {
+	if metric.Counter != nil {
+		return metric.Counter.GetValue()
+	}
+	return metric.Gauge.GetValue()
+}
 
 // TestNewPerClientMiddleware tests the middleware constructor.
 func TestNewPerClientMiddleware(t *testing.T) {
@@ -90,6 +133,29 @@ func TestPerClientMiddleware_Allow(t *testing.T) {
 	}
 	if allowed {
 		t.Error("expected request to be denied (burst exceeded)")
+	}
+}
+
+func TestPerClientMiddleware_ServerLabelMetrics(t *testing.T) {
+	config := PerClientRateLimitConfig{Enabled: true, RequestsPerSecond: 1, Burst: 1, MaxClients: 10, TTL: time.Minute}
+	perClientLimiter := NewPerClientRateLimiter(config)
+	defer perClientLimiter.Stop()
+	reg := prometheus.NewRegistry()
+	metricsCollector, _ := metrics.NewCollector(reg)
+	middleware := NewPerClientMiddlewareForServer(perClientLimiter, nil, metricsCollector, "edge-a")
+	req := &icap.Request{ClientIP: "192.168.1.1", RemoteAddr: "192.168.1.1:12345"}
+
+	allowed, _ := middleware.Allow(context.Background(), req)
+	if !allowed {
+		t.Fatal("first request should be allowed")
+	}
+	allowed, _ = middleware.Allow(context.Background(), req)
+	if allowed {
+		t.Fatal("second request should be denied")
+	}
+	labels := map[string]string{"server": "edge-a"}
+	if got := metricValue(t, reg, "icap_per_client_rate_limit_exceeded_total", labels); got != 1 {
+		t.Errorf("per-client exceeded = %v, want 1", got)
 	}
 }
 

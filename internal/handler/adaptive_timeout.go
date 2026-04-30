@@ -340,6 +340,7 @@ type AdaptiveTimeoutMiddleware struct {
 	tracker  *AdaptiveTimeoutTracker
 	next     Handler
 	basePath string
+	server   string
 }
 
 // AdaptiveTimeoutMiddlewareConfig holds configuration for the adaptive timeout middleware.
@@ -349,6 +350,8 @@ type AdaptiveTimeoutMiddlewareConfig struct {
 	// BasePath is the base path to use for endpoint identification.
 	// If empty, the full request URI will be used.
 	BasePath string
+	// Server is the server metric label. If empty, metrics use the default server.
+	Server string
 }
 
 // NewAdaptiveTimeoutMiddleware creates a new adaptive timeout middleware.
@@ -375,6 +378,7 @@ func NewAdaptiveTimeoutMiddleware(cfg AdaptiveTimeoutMiddlewareConfig) Middlewar
 			tracker:  cfg.Tracker,
 			next:     next,
 			basePath: cfg.BasePath,
+			server:   cfg.Server,
 		}
 	}
 }
@@ -409,11 +413,19 @@ func (m *AdaptiveTimeoutMiddleware) Handle(ctx context.Context, req *icap.Reques
 	if ctx.Err() == context.DeadlineExceeded {
 		// Record timeout in metrics
 		if m.tracker.metrics != nil {
-			m.tracker.metrics.RecordRequestTimeout(m.next.Method())
+			m.recordRequestTimeout(m.next.Method())
 		}
 	}
 
 	return resp, err
+}
+
+func (m *AdaptiveTimeoutMiddleware) recordRequestTimeout(method string) {
+	if m.server == "" {
+		m.tracker.metrics.RecordRequestTimeout(method)
+		return
+	}
+	m.tracker.metrics.RecordRequestTimeoutForServer(m.server, method)
 }
 
 // Method returns the ICAP method this handler processes.
@@ -428,6 +440,7 @@ func (m *AdaptiveTimeoutMiddleware) Wrap(next Handler) Handler {
 		tracker:  m.tracker,
 		next:     next,
 		basePath: m.basePath,
+		server:   m.server,
 	}
 }
 

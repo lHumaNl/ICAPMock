@@ -5,7 +5,9 @@ package processor
 
 import (
 	"context"
+	"errors"
 
+	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -69,6 +71,9 @@ func (c *chainProcessor) Process(ctx context.Context, req *icap.Request) (*icap.
 	for _, p := range c.processors {
 		resp, err := p.Process(ctx, req)
 		if err != nil {
+			if errors.Is(err, apperrors.ErrScenarioNotFound) {
+				continue
+			}
 			return nil, err
 		}
 		if resp != nil {

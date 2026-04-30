@@ -406,7 +406,7 @@ func startIntegrationRuntimeWithConfig(t *testing.T, scenariosDir string, mutate
 		t.Fatalf("expected exactly one ICAP server, got %d", len(servers))
 	}
 
-	startHealthServer(ctx, cfg, healthServer, firstRegistry, runtimeManager, log)
+	startHealthServer(ctx, cfg, healthServer, firstRegistry, runtimeManager, collector, log)
 	waitForReady(t, cfg.Health.Port)
 
 	shutdown := func() {

@@ -5,6 +5,7 @@ package metrics
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -53,19 +54,27 @@ type Collector struct {
 	requestSize          *prometheus.HistogramVec
 	responseSize         *prometheus.HistogramVec
 	previewRequestsTotal *prometheus.CounterVec
+	apiRequestsTotal     *prometheus.CounterVec
+	apiErrorsTotal       *prometheus.CounterVec
 
 	// Error metrics
 	errorsTotal *prometheus.CounterVec
 
 	// Connection metrics
-	activeConnections          prometheus.Gauge
+	activeConnections          *prometheus.GaugeVec
 	idleConnectionsClosedTotal *prometheus.CounterVec
+	connectionRejectionsTotal  *prometheus.CounterVec
 
 	// Runtime metrics
 	goroutinesCurrent prometheus.Gauge
 
 	// Mock metrics
-	scenariosMatched *prometheus.CounterVec
+	scenariosMatched      *prometheus.CounterVec
+	scenarioRequests      *prometheus.CounterVec
+	scenarioResponseTime  *prometheus.GaugeVec
+	scenariosLoaded       *prometheus.GaugeVec
+	scenariosLoadedLabels map[string]struct{}
+	scenarioLatencyWindow *scenarioLatencyWindows
 
 	// Chaos metrics
 	chaosInjected *prometheus.CounterVec
@@ -77,8 +86,8 @@ type Collector struct {
 	// Per-client rate limit metrics
 	perClientRateLimitExceeded  *prometheus.CounterVec
 	perClientRateLimitWaitTime  *prometheus.HistogramVec
-	perClientRateLimitActive    prometheus.Gauge
-	perClientRateLimitEvictions prometheus.Counter
+	perClientRateLimitActive    *prometheus.GaugeVec
+	perClientRateLimitEvictions *prometheus.CounterVec
 
 	// Replay metrics
 	replayRequestsTotal  prometheus.Counter
@@ -141,6 +150,8 @@ type Collector struct {
 	// Preview rate limit metrics
 	previewRequestsRejected *prometheus.CounterVec
 	previewClientsActive    prometheus.Gauge
+
+	scenariosLoadedMu sync.Mutex
 }
 
 // NewCollector creates a new Collector and registers all metrics with the provided
@@ -171,52 +182,68 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "requests_total",
-				Help:      "Total number of ICAP requests by method.",
+				Help:      "Total number of ICAP requests by server and method.",
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		requestDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "request_duration_seconds",
-				Help:      "Time spent processing ICAP requests in seconds.",
+				Help:      "Time spent processing ICAP requests in seconds by server and method.",
 				Buckets:   durationBuckets,
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		requestsInFlight: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "icap",
 				Name:      "requests_in_flight",
-				Help:      "Current number of ICAP requests being processed.",
+				Help:      "Current number of ICAP requests being processed by server and method.",
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		requestSize: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "request_size_bytes",
-				Help:      "Size of ICAP request bodies in bytes.",
+				Help:      "Size of ICAP request bodies in bytes by server and method.",
 				Buckets:   sizeBuckets,
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		responseSize: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "response_size_bytes",
-				Help:      "Size of ICAP response bodies in bytes.",
+				Help:      "Size of ICAP response bodies in bytes by server and method.",
 				Buckets:   sizeBuckets,
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		previewRequestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "preview_requests_total",
-				Help:      "Total number of ICAP preview requests by method and preview_used status.",
+				Help:      "Total number of ICAP preview requests by server, method and preview_used status.",
 			},
-			[]string{"method", "preview_used"},
+			[]string{"server", "method", "preview_used"},
+		),
+		apiRequestsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "icap",
+				Name:      "api_requests_total",
+				Help:      "Total number of management API requests by bounded route, method, and status code.",
+			},
+			[]string{"server", "route", "method", "status_code"},
+		),
+		apiErrorsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "icap",
+				Name:      "api_errors_total",
+				Help:      "Total number of failed management API requests by bounded route, method, status code, and error type.",
+			},
+			[]string{"server", "route", "method", "status_code", "error_type"},
 		),
 
 		// Error metrics
@@ -224,26 +251,35 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "errors_total",
-				Help:      "Total number of errors by type.",
+				Help:      "Total number of ICAP errors by server and type.",
 			},
-			[]string{"type"},
+			[]string{"server", "type"},
 		),
 
 		// Connection metrics
-		activeConnections: prometheus.NewGauge(
+		activeConnections: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "icap",
 				Name:      "active_connections",
-				Help:      "Current number of active connections.",
+				Help:      "Current number of active connections by server.",
 			},
+			[]string{"server"},
 		),
 		idleConnectionsClosedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "idle_connections_closed_total",
-				Help:      "Total number of connections closed due to idle timeout by reason.",
+				Help:      "Total number of connections closed due to idle timeout by server and reason.",
 			},
-			[]string{"reason"},
+			[]string{"server", "reason"},
+		),
+		connectionRejectionsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "icap",
+				Name:      "connection_rejections_total",
+				Help:      "Total number of rejected ICAP connections by server and reason.",
+			},
+			[]string{"server", "reason"},
 		),
 
 		// Runtime metrics
@@ -260,9 +296,37 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "scenarios_matched_total",
-				Help:      "Total number of matched mock scenarios.",
+				Help:      "Total number of matched mock scenarios by server.",
 			},
-			[]string{"scenario"},
+			[]string{"server", "scenario"},
+		),
+		scenarioRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "icap",
+				Name:      "scenario_requests_total",
+				Help:      "Total number of matched scenario requests by server, scenario and selected response.",
+			},
+			[]string{"server", "scenario", "response"},
+		),
+		scenarioResponseTime: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "icap",
+				Name:      "scenario_response_time_seconds",
+				Help:      "Rolling scenario response-time statistics in seconds by server, scenario, response, and stat.",
+			},
+			[]string{"server", "scenario", "response", "stat"},
+		),
+		scenariosLoaded: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "icap",
+				Name:      "scenarios_loaded",
+				Help:      "Current number of loaded scenarios by server.",
+			},
+			[]string{"server"},
+		),
+		scenarioLatencyWindow: newScenarioLatencyWindows(
+			scenarioLatencyWindowCapacity,
+			maxScenarioLatencySeries,
 		),
 
 		// Chaos metrics
@@ -280,18 +344,18 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "rate_limit_exceeded_total",
-				Help:      "Total number of rate limit exceeded events.",
+				Help:      "Total number of rate limit exceeded events by server.",
 			},
-			[]string{"client"},
+			[]string{"server"},
 		),
 		rateLimitWaitTime: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "rate_limit_wait_seconds",
-				Help:      "Time spent waiting due to rate limiting in seconds.",
+				Help:      "Time spent waiting due to rate limiting in seconds by server.",
 				Buckets:   waitTimeBuckets,
 			},
-			[]string{"client"},
+			[]string{"server"},
 		),
 
 		// Per-client rate limit metrics
@@ -299,32 +363,34 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "per_client_rate_limit_exceeded_total",
-				Help:      "Total number of per-client rate limit exceeded events.",
+				Help:      "Total number of per-client rate limit exceeded events by server.",
 			},
-			[]string{}, // No labels to prevent high cardinality
+			[]string{"server"},
 		),
 		perClientRateLimitWaitTime: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "per_client_rate_limit_wait_seconds",
-				Help:      "Time spent waiting due to per-client rate limiting in seconds.",
+				Help:      "Time spent waiting due to per-client rate limiting in seconds by server.",
 				Buckets:   waitTimeBuckets,
 			},
-			[]string{}, // No labels to prevent high cardinality
+			[]string{"server"},
 		),
-		perClientRateLimitActive: prometheus.NewGauge(
+		perClientRateLimitActive: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "icap",
 				Name:      "per_client_rate_limit_active_clients",
-				Help:      "Current number of active clients tracked in per-client rate limiter.",
+				Help:      "Current number of active clients tracked in per-client rate limiter by server.",
 			},
+			[]string{"server"},
 		),
-		perClientRateLimitEvictions: prometheus.NewCounter(
+		perClientRateLimitEvictions: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "per_client_rate_limit_evictions_total",
-				Help:      "Total number of client evictions from the per-client rate limiter cache.",
+				Help:      "Total number of client evictions from the per-client rate limiter cache by server.",
 			},
+			[]string{"server"},
 		),
 
 		// Replay metrics
@@ -463,25 +529,25 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "request_timeouts_total",
-				Help:      "Total number of request timeouts by method.",
+				Help:      "Total number of request timeouts by server and method.",
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		requestCancellationsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "request_cancellations_total",
-				Help:      "Total number of request cancellations by method.",
+				Help:      "Total number of request cancellations by server and method.",
 			},
-			[]string{"method"},
+			[]string{"server", "method"},
 		),
 		requestContextCancellationsByReason: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "request_context_cancellations_total",
-				Help:      "Total number of request context cancellations by method and reason.",
+				Help:      "Total number of request context cancellations by server, method and reason.",
 			},
-			[]string{"method", "reason"},
+			[]string{"server", "method", "reason"},
 		),
 
 		// Storage backpressure metrics
@@ -634,11 +700,17 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		c.requestSize,
 		c.responseSize,
 		c.previewRequestsTotal,
+		c.apiRequestsTotal,
+		c.apiErrorsTotal,
 		c.errorsTotal,
 		c.activeConnections,
 		c.idleConnectionsClosedTotal,
+		c.connectionRejectionsTotal,
 		c.goroutinesCurrent,
 		c.scenariosMatched,
+		c.scenarioRequests,
+		c.scenarioResponseTime,
+		c.scenariosLoaded,
 		c.chaosInjected,
 		c.rateLimitExceeded,
 		c.rateLimitWaitTime,
@@ -691,7 +763,13 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordRequest(method string) {
-	c.requestsTotal.WithLabelValues(method).Inc()
+	c.RecordRequestForServer(defaultServerMetricLabel, method)
+
+}
+
+// RecordRequestForServer increments the ICAP request counter by server and method.
+func (c *Collector) RecordRequestForServer(server, method string) {
+	c.requestsTotal.WithLabelValues(normalizedMetricLabel(server), method).Inc()
 }
 
 // RecordRequestDuration records the duration of processing a request.
@@ -699,7 +777,12 @@ func (c *Collector) RecordRequest(method string) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordRequestDuration(method string, duration time.Duration) {
-	c.requestDuration.WithLabelValues(method).Observe(duration.Seconds())
+	c.RecordRequestDurationForServer(defaultServerMetricLabel, method, duration)
+}
+
+// RecordRequestDurationForServer records request processing duration by server and method.
+func (c *Collector) RecordRequestDurationForServer(server, method string, duration time.Duration) {
+	c.requestDuration.WithLabelValues(normalizedMetricLabel(server), method).Observe(duration.Seconds())
 }
 
 // IncRequestsInFlight increments the gauge tracking requests currently being processed.
@@ -707,7 +790,12 @@ func (c *Collector) RecordRequestDuration(method string, duration time.Duration)
 //
 // This method is safe for concurrent use.
 func (c *Collector) IncRequestsInFlight(method string) {
-	c.requestsInFlight.WithLabelValues(method).Inc()
+	c.IncRequestsInFlightForServer(defaultServerMetricLabel, method)
+}
+
+// IncRequestsInFlightForServer increments in-flight requests by server and method.
+func (c *Collector) IncRequestsInFlightForServer(server, method string) {
+	c.requestsInFlight.WithLabelValues(normalizedMetricLabel(server), method).Inc()
 }
 
 // DecRequestsInFlight decrements the gauge tracking requests currently being processed.
@@ -715,21 +803,36 @@ func (c *Collector) IncRequestsInFlight(method string) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) DecRequestsInFlight(method string) {
-	c.requestsInFlight.WithLabelValues(method).Dec()
+	c.DecRequestsInFlightForServer(defaultServerMetricLabel, method)
+}
+
+// DecRequestsInFlightForServer decrements in-flight requests by server and method.
+func (c *Collector) DecRequestsInFlightForServer(server, method string) {
+	c.requestsInFlight.WithLabelValues(normalizedMetricLabel(server), method).Dec()
 }
 
 // RecordRequestSize records the size of a request body in bytes.
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordRequestSize(method string, sizeBytes int64) {
-	c.requestSize.WithLabelValues(method).Observe(float64(sizeBytes))
+	c.RecordRequestSizeForServer(defaultServerMetricLabel, method, sizeBytes)
+}
+
+// RecordRequestSizeForServer records request body size by server and method.
+func (c *Collector) RecordRequestSizeForServer(server, method string, sizeBytes int64) {
+	c.requestSize.WithLabelValues(normalizedMetricLabel(server), method).Observe(float64(sizeBytes))
 }
 
 // RecordResponseSize records the size of a response body in bytes.
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordResponseSize(method string, sizeBytes int64) {
-	c.responseSize.WithLabelValues(method).Observe(float64(sizeBytes))
+	c.RecordResponseSizeForServer(defaultServerMetricLabel, method, sizeBytes)
+}
+
+// RecordResponseSizeForServer records response body size by server and method.
+func (c *Collector) RecordResponseSizeForServer(server, method string, sizeBytes int64) {
+	c.responseSize.WithLabelValues(normalizedMetricLabel(server), method).Observe(float64(sizeBytes))
 }
 
 // RecordPreviewRequest increments the counter for preview requests.
@@ -737,11 +840,16 @@ func (c *Collector) RecordResponseSize(method string, sizeBytes int64) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordPreviewRequest(method string, previewUsed bool) {
+	c.RecordPreviewRequestForServer(defaultServerMetricLabel, method, previewUsed)
+}
+
+// RecordPreviewRequestForServer increments the preview request counter.
+func (c *Collector) RecordPreviewRequestForServer(server, method string, previewUsed bool) {
 	previewUsedStr := "false"
 	if previewUsed {
 		previewUsedStr = "true"
 	}
-	c.previewRequestsTotal.WithLabelValues(method, previewUsedStr).Inc()
+	c.previewRequestsTotal.WithLabelValues(normalizedMetricLabel(server), method, previewUsedStr).Inc()
 }
 
 // RecordError increments the error counter for the given error type.
@@ -749,7 +857,12 @@ func (c *Collector) RecordPreviewRequest(method string, previewUsed bool) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordError(errorType string) {
-	c.errorsTotal.WithLabelValues(errorType).Inc()
+	c.RecordErrorForServer(defaultServerMetricLabel, errorType)
+}
+
+// RecordErrorForServer increments the error counter by server and error type.
+func (c *Collector) RecordErrorForServer(server, errorType string) {
+	c.errorsTotal.WithLabelValues(normalizedMetricLabel(server), errorType).Inc()
 }
 
 // IncActiveConnections increments the gauge tracking active connections.
@@ -757,7 +870,12 @@ func (c *Collector) RecordError(errorType string) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) IncActiveConnections() {
-	c.activeConnections.Inc()
+	c.IncActiveConnectionsForServer(defaultServerMetricLabel)
+}
+
+// IncActiveConnectionsForServer increments active connections by server.
+func (c *Collector) IncActiveConnectionsForServer(server string) {
+	c.activeConnections.WithLabelValues(normalizedMetricLabel(server)).Inc()
 }
 
 // DecActiveConnections decrements the gauge tracking active connections.
@@ -765,7 +883,12 @@ func (c *Collector) IncActiveConnections() {
 //
 // This method is safe for concurrent use.
 func (c *Collector) DecActiveConnections() {
-	c.activeConnections.Dec()
+	c.DecActiveConnectionsForServer(defaultServerMetricLabel)
+}
+
+// DecActiveConnectionsForServer decrements active connections by server.
+func (c *Collector) DecActiveConnectionsForServer(server string) {
+	c.activeConnections.WithLabelValues(normalizedMetricLabel(server)).Dec()
 }
 
 // RecordIdleConnectionClosed increments the counter for connections closed due to idle timeout.
@@ -773,7 +896,18 @@ func (c *Collector) DecActiveConnections() {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordIdleConnectionClosed(reason string) {
-	c.idleConnectionsClosedTotal.WithLabelValues(reason).Inc()
+	c.RecordIdleConnectionClosedForServer(defaultServerMetricLabel, reason)
+}
+
+// RecordIdleConnectionClosedForServer increments idle close counts by server and reason.
+func (c *Collector) RecordIdleConnectionClosedForServer(server, reason string) {
+	c.idleConnectionsClosedTotal.WithLabelValues(normalizedMetricLabel(server), reason).Inc()
+
+}
+
+// RecordConnectionRejected increments rejected connection counts for the server.
+func (c *Collector) RecordConnectionRejected(server, reason string) {
+	c.connectionRejectionsTotal.WithLabelValues(normalizedMetricLabel(server), reason).Inc()
 }
 
 // SetGoroutines sets the gauge tracking the current number of goroutines.
@@ -789,7 +923,84 @@ func (c *Collector) SetGoroutines(count int) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordScenarioMatched(scenario string) {
-	c.scenariosMatched.WithLabelValues(scenario).Inc()
+	c.RecordScenarioMatchedForServer(defaultServerMetricLabel, scenario)
+
+}
+
+// RecordScenarioMatchedForServer increments the scenario match counter by server.
+func (c *Collector) RecordScenarioMatchedForServer(server, scenario string) {
+	server = normalizedMetricLabel(server)
+	scenario = normalizedMetricLabel(scenario)
+	c.scenariosMatched.WithLabelValues(server, scenario).Inc()
+}
+
+// RecordScenarioRequest records a matched scenario request and rolling latency stats.
+// The response label should be a response/template name when available, or a status code.
+// User-supplied reserved labels are escaped before cardinality admission.
+// New (scenario, response) pairs beyond the cardinality cap are aggregated into
+// the reserved __overflow__ labels before any scenario Prometheus vector is
+// touched. This keeps request counters and latency gauges bounded and consistent.
+//
+// This method is safe for concurrent use.
+func (c *Collector) RecordScenarioRequest(scenario, response string, duration time.Duration) {
+	c.RecordScenarioRequestForServer(defaultServerMetricLabel, scenario, response, duration)
+}
+
+// RecordScenarioRequestForServer records a matched scenario request by server.
+func (c *Collector) RecordScenarioRequestForServer(server, scenario, response string, duration time.Duration) {
+	server = normalizedMetricLabel(server)
+	scenario = normalizedMetricLabel(scenario)
+	response = normalizedMetricLabel(response)
+	observation := c.scenarioLatencyWindow.observe(server, scenario, response, duration.Seconds())
+	c.scenariosMatched.WithLabelValues(observation.server, observation.scenario).Inc()
+	c.scenarioRequests.WithLabelValues(observation.server, observation.scenario, observation.response).Inc()
+	for _, stat := range observation.stats {
+		c.scenarioResponseTime.WithLabelValues(
+			observation.server,
+			observation.scenario,
+			observation.response,
+			stat.name,
+		).Set(stat.value)
+	}
+}
+
+// SetScenariosLoaded sets the current loaded scenario count for a server.
+func (c *Collector) SetScenariosLoaded(server string, count int) {
+	label := normalizedMetricLabel(server)
+	c.scenariosLoaded.WithLabelValues(label).Set(float64(count))
+	c.trackScenariosLoadedLabel(label)
+}
+
+// SetScenariosLoadedSnapshot replaces the reported scenario-loaded server set.
+func (c *Collector) SetScenariosLoadedSnapshot(counts map[string]int) {
+	c.scenariosLoadedMu.Lock()
+	defer c.scenariosLoadedMu.Unlock()
+	current := make(map[string]struct{}, len(counts))
+	for server, count := range counts {
+		label := normalizedMetricLabel(server)
+		c.scenariosLoaded.WithLabelValues(label).Set(float64(count))
+		current[label] = struct{}{}
+	}
+	for label := range c.scenariosLoadedLabels {
+		if _, ok := current[label]; !ok {
+			c.scenariosLoaded.DeleteLabelValues(label)
+		}
+	}
+	c.scenariosLoadedLabels = current
+}
+
+func (c *Collector) trackScenariosLoadedLabel(label string) {
+	c.scenariosLoadedMu.Lock()
+	defer c.scenariosLoadedMu.Unlock()
+	if c.scenariosLoadedLabels == nil {
+		c.scenariosLoadedLabels = make(map[string]struct{})
+	}
+	c.scenariosLoadedLabels[label] = struct{}{}
+}
+
+// RecordFallbackScenarioRequest records use of the default fallback response.
+func (c *Collector) RecordFallbackScenarioRequest(server, response string, duration time.Duration) {
+	c.RecordScenarioRequestForServer(server, fallbackScenarioMetricLabel, response, duration)
 }
 
 // RecordChaosInjected increments the counter for chaos injections.
@@ -804,15 +1015,25 @@ func (c *Collector) RecordChaosInjected(chaosType string) {
 // for the given client identifier.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordRateLimitExceeded(client string) {
-	c.rateLimitExceeded.WithLabelValues(client).Inc()
+func (c *Collector) RecordRateLimitExceeded(_ string) {
+	c.RecordRateLimitExceededForServer(defaultServerMetricLabel)
+}
+
+// RecordRateLimitExceededForServer increments bounded rate-limit events by server.
+func (c *Collector) RecordRateLimitExceededForServer(server string) {
+	c.rateLimitExceeded.WithLabelValues(normalizedMetricLabel(server)).Inc()
 }
 
 // RecordRateLimitWaitTime records the time a request waited due to rate limiting.
 //
 // This method is safe for concurrent use.
-func (c *Collector) RecordRateLimitWaitTime(client string, waitTime time.Duration) {
-	c.rateLimitWaitTime.WithLabelValues(client).Observe(waitTime.Seconds())
+func (c *Collector) RecordRateLimitWaitTime(_ string, waitTime time.Duration) {
+	c.RecordRateLimitWaitTimeForServer(defaultServerMetricLabel, waitTime)
+}
+
+// RecordRateLimitWaitTimeForServer records rate-limit wait time by server.
+func (c *Collector) RecordRateLimitWaitTimeForServer(server string, waitTime time.Duration) {
+	c.rateLimitWaitTime.WithLabelValues(normalizedMetricLabel(server)).Observe(waitTime.Seconds())
 }
 
 // RecordPerClientRateLimitExceeded increments the counter for per-client
@@ -823,7 +1044,12 @@ func (c *Collector) RecordRateLimitWaitTime(client string, waitTime time.Duratio
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordPerClientRateLimitExceeded(_ string) {
-	c.perClientRateLimitExceeded.WithLabelValues().Inc()
+	c.RecordPerClientRateLimitExceededForServer(defaultServerMetricLabel)
+}
+
+// RecordPerClientRateLimitExceededForServer increments per-client events by server.
+func (c *Collector) RecordPerClientRateLimitExceededForServer(server string) {
+	c.perClientRateLimitExceeded.WithLabelValues(normalizedMetricLabel(server)).Inc()
 }
 
 // RecordPerClientRateLimitWaitTime records the time a request waited due
@@ -834,7 +1060,12 @@ func (c *Collector) RecordPerClientRateLimitExceeded(_ string) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordPerClientRateLimitWaitTime(waitTime time.Duration) {
-	c.perClientRateLimitWaitTime.WithLabelValues().Observe(waitTime.Seconds())
+	c.RecordPerClientRateLimitWaitTimeForServer(defaultServerMetricLabel, waitTime)
+}
+
+// RecordPerClientRateLimitWaitTimeForServer records per-client wait time by server.
+func (c *Collector) RecordPerClientRateLimitWaitTimeForServer(server string, waitTime time.Duration) {
+	c.perClientRateLimitWaitTime.WithLabelValues(normalizedMetricLabel(server)).Observe(waitTime.Seconds())
 }
 
 // SetPerClientRateLimitActive sets the gauge tracking the current number
@@ -842,7 +1073,12 @@ func (c *Collector) RecordPerClientRateLimitWaitTime(waitTime time.Duration) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) SetPerClientRateLimitActive(count int) {
-	c.perClientRateLimitActive.Set(float64(count))
+	c.SetPerClientRateLimitActiveForServer(defaultServerMetricLabel, count)
+}
+
+// SetPerClientRateLimitActiveForServer sets active per-client limiters by server.
+func (c *Collector) SetPerClientRateLimitActiveForServer(server string, count int) {
+	c.perClientRateLimitActive.WithLabelValues(normalizedMetricLabel(server)).Set(float64(count))
 }
 
 // IncPerClientRateLimitEvictions increments the counter for client evictions
@@ -850,7 +1086,12 @@ func (c *Collector) SetPerClientRateLimitActive(count int) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) IncPerClientRateLimitEvictions() {
-	c.perClientRateLimitEvictions.Inc()
+	c.IncPerClientRateLimitEvictionsForServer(defaultServerMetricLabel)
+}
+
+// IncPerClientRateLimitEvictionsForServer increments client evictions by server.
+func (c *Collector) IncPerClientRateLimitEvictionsForServer(server string) {
+	c.perClientRateLimitEvictions.WithLabelValues(normalizedMetricLabel(server)).Inc()
 }
 
 // RecordReplayRequest increments the counter for replayed requests.
@@ -995,13 +1236,23 @@ func (c *Collector) DecStorageRotationActive() {
 // RecordRequestTimeout increments the counter for request timeouts.
 // This method is safe for concurrent use.
 func (c *Collector) RecordRequestTimeout(method string) {
-	c.requestTimeoutsTotal.WithLabelValues(method).Inc()
+	c.RecordRequestTimeoutForServer(defaultServerMetricLabel, method)
+}
+
+// RecordRequestTimeoutForServer increments request timeouts by server and method.
+func (c *Collector) RecordRequestTimeoutForServer(server, method string) {
+	c.requestTimeoutsTotal.WithLabelValues(normalizedMetricLabel(server), method).Inc()
 }
 
 // RecordRequestCancellation increments the counter for request cancellations.
 // This method is safe for concurrent use.
 func (c *Collector) RecordRequestCancellation(method string) {
-	c.requestCancellationsTotal.WithLabelValues(method).Inc()
+	c.RecordRequestCancellationForServer(defaultServerMetricLabel, method)
+}
+
+// RecordRequestCancellationForServer increments request cancellations by server and method.
+func (c *Collector) RecordRequestCancellationForServer(server, method string) {
+	c.requestCancellationsTotal.WithLabelValues(normalizedMetricLabel(server), method).Inc()
 }
 
 // RecordRequestContextCancellation increments the counter for request context cancellations by reason.
@@ -1009,7 +1260,12 @@ func (c *Collector) RecordRequestCancellation(method string) {
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordRequestContextCancellation(method, reason string) {
-	c.requestContextCancellationsByReason.WithLabelValues(method, reason).Inc()
+	c.RecordRequestContextCancellationForServer(defaultServerMetricLabel, method, reason)
+}
+
+// RecordRequestContextCancellationForServer increments context cancellations by server.
+func (c *Collector) RecordRequestContextCancellationForServer(server, method, reason string) {
+	c.requestContextCancellationsByReason.WithLabelValues(normalizedMetricLabel(server), method, reason).Inc()
 }
 
 // RecordStorageBackpressureRejected increments the counter for requests rejected
@@ -1123,6 +1379,20 @@ func (c *Collector) RecordPreviewRequestRejected(_ string) {
 // This method is safe for concurrent use.
 func (c *Collector) SetPreviewClientsActive(count int) {
 	c.previewClientsActive.Set(float64(count))
+}
+
+// RecordAPIRequest increments the bounded management API request counter.
+func (c *Collector) RecordAPIRequest(server, route, method string, statusCode int) {
+	c.apiRequestsTotal.WithLabelValues(
+		normalizedMetricLabel(server), route, method, fmt.Sprintf("%d", statusCode),
+	).Inc()
+}
+
+// RecordAPIError increments the bounded management API error counter.
+func (c *Collector) RecordAPIError(server, route, method string, statusCode int, errorType string) {
+	c.apiErrorsTotal.WithLabelValues(
+		normalizedMetricLabel(server), route, method, fmt.Sprintf("%d", statusCode), errorType,
+	).Inc()
 }
 
 // SetStorageDiskUsage sets the gauge for the current disk usage in bytes.

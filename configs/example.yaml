@@ -22,6 +22,10 @@
 # =============================================================================
 # Used when "servers:" map is absent. Exactly one ICAP listener is started.
 server:
+  # Stable server key/name used in metrics labels. Required for new configs.
+  # Type: string | Default: "default"
+  name: "default"
+
   # Interface to bind. "0.0.0.0" listens on all interfaces.
   # Type: string | Default: "0.0.0.0"
   host: "0.0.0.0"

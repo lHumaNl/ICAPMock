@@ -465,6 +465,26 @@ func TestLoader_DefaultsOnly(t *testing.T) {
 	}
 }
 
+func TestLoader_LoadSingleServerWithoutNameDefaultsToDefault(t *testing.T) {
+	content := `
+server:
+  host: "127.0.0.1"
+  port: 1344
+`
+	cfgPath := filepath.Join(t.TempDir(), "single-server.yaml")
+	if err := os.WriteFile(cfgPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg, err := NewLoader().Load(LoadOptions{ConfigPath: cfgPath})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Server.Name != "default" {
+		t.Fatalf("Server.Name = %q, want default", cfg.Server.Name)
+	}
+}
+
 // TestLoadOptions tests LoadOptions configuration.
 func TestLoadOptions(t *testing.T) {
 	opts := LoadOptions{

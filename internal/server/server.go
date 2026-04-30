@@ -125,6 +125,7 @@ type ICAPServer struct {
 	config                     *config.ServerConfig
 	logger                     *slog.Logger
 	metrics                    *metrics.Collector
+	metricsServerName          string
 	goroutineConfig            GoroutineMonitorConfig
 	wg                         sync.WaitGroup
 	goroutinePeak              int
@@ -172,6 +173,7 @@ func NewServer(cfg *config.ServerConfig, pool *ConnectionPool, logger *slog.Logg
 		semaphore:         make(chan struct{}, cfg.MaxConnections),
 		stopChan:          make(chan struct{}),
 		logger:            logger,
+		metricsServerName: "default",
 		goroutineConfig:   DefaultGoroutineMonitorConfig(),
 		goroutineBaseline: runtime.NumGoroutine(),
 		goroutinePeak:     runtime.NumGoroutine(),
@@ -196,6 +198,13 @@ func (s *ICAPServer) SetRouter(r *router.Router) {
 // This is optional - if not set, goroutine monitoring will only log warnings.
 func (s *ICAPServer) SetMetrics(m *metrics.Collector) {
 	s.metrics = m
+}
+
+// SetMetricsServerName sets the bounded server label used by ICAP server metrics.
+func (s *ICAPServer) SetMetricsServerName(name string) {
+	if name != "" {
+		s.metricsServerName = name
+	}
 }
 
 // SetGoroutineMonitorConfig configures the goroutine leak detection monitoring.
@@ -464,6 +473,9 @@ func (s *ICAPServer) acceptLoop() {
 				// Got a slot, handle the connection
 			default:
 				// Connection limit reached, reject
+				if s.metrics != nil {
+					s.metrics.RecordConnectionRejected(s.metricsServerName, "max_connections")
+				}
 				_ = netConn.Close()
 				continue
 			}
@@ -480,6 +492,9 @@ func (s *ICAPServer) acceptLoop() {
 
 			// Add to pool
 			s.pool.Add(conn)
+			if s.metrics != nil {
+				s.metrics.IncActiveConnectionsForServer(s.metricsServerName)
+			}
 
 			// Handle connection in a goroutine
 			s.wg.Add(1)
@@ -515,6 +530,9 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 		connCancel()
 		_ = conn.Close()
 		s.pool.Remove(conn)
+		if s.metrics != nil {
+			s.metrics.DecActiveConnectionsForServer(s.metricsServerName)
+		}
 		<-s.semaphore // Release slot
 		s.wg.Done()
 	}()
@@ -548,7 +566,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 
 				// Record metric
 				if s.metrics != nil {
-					s.metrics.RecordIdleConnectionClosed("idle")
+					s.metrics.RecordIdleConnectionClosedForServer(s.metricsServerName, "idle")
 				}
 
 				// Send error to client if possible

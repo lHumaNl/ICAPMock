@@ -17,6 +17,7 @@ type PerMethodMiddleware struct {
 	globalLimiter    Limiter
 	metrics          *metrics.Collector
 	config           *PerMethodRateLimitConfig
+	server           string
 }
 
 // PerMethodRateLimitConfig holds configuration for per-method rate limiting.
@@ -46,12 +47,25 @@ func NewPerMethodMiddleware(
 	mc *metrics.Collector,
 	config *PerMethodRateLimitConfig,
 ) *PerMethodMiddleware {
+	return NewPerMethodMiddlewareForServer(perMethodLimiter, perClientLimiter, globalLimiter, mc, config, "")
+}
+
+// NewPerMethodMiddlewareForServer creates per-method middleware with server-labeled metrics.
+func NewPerMethodMiddlewareForServer(
+	perMethodLimiter *KeyBasedShardedTokenBucketLimiter,
+	perClientLimiter *PerClientRateLimiter,
+	globalLimiter Limiter,
+	mc *metrics.Collector,
+	config *PerMethodRateLimitConfig,
+	server string,
+) *PerMethodMiddleware {
 	return &PerMethodMiddleware{
 		perMethodLimiter: perMethodLimiter,
 		perClientLimiter: perClientLimiter,
 		globalLimiter:    globalLimiter,
 		metrics:          mc,
 		config:           config,
+		server:           server,
 	}
 }
 
@@ -81,7 +95,7 @@ func (m *PerMethodMiddleware) Allow(_ context.Context, req *icap.Request) (allow
 	if m.perMethodLimiter != nil && m.config != nil && m.config.Enabled {
 		methodKey := MethodKey(method)
 		if !m.perMethodLimiter.Allow(methodKey) {
-			m.metrics.RecordRateLimitExceeded("per_method:" + method)
+			m.recordRateLimitExceeded()
 			return false, nil
 		}
 
@@ -94,13 +108,13 @@ func (m *PerMethodMiddleware) Allow(_ context.Context, req *icap.Request) (allow
 			if ok {
 				// Client was in cache
 				if !allowed {
-					m.metrics.RecordPerClientRateLimitExceeded("")
+					m.recordPerClientRateLimitExceeded()
 					return false, nil
 				}
 
 				// Check combined client+method limit
 				if !m.perMethodLimiter.Allow(clientMethodKey) {
-					m.metrics.RecordRateLimitExceeded("per_client_method:" + req.ClientIP + ":" + method)
+					m.recordRateLimitExceeded()
 					return false, nil
 				}
 			}
@@ -113,7 +127,7 @@ func (m *PerMethodMiddleware) Allow(_ context.Context, req *icap.Request) (allow
 			return true, nil
 		}
 
-		m.metrics.RecordRateLimitExceeded("global")
+		m.recordRateLimitExceeded()
 		return false, nil
 	}
 
@@ -153,7 +167,7 @@ func (m *PerMethodMiddleware) Wait(ctx context.Context, req *icap.Request) error
 			allowed, _ := m.perClientLimiter.Allow(req.ClientIP)
 
 			if !allowed {
-				m.metrics.RecordPerClientRateLimitExceeded("")
+				m.recordPerClientRateLimitExceeded()
 			}
 
 			// Wait for client+method token
@@ -188,4 +202,26 @@ func (m *PerMethodMiddleware) GetStats() ShardedStats {
 // GetMethodKey returns the rate limit key for a specific method.
 func (m *PerMethodMiddleware) GetMethodKey(method string) Key {
 	return MethodKey(method)
+}
+
+func (m *PerMethodMiddleware) recordRateLimitExceeded() {
+	if m.metrics == nil {
+		return
+	}
+	if m.server == "" {
+		m.metrics.RecordRateLimitExceeded("")
+		return
+	}
+	m.metrics.RecordRateLimitExceededForServer(m.server)
+}
+
+func (m *PerMethodMiddleware) recordPerClientRateLimitExceeded() {
+	if m.metrics == nil {
+		return
+	}
+	if m.server == "" {
+		m.metrics.RecordPerClientRateLimitExceeded("")
+		return
+	}
+	m.metrics.RecordPerClientRateLimitExceededForServer(m.server)
 }

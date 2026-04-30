@@ -29,6 +29,22 @@ func TestBuildServerEntriesSortsServerNames(t *testing.T) {
 	}
 }
 
+func TestBuildServerEntriesSingleServerEmptyNameDefaultsToDefault(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Port: 1344},
+		Mock:   config.MockConfig{ServiceID: "global-service"},
+	}
+
+	entries := buildServerEntries(cfg)
+
+	if len(entries) != 1 {
+		t.Fatalf("entries count = %d, want 1", len(entries))
+	}
+	if entries[0].name != "default" {
+		t.Fatalf("entry name = %q, want default", entries[0].name)
+	}
+}
+
 func TestMultiServerCLIOverridesApplyToRuntimeEntries(t *testing.T) {
 	cfg := multiServerOptionsConfig()
 	cmd := NewServerCommand()

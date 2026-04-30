@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/icap-mock/icap-mock/internal/config"
+	metricsinternal "github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
@@ -155,6 +157,53 @@ func TestServerAddr(t *testing.T) {
 		t.Fatalf("Failed to connect to server: %v", err)
 	}
 	conn.Close()
+}
+
+func TestServerActiveConnectionsMetricLifecycle(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metricsinternal.NewCollector(reg)
+	require.NoError(t, err)
+	srv := newActiveConnectionMetricServer(t, collector)
+	require.NoError(t, srv.Start(context.Background()))
+	defer func() { require.NoError(t, srv.Stop(context.Background())) }()
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return gaugeMetricValue(t, reg, "icap_active_connections") == 1
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, conn.Close())
+	require.Eventually(t, func() bool {
+		return gaugeMetricValue(t, reg, "icap_active_connections") == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func newActiveConnectionMetricServer(t *testing.T, collector *metricsinternal.Collector) *ICAPServer {
+	t.Helper()
+	cfg := &config.ServerConfig{
+		Host:           "127.0.0.1",
+		Port:           0,
+		ReadTimeout:    time.Second,
+		WriteTimeout:   time.Second,
+		MaxConnections: 10,
+		MaxBodySize:    1024,
+	}
+	srv, err := NewServer(cfg, NewConnectionPool(), nil)
+	require.NoError(t, err)
+	srv.SetMetrics(collector)
+	return srv
+}
+
+func gaugeMetricValue(t *testing.T, reg prometheus.Gatherer, name string) float64 {
+	t.Helper()
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+	for _, mf := range mfs {
+		if mf.GetName() == name && len(mf.GetMetric()) > 0 {
+			return mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	return 0
 }
 
 func TestServerGracefulShutdown(t *testing.T) {

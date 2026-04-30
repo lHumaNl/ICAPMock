@@ -9,11 +9,47 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+func metricValue(t *testing.T, reg prometheus.Gatherer, name string, labels map[string]string) float64 {
+	t.Helper()
+	for _, metric := range metricFamily(t, reg, name).GetMetric() {
+		if metricMatchesLabels(metric, labels) {
+			return metric.GetCounter().GetValue()
+		}
+	}
+	t.Fatalf("metric %s with labels %v not found", name, labels)
+	return 0
+}
+
+func metricFamily(t *testing.T, reg prometheus.Gatherer, name string) *dto.MetricFamily {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == name {
+			return mf
+		}
+	}
+	t.Fatalf("metric %s not found", name)
+	return nil
+}
+
+func metricMatchesLabels(metric *dto.Metric, labels map[string]string) bool {
+	for _, label := range metric.GetLabel() {
+		if labels[label.GetName()] != label.GetValue() {
+			return false
+		}
+	}
+	return len(metric.GetLabel()) == len(labels)
+}
 
 // TestAdaptiveTimeoutTracker_RecordDuration tests recording request durations.
 func TestAdaptiveTimeoutTracker_RecordDuration(t *testing.T) {
@@ -210,6 +246,7 @@ func TestAdaptiveTimeoutMiddleware_Handle(t *testing.T) {
 
 	middlewareCfg := handler.AdaptiveTimeoutMiddlewareConfig{
 		Tracker: tracker,
+		Server:  "edge-a",
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
@@ -248,10 +285,12 @@ func TestAdaptiveTimeoutMiddleware_ContextDeadlineExceeded(t *testing.T) {
 	cfg := handler.DefaultAdaptiveTimeoutConfig()
 	cfg.Metrics = collector
 	cfg.MinTimeout = 5 * time.Millisecond // Very low timeout
+	cfg.FallbackTimeout = 5 * time.Millisecond
 	tracker := handler.NewAdaptiveTimeoutTracker(cfg)
 
 	middlewareCfg := handler.AdaptiveTimeoutMiddlewareConfig{
 		Tracker: tracker,
+		Server:  "edge-a",
 	}
 	middleware := handler.NewAdaptiveTimeoutMiddleware(middlewareCfg)
 
@@ -276,6 +315,31 @@ func TestAdaptiveTimeoutMiddleware_ContextDeadlineExceeded(t *testing.T) {
 
 	// The handler should have recorded a timeout
 	// Check metrics for timeout counter
+	labels := map[string]string{"server": "edge-a", "method": "REQMOD"}
+	if got := metricValue(t, reg, "icap_request_timeouts_total", labels); got != 1 {
+		t.Errorf("request timeouts = %v, want 1", got)
+	}
+}
+
+func TestAdaptiveTimeoutMiddleware_EmptyServerUsesDefaultMetricLabel(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, _ := metrics.NewCollector(reg)
+	cfg := handler.DefaultAdaptiveTimeoutConfig()
+	cfg.Metrics = collector
+	cfg.MinTimeout = 5 * time.Millisecond
+	cfg.FallbackTimeout = 5 * time.Millisecond
+	tracker := handler.NewAdaptiveTimeoutTracker(cfg)
+	middleware := handler.NewAdaptiveTimeoutMiddleware(handler.AdaptiveTimeoutMiddlewareConfig{Tracker: tracker})
+	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+		time.Sleep(20 * time.Millisecond)
+		return icap.NewResponse(icap.StatusOK), nil
+	}, "REQMOD")
+	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
+	_, _ = middleware(baseHandler).Handle(context.Background(), req)
+	labels := map[string]string{"server": "default", "method": "REQMOD"}
+	if got := metricValue(t, reg, "icap_request_timeouts_total", labels); got != 1 {
+		t.Errorf("request timeouts = %v, want 1", got)
+	}
 }
 
 // TestAdaptiveTimeoutMiddleware_BasePath tests base path configuration.

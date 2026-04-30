@@ -4,7 +4,9 @@ package processor
 
 import (
 	"context"
+	"time"
 
+	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -19,12 +21,21 @@ import (
 //   - Implementing "pass-through" mode
 //
 // EchoProcessor is thread-safe and can be used concurrently.
-type EchoProcessor struct{}
+type EchoProcessor struct {
+	metrics *metrics.Collector
+	server  string
+}
 
 // NewEchoProcessor creates a new EchoProcessor instance.
 // The returned processor always returns 204 No Content Needed.
 func NewEchoProcessor() *EchoProcessor {
-	return &EchoProcessor{}
+	return &EchoProcessor{server: "default"}
+}
+
+// SetMetricsForServer enables fallback scenario metrics for echo responses.
+func (p *EchoProcessor) SetMetricsForServer(collector *metrics.Collector, server string) {
+	p.metrics = collector
+	p.server = server
 }
 
 // Process handles the ICAP request by returning 204 No Content Needed.
@@ -33,11 +44,16 @@ func NewEchoProcessor() *EchoProcessor {
 //
 // The request is always handled successfully (no error is returned).
 func (p *EchoProcessor) Process(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-	return &icap.Response{
+	start := time.Now()
+	resp := &icap.Response{
 		StatusCode: icap.StatusNoContentNeeded,
 		Proto:      icap.Version,
 		Header:     icap.NewHeader(),
-	}, nil
+	}
+	if p.metrics != nil {
+		p.metrics.RecordFallbackScenarioRequest(p.server, "204", time.Since(start))
+	}
+	return resp, nil
 }
 
 // Name returns "EchoProcessor" as the processor name.

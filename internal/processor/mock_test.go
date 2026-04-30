@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/logger"
+	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
@@ -130,6 +134,74 @@ func TestMockProcessor_Process(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMockProcessor_RecordsScenarioMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(namedResponseScenario()); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	proc.SetMetrics(collector)
+
+	_, err = proc.Process(context.Background(), createTestREQMODRequest(t))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	count := scenarioRequestMetricValue(t, reg, "named-scenario", "clean")
+	if count != 1 {
+		t.Errorf("scenario request count = %v, want 1", count)
+	}
+}
+
+func namedResponseScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name:     "named-scenario",
+		Match:    storage.MatchRule{Methods: []string{icap.MethodREQMOD}},
+		Priority: 100,
+		Response: storage.ResponseTemplate{
+			ICAPStatus:   204,
+			ResponseName: "clean",
+		},
+	}
+}
+
+func scenarioRequestMetricValue(t *testing.T, reg prometheus.Gatherer, scenario, response string) float64 {
+	t.Helper()
+	for _, mf := range gatherProcessorTestMetrics(t, reg) {
+		if mf.GetName() != "icap_scenario_requests_total" {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			if metricHasLabels(metric, scenario, response) {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
+}
+
+func gatherProcessorTestMetrics(t *testing.T, reg prometheus.Gatherer) []*dto.MetricFamily {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	return mfs
+}
+
+func metricHasLabels(metric *dto.Metric, scenario, response string) bool {
+	labels := make(map[string]string, len(metric.GetLabel()))
+	for _, label := range metric.GetLabel() {
+		labels[label.GetName()] = label.GetValue()
+	}
+	return labels["scenario"] == scenario && labels["response"] == response
 }
 
 // TestMockProcessor_NoMatch tests behavior when no scenario matches.

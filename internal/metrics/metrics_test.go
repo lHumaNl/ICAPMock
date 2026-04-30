@@ -3,14 +3,18 @@
 package metrics
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // getHistogramCount returns the count of observations from a histogram metric.
@@ -39,6 +43,149 @@ func getHistogramCount(reg prometheus.Gatherer, metricName string, labels ...str
 		}
 	}
 	return 0
+}
+
+func assertHistogramCount(
+	t *testing.T,
+	reg prometheus.Gatherer,
+	name string,
+	labels map[string]string,
+	want uint64,
+) {
+	t.Helper()
+	for _, metric := range metricFamily(t, reg, name).GetMetric() {
+		if metricMatchesLabels(metric, labels) && metric.GetHistogram().GetSampleCount() == want {
+			return
+		}
+	}
+	t.Fatalf("histogram %s with labels %v and count %d not found", name, labels, want)
+}
+
+func assertScenarioLatencyStat(
+	t *testing.T,
+	collector *Collector,
+	stat string,
+	want float64,
+) {
+	t.Helper()
+	got := testutil.ToFloat64(collector.scenarioResponseTime.WithLabelValues("default", "scan", "clean", stat))
+	if math.Abs(got-want) > 0.0000001 {
+		t.Errorf("scenario latency %s = %v, want %v", stat, got, want)
+	}
+}
+
+func assertMetricLabels(t *testing.T, reg prometheus.Gatherer, name string, labels []string) {
+	t.Helper()
+	metric := firstMetric(t, reg, name)
+	if len(metric.GetLabel()) != len(labels) {
+		t.Fatalf("%s label count = %d, want %d", name, len(metric.GetLabel()), len(labels))
+	}
+	for i, label := range labels {
+		if metric.GetLabel()[i].GetName() != label {
+			t.Errorf("%s label[%d] = %s, want %s", name, i, metric.GetLabel()[i].GetName(), label)
+		}
+	}
+}
+
+func assertNoMetric(t *testing.T, reg prometheus.Gatherer, name string) {
+	t.Helper()
+	for _, mf := range gatherMetricFamilies(t, reg) {
+		if mf.GetName() == name {
+			t.Fatalf("metric %s exists, want absent", name)
+		}
+	}
+}
+
+func countMetricSeries(t *testing.T, reg prometheus.Gatherer, name string) int {
+	t.Helper()
+	for _, mf := range gatherMetricFamilies(t, reg) {
+		if mf.GetName() == name {
+			return len(mf.GetMetric())
+		}
+	}
+	return 0
+}
+
+func hasMetricLabels(t *testing.T, reg prometheus.Gatherer, name string, labels map[string]string) bool {
+	t.Helper()
+	for _, metric := range metricFamily(t, reg, name).GetMetric() {
+		if metricMatchesLabels(metric, labels) {
+			return true
+		}
+	}
+	return false
+}
+
+func metricFamily(t *testing.T, reg prometheus.Gatherer, name string) *dto.MetricFamily {
+	t.Helper()
+	for _, mf := range gatherMetricFamilies(t, reg) {
+		if mf.GetName() == name {
+			return mf
+		}
+	}
+	t.Fatalf("metric %s not found", name)
+	return nil
+}
+
+func metricValue(t *testing.T, reg prometheus.Gatherer, name string, labels map[string]string) float64 {
+	t.Helper()
+	for _, metric := range metricFamily(t, reg, name).GetMetric() {
+		if metricMatchesLabels(metric, labels) {
+			return metricSampleValue(t, metric)
+		}
+	}
+	t.Fatalf("metric %s with labels %v not found", name, labels)
+	return 0
+}
+
+func metricSampleValue(t *testing.T, metric *dto.Metric) float64 {
+	t.Helper()
+	if metric.Counter != nil {
+		return metric.Counter.GetValue()
+	}
+	if metric.Gauge != nil {
+		return metric.Gauge.GetValue()
+	}
+	t.Fatal("metric has neither counter nor gauge value")
+	return 0
+}
+
+func metricMatchesLabels(metric *dto.Metric, labels map[string]string) bool {
+	for _, label := range metric.GetLabel() {
+		if labels[label.GetName()] != label.GetValue() {
+			return false
+		}
+	}
+	return len(metric.GetLabel()) == len(labels)
+}
+
+func sumCounterMetric(t *testing.T, reg prometheus.Gatherer, name string) float64 {
+	t.Helper()
+	var total float64
+	for _, metric := range metricFamily(t, reg, name).GetMetric() {
+		total += metric.GetCounter().GetValue()
+	}
+	return total
+}
+
+func firstMetric(t *testing.T, reg prometheus.Gatherer, name string) *dto.Metric {
+	t.Helper()
+	for _, mf := range gatherMetricFamilies(t, reg) {
+		if mf.GetName() == name && len(mf.GetMetric()) > 0 {
+			return mf.GetMetric()[0]
+		}
+	}
+	t.Fatalf("metric %s not found", name)
+	return nil
+}
+
+func gatherMetricFamilies(t *testing.T, reg prometheus.Gatherer) []*dto.MetricFamily {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	return mfs
 }
 
 // TestNewCollector tests that a new collector can be created.
@@ -75,8 +222,8 @@ func TestCollector_RecordRequest(t *testing.T) {
 	collector.RecordRequest("RESPMOD")
 
 	// Verify counter increased
-	countReqmod := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("REQMOD"))
-	countRespmod := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("RESPMOD"))
+	countReqmod := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("default", "REQMOD"))
+	countRespmod := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("default", "RESPMOD"))
 
 	if countReqmod != 2 {
 		t.Errorf("REQMOD count = %v, want 2", countReqmod)
@@ -119,8 +266,8 @@ func TestCollector_RequestsInFlight(t *testing.T) {
 	collector.IncRequestsInFlight("REQMOD")
 	collector.IncRequestsInFlight("RESPMOD")
 
-	countReqmod := testutil.ToFloat64(collector.requestsInFlight.WithLabelValues("REQMOD"))
-	countRespmod := testutil.ToFloat64(collector.requestsInFlight.WithLabelValues("RESPMOD"))
+	countReqmod := testutil.ToFloat64(collector.requestsInFlight.WithLabelValues("default", "REQMOD"))
+	countRespmod := testutil.ToFloat64(collector.requestsInFlight.WithLabelValues("default", "RESPMOD"))
 
 	if countReqmod != 2 {
 		t.Errorf("REQMOD in-flight = %v, want 2", countReqmod)
@@ -131,7 +278,7 @@ func TestCollector_RequestsInFlight(t *testing.T) {
 
 	// Test decrement
 	collector.DecRequestsInFlight("REQMOD")
-	countReqmod = testutil.ToFloat64(collector.requestsInFlight.WithLabelValues("REQMOD"))
+	countReqmod = testutil.ToFloat64(collector.requestsInFlight.WithLabelValues("default", "REQMOD"))
 	if countReqmod != 1 {
 		t.Errorf("REQMOD in-flight after decrement = %v, want 1", countReqmod)
 	}
@@ -184,8 +331,8 @@ func TestCollector_RecordError(t *testing.T) {
 	collector.RecordError("timeout")
 	collector.RecordError("connection_error")
 
-	countTimeout := testutil.ToFloat64(collector.errorsTotal.WithLabelValues("timeout"))
-	countConnErr := testutil.ToFloat64(collector.errorsTotal.WithLabelValues("connection_error"))
+	countTimeout := testutil.ToFloat64(collector.errorsTotal.WithLabelValues("default", "timeout"))
+	countConnErr := testutil.ToFloat64(collector.errorsTotal.WithLabelValues("default", "connection_error"))
 
 	if countTimeout != 2 {
 		t.Errorf("timeout error count = %v, want 2", countTimeout)
@@ -233,14 +380,290 @@ func TestCollector_RecordScenarioMatched(t *testing.T) {
 	collector.RecordScenarioMatched("virus_scan")
 	collector.RecordScenarioMatched("url_filter")
 
-	countVirus := testutil.ToFloat64(collector.scenariosMatched.WithLabelValues("virus_scan"))
-	countFilter := testutil.ToFloat64(collector.scenariosMatched.WithLabelValues("url_filter"))
+	countVirus := testutil.ToFloat64(collector.scenariosMatched.WithLabelValues("default", "virus_scan"))
+	countFilter := testutil.ToFloat64(collector.scenariosMatched.WithLabelValues("default", "url_filter"))
 
 	if countVirus != 2 {
 		t.Errorf("virus_scan scenario count = %v, want 2", countVirus)
 	}
 	if countFilter != 1 {
 		t.Errorf("url_filter scenario count = %v, want 1", countFilter)
+	}
+}
+
+func TestCollector_RecordScenarioRequest(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordScenarioRequest("virus_scan", "blocked", 100*time.Millisecond)
+	collector.RecordScenarioRequest("virus_scan", "blocked", 200*time.Millisecond)
+	collector.RecordScenarioRequest("virus_scan", "204", 50*time.Millisecond)
+
+	blocked := testutil.ToFloat64(collector.scenarioRequests.WithLabelValues("default", "virus_scan", "blocked"))
+	noContent := testutil.ToFloat64(collector.scenarioRequests.WithLabelValues("default", "virus_scan", "204"))
+	if blocked != 2 {
+		t.Errorf("blocked scenario requests = %v, want 2", blocked)
+	}
+	if noContent != 1 {
+		t.Errorf("204 scenario requests = %v, want 1", noContent)
+	}
+	assertMetricLabels(t, reg, "icap_scenario_requests_total", []string{"response", "scenario", "server"})
+}
+
+func TestCollector_RecordFallbackScenarioRequest(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordFallbackScenarioRequest("server-a", "204", time.Millisecond)
+	labels := map[string]string{"server": "server-a", "scenario": "fallback", "response": "204"}
+	if got := metricValue(t, reg, "icap_scenario_requests_total", labels); got != 1 {
+		t.Errorf("fallback scenario requests = %v, want 1", got)
+	}
+}
+
+func TestCollector_RecordAPIMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordAPIRequest("management", "/api/v1/config/load", "POST", http.StatusBadRequest)
+	collector.RecordAPIError("management", "/api/v1/config/load", "POST", http.StatusBadRequest, "bad_request")
+	reqLabels := map[string]string{"server": "management", "route": "/api/v1/config/load", "method": "POST", "status_code": "400"}
+	errLabels := map[string]string{"server": "management", "route": "/api/v1/config/load", "method": "POST", "status_code": "400", "error_type": "bad_request"}
+	if got := metricValue(t, reg, "icap_api_requests_total", reqLabels); got != 1 {
+		t.Errorf("api requests = %v, want 1", got)
+	}
+	if got := metricValue(t, reg, "icap_api_errors_total", errLabels); got != 1 {
+		t.Errorf("api errors = %v, want 1", got)
+	}
+}
+
+func TestCollector_SetScenariosLoaded(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.SetScenariosLoaded("server-a", 7)
+	if got := metricValue(t, reg, "icap_scenarios_loaded", map[string]string{"server": "server-a"}); got != 7 {
+		t.Errorf("scenarios loaded = %v, want 7", got)
+	}
+}
+
+func TestCollector_SetScenariosLoadedSnapshotDeletesRemovedServers(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.SetScenariosLoadedSnapshot(map[string]int{"server-a": 3, "server-b": 5})
+	collector.SetScenariosLoadedSnapshot(map[string]int{"server-a": 4})
+
+	if got := metricValue(t, reg, "icap_scenarios_loaded", map[string]string{"server": "server-a"}); got != 4 {
+		t.Errorf("server-a scenarios loaded = %v, want 4", got)
+	}
+	if hasMetricLabels(t, reg, "icap_scenarios_loaded", map[string]string{"server": "server-b"}) {
+		t.Error("server-b scenarios_loaded series is still present after snapshot removal")
+	}
+}
+
+func TestCollector_RecordScenarioRequestLatencyStats(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	for i := 1; i <= 100; i++ {
+		collector.RecordScenarioRequest("scan", "clean", time.Duration(i)*time.Millisecond)
+	}
+
+	assertScenarioLatencyStat(t, collector, "min", 0.001)
+	assertScenarioLatencyStat(t, collector, "max", 0.100)
+	assertScenarioLatencyStat(t, collector, "avg", 0.0505)
+	assertScenarioLatencyStat(t, collector, "p50", 0.050)
+	assertScenarioLatencyStat(t, collector, "p75", 0.075)
+	assertScenarioLatencyStat(t, collector, "p90", 0.090)
+	assertScenarioLatencyStat(t, collector, "p92", 0.092)
+	assertScenarioLatencyStat(t, collector, "p95", 0.095)
+	assertNoMetric(t, reg, "icap_scenario_response_time_seconds_bucket")
+}
+
+func TestCollector_RecordScenarioRequestCapsUniqueSeries(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	for i := 0; i < maxScenarioLatencySeries+50; i++ {
+		collector.RecordScenarioRequest(
+			"scenario-"+strconv.Itoa(i),
+			"response-"+strconv.Itoa(i),
+			time.Millisecond,
+		)
+	}
+
+	wantPairs := maxScenarioLatencySeries
+	gotRequests := countMetricSeries(t, reg, "icap_scenario_requests_total")
+	if gotRequests != wantPairs {
+		t.Errorf("scenario request series = %d, want %d", gotRequests, wantPairs)
+	}
+	gotLatency := countMetricSeries(t, reg, "icap_scenario_response_time_seconds")
+	wantLatency := wantPairs * len(scenarioLatencyStatNames)
+	if gotLatency != wantLatency {
+		t.Errorf("scenario latency series = %d, want %d", gotLatency, wantLatency)
+	}
+}
+
+func TestCollector_RecordScenarioRequestOverflowIsBounded(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	fillScenarioMetricCapacity(collector)
+	collector.RecordScenarioRequest("overflow-a", "blocked", time.Millisecond)
+	collector.RecordScenarioRequest("overflow-b", "allowed", 2*time.Millisecond)
+	collector.RecordScenarioRequest("overflow-c", "other", 3*time.Millisecond)
+
+	labels := map[string]string{"server": overflowMetricLabel, "scenario": overflowMetricLabel, "response": overflowMetricLabel}
+	if got := metricValue(t, reg, "icap_scenario_requests_total", labels); got != 3 {
+		t.Errorf("overflow scenario requests = %v, want 3", got)
+	}
+	if hasMetricLabels(t, reg, "icap_scenario_requests_total", overflowSourceLabels()) {
+		t.Fatal("overflow source labels created a request series")
+	}
+	if got := countMetricSeries(t, reg, "icap_scenario_requests_total"); got != maxScenarioLatencySeries {
+		t.Errorf("scenario request series = %d, want %d", got, maxScenarioLatencySeries)
+	}
+}
+
+func TestCollector_RecordScenarioRequestEscapesReservedUserLabels(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordScenarioRequest(overflowMetricLabel, overflowMetricLabel, time.Millisecond)
+
+	escapedLabels := escapedOverflowLabels()
+	if got := metricValue(t, reg, "icap_scenario_requests_total", escapedLabels); got != 1 {
+		t.Errorf("escaped reserved scenario requests = %v, want 1", got)
+	}
+	if hasMetricLabels(t, reg, "icap_scenario_requests_total", overflowLabels()) {
+		t.Fatal("reserved user labels created the overflow aggregate series")
+	}
+	matchedLabels := map[string]string{"server": "default", "scenario": escapedOverflowMetricLabel()}
+	if got := metricValue(t, reg, "icap_scenarios_matched_total", matchedLabels); got != 1 {
+		t.Errorf("escaped reserved scenarios matched = %v, want 1", got)
+	}
+}
+
+func TestCollector_RecordScenarioRequestSeparatesReservedUserLabelsFromOverflow(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordScenarioRequest(overflowMetricLabel, overflowMetricLabel, time.Millisecond)
+	fillScenarioMetricCapacityAfterReserved(collector)
+	collector.RecordScenarioRequest("overflow-a", "blocked", 2*time.Millisecond)
+
+	if got := metricValue(t, reg, "icap_scenario_requests_total", escapedOverflowLabels()); got != 1 {
+		t.Errorf("escaped reserved scenario requests = %v, want 1", got)
+	}
+	if got := metricValue(t, reg, "icap_scenario_requests_total", overflowLabels()); got != 1 {
+		t.Errorf("overflow aggregate scenario requests = %v, want 1", got)
+	}
+	if got := countMetricSeries(t, reg, "icap_scenario_requests_total"); got != maxScenarioLatencySeries {
+		t.Errorf("scenario request series = %d, want %d", got, maxScenarioLatencySeries)
+	}
+}
+
+func TestCollector_RecordScenarioRequestConcurrent(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	const workers = 16
+	const iterations = 128
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go recordScenarioRequestsWorker(&wg, start, collector, worker, iterations)
+	}
+	close(start)
+	wg.Wait()
+
+	if got := countMetricSeries(t, reg, "icap_scenario_requests_total"); got > maxScenarioLatencySeries {
+		t.Errorf("scenario request series = %d, want <= %d", got, maxScenarioLatencySeries)
+	}
+	if got := sumCounterMetric(t, reg, "icap_scenario_requests_total"); got != float64(workers*iterations) {
+		t.Errorf("scenario request count = %v, want %d", got, workers*iterations)
+	}
+}
+
+func fillScenarioMetricCapacity(collector *Collector) {
+	for i := 0; i < maxScenarioLatencySeries-1; i++ {
+		collector.RecordScenarioRequest("scenario-"+strconv.Itoa(i), "response", time.Millisecond)
+	}
+}
+
+func fillScenarioMetricCapacityAfterReserved(collector *Collector) {
+	for i := 0; i < maxScenarioLatencySeries-2; i++ {
+		collector.RecordScenarioRequest("scenario-"+strconv.Itoa(i), "response", time.Millisecond)
+	}
+}
+
+func overflowLabels() map[string]string {
+	return map[string]string{"server": overflowMetricLabel, "scenario": overflowMetricLabel, "response": overflowMetricLabel}
+}
+
+func escapedOverflowLabels() map[string]string {
+	escaped := escapedOverflowMetricLabel()
+	return map[string]string{"server": "default", "scenario": escaped, "response": escaped}
+}
+
+func escapedOverflowMetricLabel() string {
+	return userMetricLabelEscapePrefix + overflowMetricLabel
+}
+
+func overflowSourceLabels() map[string]string {
+	return map[string]string{"server": "default", "scenario": "overflow-a", "response": "blocked"}
+}
+
+func recordScenarioRequestsWorker(
+	wg *sync.WaitGroup,
+	start <-chan struct{},
+	collector *Collector,
+	worker int,
+	iterations int,
+) {
+	defer wg.Done()
+	<-start
+	for i := 0; i < iterations; i++ {
+		collector.RecordScenarioRequest(
+			"scenario-"+strconv.Itoa(i),
+			"response-"+strconv.Itoa(worker),
+			time.Duration(i+1)*time.Microsecond,
+		)
 	}
 }
 
@@ -279,14 +702,9 @@ func TestCollector_RecordRateLimitExceeded(t *testing.T) {
 	collector.RecordRateLimitExceeded("client_a")
 	collector.RecordRateLimitExceeded("client_b")
 
-	countA := testutil.ToFloat64(collector.rateLimitExceeded.WithLabelValues("client_a"))
-	countB := testutil.ToFloat64(collector.rateLimitExceeded.WithLabelValues("client_b"))
-
-	if countA != 2 {
-		t.Errorf("client_a rate limit count = %v, want 2", countA)
-	}
-	if countB != 1 {
-		t.Errorf("client_b rate limit count = %v, want 1", countB)
+	count := testutil.ToFloat64(collector.rateLimitExceeded.WithLabelValues("default"))
+	if count != 3 {
+		t.Errorf("rate limit count = %v, want 3", count)
 	}
 }
 
@@ -301,10 +719,40 @@ func TestCollector_RecordRateLimitWaitTime(t *testing.T) {
 	collector.RecordRateLimitWaitTime("client_a", 50*time.Millisecond)
 	collector.RecordRateLimitWaitTime("client_a", 100*time.Millisecond)
 
-	countA := getHistogramCount(reg, "icap_rate_limit_wait_seconds", "client_a")
+	countA := getHistogramCount(reg, "icap_rate_limit_wait_seconds", "default")
 	if countA != 2 {
 		t.Errorf("client_a wait time count = %v, want 2", countA)
 	}
+}
+
+func TestCollector_RecordRateLimitForServer(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordRateLimitExceededForServer("edge-a")
+	collector.RecordRateLimitWaitTimeForServer("edge-a", 50*time.Millisecond)
+	collector.RecordPerClientRateLimitExceededForServer("edge-a")
+	collector.RecordPerClientRateLimitWaitTimeForServer("edge-a", 50*time.Millisecond)
+	collector.SetPerClientRateLimitActiveForServer("edge-a", 2)
+	collector.IncPerClientRateLimitEvictionsForServer("edge-a")
+
+	if got := metricValue(t, reg, "icap_rate_limit_exceeded_total", map[string]string{"server": "edge-a"}); got != 1 {
+		t.Errorf("rate limit exceeded = %v, want 1", got)
+	}
+	if got := metricValue(t, reg, "icap_per_client_rate_limit_exceeded_total", map[string]string{"server": "edge-a"}); got != 1 {
+		t.Errorf("per-client exceeded = %v, want 1", got)
+	}
+	if got := metricValue(t, reg, "icap_per_client_rate_limit_active_clients", map[string]string{"server": "edge-a"}); got != 2 {
+		t.Errorf("per-client active clients = %v, want 2", got)
+	}
+	if got := metricValue(t, reg, "icap_per_client_rate_limit_evictions_total", map[string]string{"server": "edge-a"}); got != 1 {
+		t.Errorf("per-client evictions = %v, want 1", got)
+	}
+	assertHistogramCount(t, reg, "icap_rate_limit_wait_seconds", map[string]string{"server": "edge-a"}, 1)
+	assertHistogramCount(t, reg, "icap_per_client_rate_limit_wait_seconds", map[string]string{"server": "edge-a"}, 1)
 }
 
 // TestCollector_RecordReplayRequest tests replay request counter recording.
@@ -560,6 +1008,7 @@ func TestCollector_MetricNames(t *testing.T) {
 	collector.IncActiveConnections()
 	collector.SetGoroutines(1)
 	collector.RecordScenarioMatched("test")
+	collector.RecordScenarioRequest("test", "204", time.Millisecond)
 	collector.RecordChaosInjected("test")
 	collector.RecordRateLimitExceeded("test")
 	collector.RecordRateLimitWaitTime("test", time.Millisecond)
@@ -589,6 +1038,8 @@ func TestCollector_MetricNames(t *testing.T) {
 		"icap_active_connections",
 		"icap_goroutines_current",
 		"icap_scenarios_matched_total",
+		"icap_scenario_requests_total",
+		"icap_scenario_response_time_seconds",
 		"icap_chaos_injected_total",
 		"icap_rate_limit_exceeded_total",
 		"icap_rate_limit_wait_seconds",
@@ -645,7 +1096,7 @@ func TestCollector_ConcurrentAccess(t *testing.T) {
 	}
 
 	// If we get here without race condition, test passes
-	count := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("REQMOD"))
+	count := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("default", "REQMOD"))
 	if count != 1000 {
 		t.Errorf("concurrent request count = %v, want 1000", count)
 	}

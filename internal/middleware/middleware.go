@@ -61,9 +61,19 @@ func (cfg CircuitBreakerConfig) toCircuitBreakerConfig() circuitbreaker.Config {
 // RateLimiterMiddleware returns middleware that checks rate limit before processing.
 // If rate limit is exceeded, returns ICAP 429 (Too Many Requests).
 func RateLimiterMiddleware(limiter ratelimit.Limiter) handler.Middleware {
+	return RateLimiterMiddlewareForServer(limiter, nil, "")
+}
+
+// RateLimiterMiddlewareForServer checks rate limits and records denied requests by server.
+func RateLimiterMiddlewareForServer(
+	limiter ratelimit.Limiter,
+	collector *metrics.Collector,
+	server string,
+) handler.Middleware {
 	return func(next handler.Handler) handler.Handler {
 		return handler.WrapHandler(handler.Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 			if !limiter.Allow() {
+				recordRateLimitExceeded(collector, server)
 				resp := icap.NewResponse(429)
 				resp.SetHeader("X-RateLimit-Remaining", "0")
 				resp.SetHeader("Connection", "close")
@@ -72,6 +82,17 @@ func RateLimiterMiddleware(limiter ratelimit.Limiter) handler.Middleware {
 			return next.Handle(ctx, req)
 		}), next.Method())
 	}
+}
+
+func recordRateLimitExceeded(collector *metrics.Collector, server string) {
+	if collector == nil {
+		return
+	}
+	if server == "" {
+		collector.RecordRateLimitExceeded("")
+		return
+	}
+	collector.RecordRateLimitExceededForServer(server)
 }
 
 // PanicRecoveryMiddleware returns middleware that recovers from panics in handlers.

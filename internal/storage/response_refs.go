@@ -22,6 +22,7 @@ func resolveResponseRef(resp ResponseTemplate, templates map[string]ResponseTemp
 	if resp.Use == "" {
 		return resp, nil
 	}
+	responseName := resp.Use
 	base, ok := templates[resp.Use]
 	if !ok {
 		return ResponseTemplate{}, fmt.Errorf("use %q: response is not defined", resp.Use)
@@ -29,7 +30,9 @@ func resolveResponseRef(resp ResponseTemplate, templates map[string]ResponseTemp
 	if base.Use != "" {
 		return ResponseTemplate{}, fmt.Errorf("response %q cannot reference another response", resp.Use)
 	}
-	return mergeResponseTemplate(base, resp), nil
+	resolved := mergeResponseTemplate(base, resp)
+	resolved.ResponseName = responseName
+	return resolved, nil
 }
 
 func mergeResponseTemplate(base, over ResponseTemplate) ResponseTemplate {

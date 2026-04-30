@@ -22,247 +22,22 @@ import (
 	"github.com/icap-mock/icap-mock/internal/storage"
 )
 
-func TestAPIHandler_ListScenarios(t *testing.T) {
-	registry := storage.NewScenarioRegistry()
-	mux := newScenarioAPIHandler(registry, "")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["count"] == nil {
-		t.Fatal("expected count in response")
-	}
-}
-
-func TestAPIHandler_AddAndGetScenario(t *testing.T) {
-	registry := storage.NewScenarioRegistry()
-	mux := newScenarioAPIHandler(registry, "")
-
-	// Add scenario
-	scenario := `{"name":"test-scenario","match":{"path_pattern":"/test"},"response":{"icap_status":200},"priority":10}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scenarios", bytes.NewBufferString(scenario))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("add: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Get scenario
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/test-scenario", http.NoBody)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("get: expected 200, got %d", w.Code)
-	}
-
-	var s storage.Scenario
-	json.NewDecoder(w.Body).Decode(&s)
-	if s.Name != "test-scenario" {
-		t.Fatalf("expected name test-scenario, got %s", s.Name)
-	}
-}
-
-func TestAPIHandler_AddScenarioJSONNormalizesStreamSelectors(t *testing.T) {
-	registry := storage.NewScenarioRegistry()
-	mux := newScenarioAPIHandler(registry, "")
-	body := `{
-		"name":"json-stream",
-		"match":{"path_pattern":"^/upload","icap_method":["REQMOD"]},
-		"response":{"icap_status":200,"stream":{
-			"from":"request_http_body",
-			"multipart":{"files":true},
-			"fallback":{"raw_file":{"filename":".*\\.bin$"}}
-		}}
-	}`
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scenarios", bytes.NewBufferString(body))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	assertJSONStreamSelectorFlags(t, registry)
-}
-
-func TestAPIHandler_DeleteScenario(t *testing.T) {
-	registry := storage.NewScenarioRegistry()
-	mux := newScenarioAPIHandler(registry, "")
-
-	// Add then delete
-	scenario := `{"name":"to-delete","match":{},"response":{"icap_status":200}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scenarios", bytes.NewBufferString(scenario))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/scenarios/to-delete", http.NoBody)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("delete: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Verify deleted
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios/to-delete", http.NoBody)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("get after delete: expected 404, got %d", w.Code)
-	}
-}
-
 func TestAPIHandler_Auth(t *testing.T) {
-	registry := storage.NewScenarioRegistry()
-	mux := newScenarioAPIHandler(registry, "secret-token")
-
-	// Without token — should fail
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("no auth: expected 401, got %d", w.Code)
-	}
-
-	// With wrong token
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
-	req.Header.Set("Authorization", "Bearer wrong-token")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong token: expected 401, got %d", w.Code)
-	}
-
-	// With correct token
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
-	req.Header.Set("Authorization", "Bearer secret-token")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("correct token: expected 200, got %d", w.Code)
-	}
+	mux, _ := newManagementTestHandler(t, "secret-token")
+	assertStatus(t, mux, http.MethodPost, "/api/v1/config/reload-current", http.StatusUnauthorized)
+	assertStatusWithToken(t, mux, "wrong-token", http.StatusUnauthorized)
+	assertStatusWithToken(t, mux, "secret-token", http.StatusOK)
 }
 
 func TestAPIHandler_DefaultManagementDisabled(t *testing.T) {
 	mux := http.NewServeMux()
 	NewAPIHandler(storage.NewScenarioRegistry(), "").RegisterRoutes(mux)
-	w := httptest.NewRecorder()
-
-	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody))
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 while disabled, got %d", w.Code)
-	}
+	assertStatus(t, mux, http.MethodPost, "/api/v1/config/reload-current", http.StatusForbidden)
 }
 
 func TestAPIHandler_EnabledWithoutTokenAllowsUnauthenticated(t *testing.T) {
-	mux := newScenarioAPIHandler(storage.NewScenarioRegistry(), "")
-	w := httptest.NewRecorder()
-
-	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody))
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 without token, got %d", w.Code)
-	}
-}
-
-func TestAPIHandler_RejectsFileBackedScenarioResponse(t *testing.T) {
-	cases := []string{
-		`{"name":"body-file","response":{"body_file":"/tmp/body"}}`,
-		`{"name":"http-body-file","response":{"http_body_file":"/tmp/body"}}`,
-		`{"name":"stream-file","response":{"stream":{"source":{"body_file":"/tmp/body"}}}}`,
-		`{"name":"stream-part-file","response":{"stream":{"parts":[{"body_file":"/tmp/body"}]}}}`,
-		`{"name":"stream-fallback-file","response":{"stream":{"source":{"from":"request_http_body"},` +
-			`"fallback":{"body_file":"/tmp/body"}}}}`,
-	}
-	mux := newScenarioAPIHandler(storage.NewScenarioRegistry(), "")
-	for _, body := range cases {
-		assertScenarioRejected(t, mux, body)
-	}
-}
-
-func TestRejectFileBackedScenarioTraversesNestedResponses(t *testing.T) {
-	for _, scenario := range nestedFileBackedScenarios() {
-		t.Run(scenario.Name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			if !rejectFileBackedScenario(w, &scenario) {
-				t.Fatal("expected nested file-backed scenario to be rejected")
-			}
-			if w.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-			}
-		})
-	}
-}
-
-func nestedFileBackedScenarios() []storage.Scenario {
-	return []storage.Scenario{
-		{Name: "weighted-body-file", WeightedResponses: []storage.WeightedResponse{{BodyFile: "/tmp/body"}}},
-		{
-			Name:              "weighted-http-body-file",
-			WeightedResponses: []storage.WeightedResponse{{HTTPBodyFile: "/tmp/body"}},
-		},
-		{Name: "weighted-stream-file", WeightedResponses: []storage.WeightedResponse{{Stream: streamWithBodyFile()}}},
-		{
-			Name:     "branch-response-file",
-			Branches: []storage.Branch{{Response: storage.ResponseTemplate{BodyFile: "/tmp/body"}}},
-		},
-		{
-			Name: "branch-weighted-file",
-			Branches: []storage.Branch{{WeightedResponses: []storage.WeightedResponse{{
-				HTTPBodyFile: "/tmp/body",
-			}}}},
-		},
-	}
-}
-
-func streamWithBodyFile() *storage.StreamConfig {
-	return &storage.StreamConfig{Parts: []storage.StreamPartConfig{{BodyFile: "/tmp/body"}}}
-}
-
-func TestAPIHandler_RejectsFileBackedScenarioUpdate(t *testing.T) {
-	mux := newScenarioAPIHandler(storage.NewScenarioRegistry(), "")
-	body := `{"response":{"body_file":"/tmp/body"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/scenarios/file", bytes.NewBufferString(body))
-	w := httptest.NewRecorder()
-
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAPIHandler_ScenarioCreateUpdateRejectTrailingJSON(t *testing.T) {
-	mux := newScenarioAPIHandler(storage.NewScenarioRegistry(), "")
-	cases := []struct{ method, path, body string }{
-		{http.MethodPost, "/api/v1/scenarios", `{"name":"bad"} {}`},
-		{http.MethodPut, "/api/v1/scenarios/bad", `{"response":{}} {}`},
-	}
-	for _, tc := range cases {
-		assertScenarioMutationRejected(t, mux, tc.method, tc.path, tc.body)
-	}
-}
-
-func TestAPIHandler_ScenarioCreateUpdateRejectOversizedBody(t *testing.T) {
-	mux := newScenarioAPIHandler(storage.NewScenarioRegistry(), "")
-	oversizedName := strings.Repeat("a", int(maxScenarioBodyBytes))
-	body := `{"name":"` + oversizedName + `"}`
-	assertScenarioMutationRejected(t, mux, http.MethodPost, "/api/v1/scenarios", body)
-	assertScenarioMutationRejected(t, mux, http.MethodPut, "/api/v1/scenarios/large", body)
+	mux, _ := newManagementTestHandler(t, "")
+	assertStatus(t, mux, http.MethodPost, "/api/v1/config/reload-current", http.StatusOK)
 }
 
 func TestAPIHandler_ConfigLoadInvalidJSON(t *testing.T) {
@@ -537,7 +312,7 @@ func TestAPIHandler_ConfigureManagementConcurrentRequests(t *testing.T) {
 
 	for range 4 {
 		wg.Add(1)
-		go serveScenarioRequests(&wg, &stop, mux)
+		go serveManagementRequests(&wg, &stop, mux)
 	}
 	for i := range 100 {
 		handler.ConfigureManagement(managementConfigForIteration(i), "")
@@ -601,58 +376,24 @@ func newManagementHealthServer(
 	return server
 }
 
-func newScenarioAPIHandler(registry storage.ScenarioRegistry, token string) *http.ServeMux {
-	handler := NewAPIHandler(registry, "")
-	handler.ConfigureManagement(config.ManagementConfig{Enabled: true, Token: token}, "")
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
-	return mux
-}
-
-func assertScenarioRejected(t *testing.T, mux *http.ServeMux, body string) {
+func assertStatus(t *testing.T, mux *http.ServeMux, method, path string, want int) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scenarios", bytes.NewBufferString(body))
+	req := httptest.NewRequest(method, path, http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for %s, got %d: %s", body, w.Code, w.Body.String())
+	if w.Code != want {
+		t.Fatalf("expected %d for %s %s, got %d: %s", want, method, path, w.Code, w.Body.String())
 	}
 }
 
-func assertJSONStreamSelectorFlags(t *testing.T, registry storage.ScenarioRegistry) {
+func assertStatusWithToken(t *testing.T, mux *http.ServeMux, token string, want int) {
 	t.Helper()
-	for _, scenario := range registry.List() {
-		if scenario.Name == "json-stream" {
-			assertJSONStreamSelectorFlagValues(t, scenario.Response.Stream)
-			return
-		}
-	}
-	t.Fatal("json-stream scenario was not registered")
-}
-
-func assertJSONStreamSelectorFlagValues(t *testing.T, stream *storage.StreamConfig) {
-	t.Helper()
-	if stream == nil || stream.Source.From != "request_http_body" {
-		t.Fatalf("stream source was not normalized: %+v", stream)
-	}
-	if !stream.Multipart.IsSet || !stream.Multipart.Files.IsSet || !stream.Multipart.Files.Enabled {
-		t.Fatalf("multipart flags were not set: %+v", stream.Multipart)
-	}
-	if !stream.Fallback.RawFile.IsSet || !stream.Fallback.RawFile.Enabled {
-		t.Fatalf("raw_file flags were not set: %+v", stream.Fallback.RawFile)
-	}
-	if got := stream.Fallback.RawFile.Filename; len(got) != 1 || got[0] != `.*\.bin$` {
-		t.Fatalf("raw_file filename = %v, want single .bin regex", got)
-	}
-}
-
-func assertScenarioMutationRejected(t *testing.T, mux *http.ServeMux, method, path, body string) {
-	t.Helper()
-	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/reload-current", http.NoBody)
+	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for %s %s, got %d: %s", method, path, w.Code, w.Body.String())
+	if w.Code != want {
+		t.Fatalf("expected %d with token %q, got %d: %s", want, token, w.Code, w.Body.String())
 	}
 }
 
@@ -668,11 +409,11 @@ func assertReloadCurrentAllowed(t *testing.T, handler *APIHandler) {
 	}
 }
 
-func serveScenarioRequests(wg *sync.WaitGroup, stop *atomic.Bool, mux *http.ServeMux) {
+func serveManagementRequests(wg *sync.WaitGroup, stop *atomic.Bool, mux *http.ServeMux) {
 	defer wg.Done()
 	for !stop.Load() {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/scenarios/reload", http.NoBody)
 		mux.ServeHTTP(w, req)
 	}
 }

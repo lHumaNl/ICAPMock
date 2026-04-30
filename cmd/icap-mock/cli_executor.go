@@ -31,6 +31,7 @@ import (
 	"github.com/icap-mock/icap-mock/pkg/plugin"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -255,6 +256,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	if healthServer != nil {
+		healthServer.SetMetrics(collector)
+	}
 
 	// Start metrics server if enabled
 	launchMetricsServer(ctx, cfg, log, metricsRegistry, collector)
@@ -266,7 +270,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Start health server (after ICAP servers are up)
-	startHealthServer(ctx, cfg, healthServer, firstRegistry, runtimeManager, log)
+	startHealthServer(ctx, cfg, healthServer, firstRegistry, runtimeManager, collector, log)
 
 	// Wait for shutdown
 	<-ctx.Done()
@@ -333,8 +337,9 @@ func startAllServers(
 		if len(entry.inlineScenarios) > 0 {
 			loadInlineScenarios(entry, registry, log)
 		}
+		collector.SetScenariosLoaded(entry.name, len(registry.List()))
 
-		proc, _ := createProcessorChain(cfg, registry, log, entry.serverCfg.MaxBodySize)
+		proc, _ := createProcessorChain(cfg, registry, log, collector, entry.name, entry.serverCfg.MaxBodySize)
 
 		rtr := router.NewRouter()
 		rtr.SetLogger(log.Logger)
@@ -350,6 +355,7 @@ func startAllServers(
 		}
 		srv.SetRouter(rtr)
 		srv.SetMetrics(collector)
+		srv.SetMetricsServerName(entry.name)
 
 		log.Info("starting ICAP server",
 			"name", entry.name,
@@ -383,6 +389,7 @@ func startHealthServer(
 	healthServer *health.Server,
 	firstRegistry storage.ScenarioRegistry,
 	runtimeManager *management.RuntimeManager,
+	collector *metrics.Collector,
 	log *logger.Logger,
 ) {
 	if healthServer == nil {
@@ -393,11 +400,13 @@ func startHealthServer(
 	runtimeManager.RegisterConfigApplyFunc(func(updated *config.Config) {
 		healthServer.ConfigureManagement(updated.Management, updated.Health.APIToken)
 		healthServer.Checker().SetScenariosCount(runtimeManager.ScenarioCount())
+		setScenarioLoadedMetrics(collector, runtimeManager.ScenarioCounts())
 		warnUnauthenticatedManagement(updated.Management, updated.Health.APIToken, log)
 	})
 	if firstRegistry != nil {
 		healthServer.SetupAPI(firstRegistry, runtimeManager)
 		healthServer.Checker().SetScenariosCount(runtimeManager.ScenarioCount())
+		setScenarioLoadedMetrics(collector, runtimeManager.ScenarioCounts())
 	}
 	healthServer.Checker().SetICAPReady(true)
 	healthServer.Checker().SetStorageReady(true)
@@ -412,6 +421,17 @@ func startHealthServer(
 			log.Error("health server error", "error", err)
 		}
 	}()
+}
+
+func setScenarioLoadedMetrics(collector *metrics.Collector, counts []management.ScenarioSetCount) {
+	if collector == nil {
+		return
+	}
+	snapshot := make(map[string]int, len(counts))
+	for _, count := range counts {
+		snapshot[count.Name] = count.Count
+	}
+	collector.SetScenariosLoadedSnapshot(snapshot)
 }
 
 func warnUnauthenticatedManagement(cfg config.ManagementConfig, fallbackToken string, log *logger.Logger) {
@@ -503,8 +523,12 @@ func buildServerEntries(cfg *config.Config) []serverEntry {
 		}
 		return entries
 	}
+	name := cfg.Server.Name
+	if name == "" {
+		name = "default"
+	}
 	return []serverEntry{{
-		name:         "default",
+		name:         name,
 		serverCfg:    cfg.Server,
 		scenariosDir: cfg.Mock.ScenariosDir,
 		serviceID:    cfg.Mock.ServiceID,
@@ -669,6 +693,10 @@ func createStorageStack(cfg *config.Config, collector *metrics.Collector, log *l
 func createMetricsCollector() (*prometheus.Registry, *metrics.Collector, error) {
 	// Create a Prometheus registry for metrics collection
 	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
 
 	collector, err := metrics.NewCollector(reg)
 	if err != nil {
@@ -752,6 +780,8 @@ func createProcessorChain(
 	cfg *config.Config,
 	registry storage.ScenarioRegistry,
 	log *logger.Logger,
+	collector *metrics.Collector,
+	serverName string,
 	maxBodySize int64,
 ) (proc processor.Processor, cleanup func(context.Context)) {
 	// Create processors in order: mock -> plugins -> chaos (if enabled) -> echo
@@ -761,6 +791,7 @@ func createProcessorChain(
 	// Add script processor if script mode is configured
 	if cfg.Mock.DefaultMode == "script" {
 		scriptProc := processor.NewScriptProcessorWithMaxBodySize(registry, log, cfg.Mock.DefaultTimeout, maxBodySize)
+		scriptProc.SetMetricsForServer(collector, serverName)
 		processors = append(processors, scriptProc)
 		cleanups = append(cleanups, func(ctx context.Context) { _ = scriptProc.Shutdown(ctx) })
 		log.Info("script processor added to chain")
@@ -768,6 +799,7 @@ func createProcessorChain(
 
 	// Create mock processor with scenario registry
 	mockProc := processor.NewMockProcessorWithMaxBodySize(registry, log, maxBodySize)
+	mockProc.SetMetricsForServer(collector, serverName)
 	processors = append(processors, mockProc)
 
 	// Add plugin processor if plugins are loaded
@@ -779,6 +811,7 @@ func createProcessorChain(
 
 	// Add echo processor for fallback
 	echoProc := processor.NewEchoProcessor()
+	echoProc.SetMetricsForServer(collector, serverName)
 	processors = append(processors, echoProc)
 
 	// Wrap with chaos processor if enabled
@@ -815,6 +848,8 @@ func createProcessorChain(
 func buildMiddlewareChain(
 	log *logger.Logger,
 	limiter ratelimit.Limiter,
+	collector *metrics.Collector,
+	serverName string,
 	storageMiddleware *middleware.StorageMiddleware,
 	cfg *config.Config,
 	maxBodySize int64,
@@ -823,7 +858,7 @@ func buildMiddlewareChain(
 
 	var rateLimitMiddleware handler.Middleware
 	if limiter != nil && cfg.RateLimit.Enabled {
-		rateLimitMiddleware = middleware.RateLimiterMiddleware(limiter)
+		rateLimitMiddleware = middleware.RateLimiterMiddlewareForServer(limiter, collector, serverName)
 	}
 
 	var storageMW handler.Middleware
@@ -869,8 +904,8 @@ func createHandlers(
 		)
 	}
 
-	reqmodHandler := handler.NewReqmodHandler(proc, collector, log.Logger, previewRateLimiter)
-	respmodHandler := handler.NewRespmodHandler(proc, collector, log.Logger, previewRateLimiter)
+	reqmodHandler := handler.NewReqmodHandlerForServer(entry.name, proc, collector, log.Logger, previewRateLimiter)
+	respmodHandler := handler.NewRespmodHandlerForServer(entry.name, proc, collector, log.Logger, previewRateLimiter)
 	optionsHandler := handler.NewOptionsHandler(optionsHandlerConfig(entry))
 
 	return applyMiddleware(reqmodHandler), applyMiddleware(respmodHandler), applyMiddleware(optionsHandler)
@@ -901,7 +936,7 @@ func registerHandlers(
 	entry serverEntry,
 ) error {
 	maxBodySize := entry.serverCfg.MaxBodySize
-	applyMiddleware := buildMiddlewareChain(log, limiter, storageMiddleware, cfg, maxBodySize)
+	applyMiddleware := buildMiddlewareChain(log, limiter, collector, entry.name, storageMiddleware, cfg, maxBodySize)
 	wrappedReqmod, wrappedRespmod, wrappedOptions := createHandlers(proc, collector, cfg, log, entry, applyMiddleware)
 
 	// Register default endpoints

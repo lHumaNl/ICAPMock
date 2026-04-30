@@ -21,7 +21,7 @@ func TestCreateProcessorChainUsesEntryMaxBodySize(t *testing.T) {
 	if err := registry.Add(streamRequestBodyScenario()); err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
-	proc, cleanup := createProcessorChain(cfg, registry, newTestIntegrationLogger(t), 8)
+	proc, cleanup := createProcessorChain(cfg, registry, newTestIntegrationLogger(t), nil, "default", 8)
 	defer cleanup(context.Background())
 
 	resp, err := proc.Process(context.Background(), oversizedStreamRequest())

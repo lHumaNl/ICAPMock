@@ -233,7 +233,7 @@ func TestServer_SetupAPIManagementDisabledByDefault(t *testing.T) {
 	mux := setupServerAPIMux(t, server)
 	rec := httptest.NewRecorder()
 
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/scenarios/reload", http.NoBody))
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 while management is disabled, got %d", rec.Code)
@@ -242,7 +242,7 @@ func TestServer_SetupAPIManagementDisabledByDefault(t *testing.T) {
 
 func TestServer_SetupAPIUsesHealthAPITokenFallback(t *testing.T) {
 	server := newHealthServerForAPITest(t, "fallback-token")
-	server.ConfigureManagement(config.ManagementConfig{Enabled: true}, "")
+	server.ConfigureManagement(config.ManagementConfig{Enabled: true, ScenarioReloadEnabled: true}, "")
 	mux := setupServerAPIMux(t, server)
 	assertServerAPIStatus(t, mux, "", http.StatusUnauthorized)
 	assertServerAPIStatus(t, mux, "wrong-token", http.StatusUnauthorized)
@@ -251,9 +251,25 @@ func TestServer_SetupAPIUsesHealthAPITokenFallback(t *testing.T) {
 
 func TestServer_SetupAPIWithoutTokenAllowsUnauthenticated(t *testing.T) {
 	server := newHealthServerForAPITest(t, "")
-	server.ConfigureManagement(config.ManagementConfig{Enabled: true}, "")
+	server.ConfigureManagement(config.ManagementConfig{Enabled: true, ScenarioReloadEnabled: true}, "")
 	mux := setupServerAPIMux(t, server)
 	assertServerAPIStatus(t, mux, "", http.StatusOK)
+}
+
+func TestAPIRoutePatternOnlyIncludesExistingManagementRoutes(t *testing.T) {
+	cases := map[string]string{
+		"/api/v1/scenarios/reload":      "/api/v1/scenarios/reload",
+		"/api/v1/config/reload-current": "/api/v1/config/reload-current",
+		"/api/v1/config/load":           "/api/v1/config/load",
+		"/api/v1/scenarios":             "",
+		"/api/v1/scenarios/name":        "",
+		"/metrics":                      "",
+	}
+	for path, want := range cases {
+		if got := apiRoutePattern(path); got != want {
+			t.Fatalf("apiRoutePattern(%q) = %q, want %q", path, got, want)
+		}
+	}
 }
 
 // TestServer_HealthEndpoint tests the /health endpoint.
@@ -670,7 +686,7 @@ func newHealthServerForAPITest(t *testing.T, apiToken string) *Server {
 
 func setupServerAPIMux(t *testing.T, server *Server) *http.ServeMux {
 	t.Helper()
-	server.SetupAPI(storage.NewScenarioRegistry())
+	server.SetupAPI(storage.NewScenarioRegistry(), failingRuntimeManager{})
 	if server.apiHandler == nil {
 		t.Fatalf("SetupAPI did not configure API handler")
 	}
@@ -681,7 +697,7 @@ func setupServerAPIMux(t *testing.T, server *Server) *http.ServeMux {
 
 func assertServerAPIStatus(t *testing.T, mux *http.ServeMux, token string, want int) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scenarios", http.NoBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/scenarios/reload", http.NoBody)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

@@ -348,10 +348,13 @@ Prometheus metrics are served at `http://localhost:9090/metrics` by default.
 
 Available metrics include:
 
-- `icap_requests_total` — total request count by method and endpoint
-- `icap_request_duration_seconds` — request latency histogram
-- `icap_active_connections` — current open connections per server
-- `icap_rate_limited_total` — requests rejected by the rate limiter
+- `icap_requests_total{server,method}` — total ICAP request count
+- `icap_request_duration_seconds{server,method}` — request latency histogram
+- `icap_active_connections{server}` — current open connections per configured server
+- `icap_scenario_requests_total{server,scenario,response}` — scenario hits; unmatched default pass-through responses use `scenario="fallback"`
+- `icap_scenarios_loaded{server}` — currently loaded scenario count
+- `icap_api_requests_total{server,route,method,status_code}` — management API calls with bounded route labels
+- `icap_api_errors_total{server,route,method,status_code,error_type}` — failed management API calls
 
 A pre-built **Grafana dashboard** is available in `monitoring/grafana/dashboards/`. Start the full monitoring stack with:
 

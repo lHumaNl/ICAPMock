@@ -15,6 +15,7 @@ import (
 
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/logger"
+	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/internal/util"
 	"github.com/icap-mock/icap-mock/pkg/icap"
@@ -34,6 +35,8 @@ import (
 type MockProcessor struct {
 	registry          storage.ScenarioRegistry
 	logger            *logger.Logger
+	metrics           *metrics.Collector
+	server            string
 	maxStreamBodySize int64
 }
 
@@ -49,6 +52,20 @@ func NewMockProcessor(registry storage.ScenarioRegistry, log *logger.Logger) *Mo
 	return NewMockProcessorWithMaxBodySize(registry, log, defaultStreamBodyLimit)
 }
 
+// SetMetrics sets the Prometheus metrics collector for scenario-level metrics.
+func (p *MockProcessor) SetMetrics(collector *metrics.Collector) {
+	p.metrics = collector
+	if p.server == "" {
+		p.server = "default"
+	}
+}
+
+// SetMetricsForServer sets the collector and server label for scenario metrics.
+func (p *MockProcessor) SetMetricsForServer(collector *metrics.Collector, server string) {
+	p.metrics = collector
+	p.server = server
+}
+
 // NewMockProcessorWithMaxBodySize creates a processor with an explicit stream body limit.
 func NewMockProcessorWithMaxBodySize(
 	registry storage.ScenarioRegistry,
@@ -58,6 +75,7 @@ func NewMockProcessorWithMaxBodySize(
 	return &MockProcessor{
 		registry:          registry,
 		logger:            log,
+		server:            "default",
 		maxStreamBodySize: maxBodySize,
 	}
 }
@@ -72,6 +90,8 @@ func NewMockProcessorWithMaxBodySize(
 // If no scenario matches, it returns an ErrNoMatch error.
 // If the scenario specifies an error, it returns that error.
 func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) { //nolint:gocyclo // request processing: match, select response, apply delay, build response
+	start := time.Now()
+
 	// Check context before processing
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -154,6 +174,9 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		if wr.Delay.Min > 0 || wr.Delay.Max > 0 {
 			selectedDelay = &wr.Delay
 		}
+		if wr.ResponseName != "" {
+			merged.ResponseName = wr.ResponseName
+		}
 		selectedResponse = &merged
 	}
 
@@ -162,6 +185,7 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		substituted := substituteCaptures(*selectedResponse, req.Captures)
 		selectedResponse = &substituted
 	}
+	defer p.recordScenarioMetrics(scenario.Name, selectedResponse, start)
 
 	// Apply delay
 	var delay time.Duration
@@ -515,6 +539,31 @@ func substituteString(s string, vars map[string]string) string {
 		return vars[name]
 	})
 	return strings.ReplaceAll(tmp, escaped, "${")
+}
+
+func (p *MockProcessor) recordScenarioMetrics(
+	scenario string,
+	response *storage.ResponseTemplate,
+	start time.Time,
+) {
+	if p.metrics == nil || response == nil {
+		return
+	}
+	p.metrics.RecordScenarioRequestForServer(p.server, scenario, scenarioResponseLabel(response), time.Since(start))
+}
+
+func scenarioResponseLabel(response *storage.ResponseTemplate) string {
+	if response.ResponseName != "" {
+		return response.ResponseName
+	}
+	return strconv.Itoa(responseStatusCode(response))
+}
+
+func responseStatusCode(response *storage.ResponseTemplate) int {
+	if response.ICAPStatus != 0 {
+		return response.ICAPStatus
+	}
+	return response.Status
 }
 
 // selectWeightedResponse picks a response variant based on weights.

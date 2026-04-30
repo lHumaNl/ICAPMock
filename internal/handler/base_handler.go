@@ -23,11 +23,20 @@ type baseHandler struct {
 	logger             *slog.Logger
 	previewRateLimiter *PreviewRateLimiter
 	method             string
+	server             string
 }
 
-func newBaseHandler(method string, proc processor.Processor, m *metrics.Collector, logger *slog.Logger, previewRateLimiter *PreviewRateLimiter) baseHandler {
+func newBaseHandlerForServer(
+	server string,
+	method string,
+	proc processor.Processor,
+	m *metrics.Collector,
+	logger *slog.Logger,
+	previewRateLimiter *PreviewRateLimiter,
+) baseHandler {
 	h := baseHandler{
 		method:             method,
+		server:             server,
 		logger:             logger,
 		previewRateLimiter: previewRateLimiter,
 	}
@@ -89,13 +98,13 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 	}
 
 	if h.getMetrics() != nil {
-		h.getMetrics().IncRequestsInFlight(h.method)
-		defer h.getMetrics().DecRequestsInFlight(h.method)
+		h.getMetrics().IncRequestsInFlightForServer(h.server, h.method)
+		defer h.getMetrics().DecRequestsInFlightForServer(h.server, h.method)
 	}
 
 	if h.getProcessor() == nil {
 		if h.getMetrics() != nil {
-			h.getMetrics().RecordError("nil_processor")
+			h.getMetrics().RecordErrorForServer(h.server, "nil_processor")
 		}
 		return nil, ErrNilProcessor
 	}
@@ -124,7 +133,7 @@ func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, star
 	}
 
 	if h.getMetrics() != nil {
-		h.getMetrics().RecordPreviewRequest(h.method, true)
+		h.getMetrics().RecordPreviewRequestForServer(h.server, h.method, true)
 	}
 
 	resp, err := h.getProcessor().Process(ctx, req)
@@ -194,7 +203,7 @@ func (h *baseHandler) resolvePreviewResponse(ctx context.Context, resp *icap.Res
 // handleNonPreview processes non-preview requests.
 func (h *baseHandler) handleNonPreview(ctx context.Context, req *icap.Request, start time.Time) (*icap.Response, error) {
 	if h.getMetrics() != nil {
-		h.getMetrics().RecordPreviewRequest(h.method, false)
+		h.getMetrics().RecordPreviewRequestForServer(h.server, h.method, false)
 	}
 
 	resp, err := h.getProcessor().Process(ctx, req)
@@ -222,8 +231,8 @@ func (h *baseHandler) checkPostProcessCancellation(ctx context.Context, procErr 
 		)
 	}
 	if h.getMetrics() != nil {
-		h.getMetrics().RecordRequestContextCancellation(h.method, string(reason))
-		h.getMetrics().RecordRequestCancellation(h.method)
+		h.getMetrics().RecordRequestContextCancellationForServer(h.server, h.method, string(reason))
+		h.getMetrics().RecordRequestCancellationForServer(h.server, h.method)
 	}
 	return ctxErr
 }
@@ -234,13 +243,13 @@ func (h *baseHandler) recordRequestMetrics(start time.Time, resp *icap.Response,
 		return
 	}
 	duration := time.Since(start)
-	h.getMetrics().RecordRequest(h.method)
-	h.getMetrics().RecordRequestDuration(h.method, duration)
+	h.getMetrics().RecordRequestForServer(h.server, h.method)
+	h.getMetrics().RecordRequestDurationForServer(h.server, h.method, duration)
 	if err != nil {
-		h.getMetrics().RecordError(errorLabel)
+		h.getMetrics().RecordErrorForServer(h.server, errorLabel)
 	}
 	if resp != nil && len(resp.Body) > 0 {
-		h.getMetrics().RecordResponseSize(h.method, int64(len(resp.Body)))
+		h.getMetrics().RecordResponseSizeForServer(h.server, h.method, int64(len(resp.Body)))
 	}
 }
 

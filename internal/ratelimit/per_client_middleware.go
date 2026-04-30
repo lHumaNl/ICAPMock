@@ -20,6 +20,7 @@ type PerClientMiddleware struct {
 	perClientLimiter *PerClientRateLimiter
 	globalLimiter    Limiter // Fallback global limiter
 	metrics          *metrics.Collector
+	server           string
 }
 
 // NewPerClientMiddleware creates a new per-client rate limiting middleware.
@@ -39,10 +40,21 @@ func NewPerClientMiddleware(
 	globalLimiter Limiter,
 	mc *metrics.Collector,
 ) *PerClientMiddleware {
+	return NewPerClientMiddlewareForServer(perClientLimiter, globalLimiter, mc, "")
+}
+
+// NewPerClientMiddlewareForServer creates per-client middleware with server-labeled metrics.
+func NewPerClientMiddlewareForServer(
+	perClientLimiter *PerClientRateLimiter,
+	globalLimiter Limiter,
+	mc *metrics.Collector,
+	server string,
+) *PerClientMiddleware {
 	return &PerClientMiddleware{
 		perClientLimiter: perClientLimiter,
 		globalLimiter:    globalLimiter,
 		metrics:          mc,
+		server:           server,
 	}
 }
 
@@ -70,7 +82,7 @@ func (m *PerClientMiddleware) Allow(_ context.Context, req *icap.Request) (allow
 
 		if ok {
 			// Client was in cache - update metrics
-			m.metrics.SetPerClientRateLimitActive(m.perClientLimiter.Stats().ActiveClients)
+			m.setPerClientRateLimitActive(m.perClientLimiter.Stats().ActiveClients)
 		}
 
 		if allowed {
@@ -78,7 +90,7 @@ func (m *PerClientMiddleware) Allow(_ context.Context, req *icap.Request) (allow
 		}
 
 		// Per-client limiter denied request
-		m.metrics.RecordPerClientRateLimitExceeded("")
+		m.recordPerClientRateLimitExceeded()
 		return false, nil
 	}
 
@@ -88,7 +100,7 @@ func (m *PerClientMiddleware) Allow(_ context.Context, req *icap.Request) (allow
 			return true, nil
 		}
 
-		m.metrics.RecordRateLimitExceeded("global")
+		m.recordRateLimitExceeded()
 		return false, nil
 	}
 
@@ -110,7 +122,7 @@ func (m *PerClientMiddleware) Wait(ctx context.Context, req *icap.Request) error
 
 		if ok {
 			// Client was in cache
-			m.metrics.SetPerClientRateLimitActive(m.perClientLimiter.Stats().ActiveClients)
+			m.setPerClientRateLimitActive(m.perClientLimiter.Stats().ActiveClients)
 		}
 
 		if allowed {
@@ -130,12 +142,12 @@ func (m *PerClientMiddleware) Wait(ctx context.Context, req *icap.Request) error
 
 		reservation := m.globalLimiter.Reserve()
 		if !reservation.OK() {
-			m.metrics.RecordRateLimitExceeded("global")
+			m.recordRateLimitExceeded()
 			return nil // Cannot wait
 		}
 
 		delay := reservation.Delay()
-		m.metrics.RecordRateLimitWaitTime("global", delay)
+		m.recordRateLimitWaitTime(delay)
 
 		if delay > 0 {
 			select {
@@ -201,4 +213,48 @@ func (m *PerClientMiddleware) extractClientIP(req *icap.Request) string {
 	}
 
 	return clientIPUnknown
+}
+
+func (m *PerClientMiddleware) recordRateLimitExceeded() {
+	if m.metrics == nil {
+		return
+	}
+	if m.server == "" {
+		m.metrics.RecordRateLimitExceeded("")
+		return
+	}
+	m.metrics.RecordRateLimitExceededForServer(m.server)
+}
+
+func (m *PerClientMiddleware) recordRateLimitWaitTime(delay time.Duration) {
+	if m.metrics == nil {
+		return
+	}
+	if m.server == "" {
+		m.metrics.RecordRateLimitWaitTime("", delay)
+		return
+	}
+	m.metrics.RecordRateLimitWaitTimeForServer(m.server, delay)
+}
+
+func (m *PerClientMiddleware) recordPerClientRateLimitExceeded() {
+	if m.metrics == nil {
+		return
+	}
+	if m.server == "" {
+		m.metrics.RecordPerClientRateLimitExceeded("")
+		return
+	}
+	m.metrics.RecordPerClientRateLimitExceededForServer(m.server)
+}
+
+func (m *PerClientMiddleware) setPerClientRateLimitActive(count int) {
+	if m.metrics == nil {
+		return
+	}
+	if m.server == "" {
+		m.metrics.SetPerClientRateLimitActive(count)
+		return
+	}
+	m.metrics.SetPerClientRateLimitActiveForServer(m.server, count)
 }

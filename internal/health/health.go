@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/icap-mock/icap-mock/internal/config"
+	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/storage"
 )
 
@@ -170,6 +172,7 @@ type Server struct {
 	checker    *Checker
 	apiHandler *APIHandler
 	config     *config.HealthConfig
+	metrics    *metrics.Collector
 	mgmtConfig config.ManagementConfig
 }
 
@@ -197,7 +200,15 @@ func (s *Server) Checker() *Checker {
 	return s.checker
 }
 
-// SetupAPI configures the REST API for scenario management.
+// SetMetrics configures metrics for management API requests.
+func (s *Server) SetMetrics(collector *metrics.Collector) {
+	s.metrics = collector
+	if s.apiHandler != nil {
+		s.apiHandler.SetMetrics(collector)
+	}
+}
+
+// SetupAPI configures the REST API for scenario and configuration reloads.
 // Must be called before Start(). If registry is nil, API endpoints are not registered.
 func (s *Server) SetupAPI(registry storage.ScenarioRegistry, managers ...RuntimeManager) {
 	if registry == nil {
@@ -205,6 +216,7 @@ func (s *Server) SetupAPI(registry storage.ScenarioRegistry, managers ...Runtime
 	}
 	token := s.config.APIToken
 	s.apiHandler = NewAPIHandler(registry, token)
+	s.apiHandler.SetMetrics(s.metrics)
 	s.apiHandler.SetScenarioCountUpdater(s.checker.SetScenariosCount)
 	s.apiHandler.ConfigureManagement(s.mgmtConfig, token)
 	if len(managers) > 0 {
@@ -244,7 +256,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.config.Port),
-		Handler:      mux,
+		Handler:      s.apiMetricsMiddleware(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
@@ -261,6 +273,70 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (s *Server) apiMetricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		s.recordAPIMetrics(r, recorder.status)
+	})
+}
+
+func (s *Server) recordAPIMetrics(r *http.Request, status int) {
+	if s.metrics == nil {
+		return
+	}
+	route := apiRoutePattern(r.URL.Path)
+	if route == "" {
+		return
+	}
+	s.metrics.RecordAPIRequest("management", route, r.Method, status)
+	if status >= http.StatusBadRequest {
+		s.metrics.RecordAPIError("management", route, r.Method, status, apiErrorType(status))
+	}
+}
+
+func apiRoutePattern(path string) string {
+	switch path {
+	case "/api/v1/scenarios/reload":
+		return "/api/v1/scenarios/reload"
+	case "/api/v1/config/reload-current":
+		return "/api/v1/config/reload-current"
+	case "/api/v1/config/load":
+		return "/api/v1/config/load"
+	default:
+		return ""
+	}
+}
+
+func apiErrorType(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "bad_request"
+	case http.StatusUnauthorized:
+		return "unauthorized"
+	case http.StatusForbidden:
+		return "forbidden"
+	case http.StatusNotFound:
+		return "not_found"
+	case http.StatusMethodNotAllowed:
+		return "method_not_allowed"
+	case http.StatusConflict:
+		return "conflict"
+	default:
+		return strconv.Itoa(status/100) + "xx"
+	}
 }
 
 // Stop gracefully stops the health check HTTP server.
