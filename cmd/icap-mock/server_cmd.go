@@ -16,7 +16,6 @@ import (
 // ServerCommand handles the server subcommand.
 type ServerCommand struct {
 	fs                      *flag.FlagSet
-	TUIRunner               func(cfg interface{}) error
 	writeTimeout            string
 	shutdownTimeout         string
 	readyPath               string
@@ -62,7 +61,6 @@ type ServerCommand struct {
 	debugFlag               bool
 	healthEnabled           bool
 	tlsEnable               bool
-	tuiFlag                 bool
 	versionFlag             bool
 	replayEnabled           bool
 	metricsEnabled          bool
@@ -80,7 +78,6 @@ func NewServerCommand() *ServerCommand {
 	// Register global flags
 	cmd.fs.BoolVar(&cmd.versionFlag, "version", false, "Print version information and exit")
 	cmd.fs.BoolVar(&cmd.validateFlag, "validate", false, "Validate configuration and exit (dry-run mode)")
-	cmd.fs.BoolVar(&cmd.tuiFlag, "tui", false, "Launch Terminal User Interface (TUI)")
 	cmd.fs.BoolVar(&cmd.debugFlag, "debug", false, "Enable debug logging (sets log level to debug)")
 	cmd.fs.BoolVar(&cmd.debugFlag, "d", false, "Enable debug logging (shorthand)")
 	cmd.fs.StringVar(&cmd.configFile, "config", "", "Path to configuration file (YAML or JSON)")
@@ -234,14 +231,6 @@ func (c *ServerCommand) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// Handle TUI flag
-	if c.tuiFlag {
-		if c.TUIRunner != nil {
-			return c.TUIRunner(nil)
-		}
-		return fmt.Errorf("TUI is not available: rebuild with TUI support or run without --tui flag")
-	}
-
 	// Load configuration
 	cfg, err := c.loadConfiguration()
 	if err != nil {
@@ -301,7 +290,7 @@ type flagGroup struct {
 // printGroupedFlags prints flags organized by category.
 func (c *ServerCommand) printGroupedFlags() {
 	groups := []flagGroup{
-		{"Global", []string{"version", "validate", "tui", "debug", "d", "config", "c"}},
+		{"Global", []string{"version", "validate", "debug", "d", "config", "c"}},
 		{"Server", []string{"server.", "p"}},
 		{"Logging", []string{"logging.", "l"}},
 		{"Metrics", []string{"metrics."}},

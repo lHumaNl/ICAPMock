@@ -10,24 +10,14 @@ import (
 	"syscall"
 
 	"github.com/icap-mock/icap-mock/internal/config"
-	"github.com/icap-mock/icap-mock/internal/tui"
-	"github.com/icap-mock/icap-mock/internal/tui/state"
 )
 
 func main() {
 	// Create command registry
 	registry := NewCommandRegistry()
 
-	// Register commands with TUI runner injected
-	serverCmd := NewServerCommand()
-	serverCmd.TUIRunner = func(cfg interface{}) error {
-		var clientCfg *state.ClientConfig
-		if cfg != nil {
-			clientCfg = cfg.(*state.ClientConfig) //nolint:errcheck
-		}
-		return tui.RunTUIWithVersion(clientCfg, version)
-	}
-	registry.Register(serverCmd)
+	// Register commands
+	registry.Register(NewServerCommand())
 	replayCmd := NewReplayCommand()
 	registry.Register(replayCmd)
 	registry.Register(NewValidateCommand())

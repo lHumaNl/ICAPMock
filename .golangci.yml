@@ -180,11 +180,6 @@ linters:
           - lll
         path: cmd/
         text: .*
-      - linters:
-          - dupl
-          - funlen
-          - gocyclo
-        path: internal/tui/
       - path: (.+)\.go$
         text: should have comment
       - path: (.+)\.go$

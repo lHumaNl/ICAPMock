@@ -23,7 +23,6 @@
 - **Rate limiting** — sharded token-bucket rate limiter configurable per server
 - **Prometheus metrics** — expose request counts, latencies, and error rates at `/metrics`
 - **Health checks** — HTTP `/health` and `/ready` endpoints for readiness probing
-- **Interactive TUI** — terminal dashboard built with Bubbletea for live server monitoring
 - **Request replay** — record and replay captured ICAP requests for regression testing
 - **Hot-reload** — scenario files are watched and reloaded without restarting the server
 
@@ -324,9 +323,6 @@ Notes:
 # Start the server with a config file
 icap-mock server --config configs/my-config.yaml
 
-# Start the server and open the TUI
-icap-mock server --config configs/my-config.yaml --tui
-
 # Replay recorded requests against a running server
 icap-mock replay --dir data/requests --target icap://localhost:1344/scan
 
@@ -384,7 +380,6 @@ icap-mock/
 │   ├── ratelimit/        # Sharded token-bucket implementation
 │   ├── replay/           # Request replay engine
 │   ├── health/           # /health and /ready HTTP handlers
-│   ├── tui/              # Bubbletea terminal UI
 │   └── circuitbreaker/   # Circuit breaker
 ├── pkg/
 │   ├── icap/             # ICAP protocol types (request, response, headers)
