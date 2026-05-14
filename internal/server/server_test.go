@@ -35,6 +35,12 @@ type mockHandler struct {
 	method   string
 }
 
+const persistentRequestCount = 4
+
+const persistentIdleTimeout = 100 * time.Millisecond
+
+const persistentRequestGap = 70 * time.Millisecond
+
 func (h *mockHandler) Handle(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 	resp := icap.NewResponse(icap.StatusOK)
 	resp.SetHeader("ISTag", "test")
@@ -49,6 +55,31 @@ func (h *mockHandler) Method() string {
 		return h.method
 	}
 	return "OPTIONS"
+}
+
+func readICAPResponseStatus(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	status := readICAPLine(t, reader)
+	for {
+		line := readICAPLine(t, reader)
+		if line == "" {
+			return status
+		}
+	}
+}
+
+func readICAPLine(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	line, err := reader.ReadString('\n')
+	require.NoError(t, err)
+	return strings.TrimRight(line, "\r\n")
+}
+
+func writePersistentICAPRequest(t *testing.T, conn net.Conn, addr string) {
+	t.Helper()
+	request := "OPTIONS icap://" + addr + "/options ICAP/1.0\r\nHost: localhost\r\n\r\n"
+	_, err := conn.Write([]byte(request))
+	require.NoError(t, err)
 }
 
 func TestNewServer(t *testing.T) {
@@ -392,6 +423,45 @@ func TestServerConcurrentRequests(t *testing.T) {
 	for err := range errChan {
 		t.Errorf("Concurrent request error: %v", err)
 	}
+}
+
+func TestServerPersistentConnectionIdleTimeoutTracksProtocolIO(t *testing.T) {
+	cfg := &config.ServerConfig{
+		Host:           "127.0.0.1",
+		Port:           0,
+		ReadTimeout:    time.Second,
+		WriteTimeout:   time.Second,
+		IdleTimeout:    persistentIdleTimeout,
+		MaxConnections: 10,
+		MaxBodySize:    1024 * 1024,
+		Streaming:      true,
+	}
+	srv, err := NewServer(cfg, NewConnectionPool(), nil)
+	require.NoError(t, err)
+	r := router.NewRouter()
+	require.NoError(t, r.Handle("/options", &mockHandler{}))
+	srv.SetRouter(r)
+
+	ctx := context.Background()
+	require.NoError(t, srv.Start(ctx))
+	defer srv.Stop(ctx)
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	start := time.Now()
+	for requestIndex := 0; requestIndex < persistentRequestCount; requestIndex++ {
+		if requestIndex > 0 {
+			time.Sleep(persistentRequestGap)
+		}
+		writePersistentICAPRequest(t, conn, srv.Addr().String())
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+		status := readICAPResponseStatus(t, reader)
+		require.True(t, strings.HasPrefix(status, "ICAP/1.0 200"), "unexpected status: %q", status)
+	}
+	require.Greater(t, time.Since(start), persistentIdleTimeout)
 }
 
 func TestServerReadTimeout(t *testing.T) {

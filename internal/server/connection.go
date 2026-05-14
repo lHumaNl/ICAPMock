@@ -306,6 +306,52 @@ type bufferedWriter struct {
 	buf    []byte
 }
 
+type activityReader struct {
+	reader BufferedReader
+	touch  func()
+}
+
+func (r activityReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.touch()
+	}
+	return n, err
+}
+
+func (r activityReader) ReadString(delim byte) (string, error) {
+	s, err := r.reader.ReadString(delim)
+	if s != "" {
+		r.touch()
+	}
+	return s, err
+}
+
+type activityWriter struct {
+	writer BufferedWriter
+	touch  func()
+}
+
+func (w activityWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 {
+		w.touch()
+	}
+	return n, err
+}
+
+func (w activityWriter) WriteString(s string) (int, error) {
+	n, err := w.writer.WriteString(s)
+	if n > 0 {
+		w.touch()
+	}
+	return n, err
+}
+
+func (w activityWriter) Flush() error {
+	return w.writer.Flush()
+}
+
 // newBufferedWriter creates a new buffered writer with a pooled 8KB buffer.
 // The buffer is obtained from the pool and will be returned when close() is called.
 func newBufferedWriter(w io.Writer, p *pool.SlicePool) *bufferedWriter {
@@ -602,13 +648,13 @@ func (c *Connection) SetState(state ConnectionState) {
 // Reader returns the pooled buffered reader for the connection.
 // Use this for reading ICAP requests.
 func (c *Connection) Reader() BufferedReader {
-	return c.reader
+	return activityReader{reader: c.reader, touch: c.UpdateActivity}
 }
 
 // Writer returns the pooled buffered writer for the connection.
 // Use this for writing ICAP responses.
 func (c *Connection) Writer() BufferedWriter {
-	return c.writer
+	return activityWriter{writer: c.writer, touch: c.UpdateActivity}
 }
 
 // Flush flushes any buffered data to the underlying connection.

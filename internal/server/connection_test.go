@@ -956,10 +956,9 @@ func TestConnectionLastActivity(t *testing.T) {
 	assert.True(t, updatedActivity.After(lastActivity), "Updated activity should be after initial activity")
 }
 
-// TestConnectionReadUpdatesActivity tests that Read() updates activity.
-func TestConnectionReadUpdatesActivity(t *testing.T) {
+// TestConnectionReaderUpdatesActivity tests that Reader() reads update activity.
+func TestConnectionReaderUpdatesActivity(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -971,24 +970,30 @@ func TestConnectionReadUpdatesActivity(t *testing.T) {
 	}
 
 	conn := newConnection(server, config)
+	defer conn.Close()
 	initialActivity := conn.LastActivity()
 
-	// Wait a bit
 	time.Sleep(10 * time.Millisecond)
 
-	// Simulate a read by updating activity manually
-	// (Direct read testing with pipes can block, so we test the update mechanism)
-	conn.UpdateActivity()
+	writeErr := make(chan error, 1)
+	go func() {
+		_, err := client.Write([]byte("x"))
+		writeErr <- err
+	}()
 
-	// Activity should be updated
+	buf := make([]byte, 1)
+	n, err := conn.Reader().Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.NoError(t, <-writeErr)
+
 	updatedActivity := conn.LastActivity()
 	assert.True(t, updatedActivity.After(initialActivity), "Activity should be updated")
 }
 
-// TestConnectionWriteUpdatesActivity tests that Write() updates activity.
-func TestConnectionWriteUpdatesActivity(t *testing.T) {
+// TestConnectionWriterUpdatesActivity tests that Writer() writes update activity.
+func TestConnectionWriterUpdatesActivity(t *testing.T) {
 	server, client := net.Pipe()
-	defer server.Close() //nolint:gocritic // deferInLoop
 	defer client.Close()
 
 	config := &ConnectionConfig{
@@ -1000,18 +1005,27 @@ func TestConnectionWriteUpdatesActivity(t *testing.T) {
 	}
 
 	conn := newConnection(server, config)
+	defer conn.Close()
 	initialActivity := conn.LastActivity()
 
-	// Wait a bit
 	time.Sleep(10 * time.Millisecond)
 
-	// Simulate a write by updating activity manually
-	// (Direct write testing with pipes can block, so we test the update mechanism)
-	conn.UpdateActivity()
+	readErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1)
+		_, err := io.ReadFull(client, buf)
+		readErr <- err
+	}()
 
-	// Activity should be updated
+	payload := []byte{'x'}
+	n, err := conn.Writer().Write(payload)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
 	updatedActivity := conn.LastActivity()
 	assert.True(t, updatedActivity.After(initialActivity), "Activity should be updated")
+	require.NoError(t, conn.Flush())
+	require.NoError(t, <-readErr)
 }
 
 // TestConnectionIdleTimeoutNoUpdate tests that connection becomes idle when no activity occurs.
