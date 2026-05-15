@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -462,6 +463,140 @@ func TestServerPersistentConnectionIdleTimeoutTracksProtocolIO(t *testing.T) {
 		require.True(t, strings.HasPrefix(status, "ICAP/1.0 200"), "unexpected status: %q", status)
 	}
 	require.Greater(t, time.Since(start), persistentIdleTimeout)
+}
+
+func TestServerPersistentConnectionUsesIdleTimeoutBetweenRequests(t *testing.T) {
+	srv := newConnectionLifecycleTestServer(t, 100*time.Millisecond, 500*time.Millisecond)
+	defer srv.Stop(context.Background())
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+
+	time.Sleep(200 * time.Millisecond)
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+}
+
+func TestServerPersistentConnectionClosesAfterIdleTimeout(t *testing.T) {
+	srv := newConnectionLifecycleTestServer(t, 500*time.Millisecond, 100*time.Millisecond)
+	defer srv.Stop(context.Background())
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+
+	time.Sleep(250 * time.Millisecond)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
+	_, err = reader.ReadByte()
+	requireIdleCloseError(t, err)
+}
+
+func TestServerDrainsUnreadRESPMODChunkedBodyBeforeKeepAlive(t *testing.T) {
+	srv := newConnectionLifecycleTestServer(t, time.Second, time.Second)
+	defer srv.Stop(context.Background())
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	_, err = conn.Write([]byte(respmodChunkedRequest(srv.Addr().String(), "")))
+	require.NoError(t, err)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+}
+
+func TestServerHonorsConnectionCloseAfterDrainingUnreadBody(t *testing.T) {
+	var calls atomic.Int32
+	srv := newConnectionLifecycleTestServerWithRESPMOD(t, time.Second, time.Second, &calls)
+	defer srv.Stop(context.Background())
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	_, err = conn.Write([]byte(respmodChunkedRequest(srv.Addr().String(), "Connection: close\r\n")))
+	require.NoError(t, err)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	_, err = reader.ReadByte()
+	requireIdleCloseError(t, err)
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func newConnectionLifecycleTestServer(t *testing.T, readTimeout, idleTimeout time.Duration) *ICAPServer {
+	t.Helper()
+	return newConnectionLifecycleTestServerWithRESPMOD(t, readTimeout, idleTimeout, nil)
+}
+
+func newConnectionLifecycleTestServerWithRESPMOD(
+	t *testing.T,
+	readTimeout time.Duration,
+	idleTimeout time.Duration,
+	calls *atomic.Int32,
+) *ICAPServer {
+	t.Helper()
+	cfg := &config.ServerConfig{
+		Host: "127.0.0.1", Port: 0, ReadTimeout: readTimeout, WriteTimeout: time.Second,
+		IdleTimeout: idleTimeout, MaxConnections: 10, MaxBodySize: 1024 * 1024, Streaming: true,
+	}
+	srv, err := NewServer(cfg, NewConnectionPool(), nil)
+	require.NoError(t, err)
+	r := router.NewRouter()
+	require.NoError(t, r.Handle("/options", &mockHandler{}))
+	require.NoError(t, r.HandleFunc("/respmod", unreadBodyHandler(calls)))
+	srv.SetRouter(r)
+	require.NoError(t, srv.Start(context.Background()))
+	return srv
+}
+
+func unreadBodyHandler(calls *atomic.Int32) func(context.Context, *icap.Request) (*icap.Response, error) {
+	return func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+		if calls != nil {
+			calls.Add(1)
+		}
+		resp := icap.NewResponse(icap.StatusOK)
+		resp.SetHeader("ISTag", "drain-test")
+		resp.SetHeader("Encapsulated", "null-body=0")
+		return resp, nil
+	}
+}
+
+func respmodChunkedRequest(addr, extraHeaders string) string {
+	reqHeader := "GET /resource HTTP/1.1\r\nHost: origin.example\r\n\r\n"
+	resHeader := "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+	encap := fmt.Sprintf("req-hdr=0, res-hdr=%d, res-body=%d", len(reqHeader), len(reqHeader)+len(resHeader))
+	chunkedBody := "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+	return fmt.Sprintf("RESPMOD icap://%s/respmod ICAP/1.0\r\nHost: localhost\r\n%sEncapsulated: %s\r\n\r\n%s%s%s",
+		addr, extraHeaders, encap, reqHeader, resHeader, chunkedBody)
+}
+
+func requireIdleCloseError(t *testing.T, err error) {
+	t.Helper()
+	require.Error(t, err)
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		t.Fatalf("connection remained open until client read deadline: %v", err)
+	}
 }
 
 func TestServerReadTimeout(t *testing.T) {

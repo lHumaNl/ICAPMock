@@ -18,7 +18,6 @@ import (
 
 	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/config"
-	icaperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/internal/util"
@@ -509,7 +508,7 @@ func (s *ICAPServer) acceptLoop() {
 //   - The server shuts down (stopChan closed)
 //   - The request timeout is exceeded
 //   - The connection is closed
-func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // connection lifecycle requires sequential checks for idle, parse, route, write, close
+func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // connection lifecycle requires sequential checks for parse, route, drain, close
 	// Create connection-scoped context that cancels on server shutdown
 	// This ensures all in-flight requests are canceled during graceful shutdown
 	connCtx, connCancel := context.WithCancel(s.serverCtx)
@@ -537,12 +536,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 		s.wg.Done()
 	}()
 
-	// Set initial deadline
-	if s.config.ReadTimeout > 0 {
-		now := time.Now()
-		_ = conn.SetReadDeadline(now.Add(s.config.ReadTimeout))
-	}
-
+	requestCount := 0
 	// Handle requests in a loop for connection reuse
 	for {
 		select {
@@ -552,40 +546,21 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			// Server is shutting down, stop handling
 			return
 		default:
-			// Cache current time for this iteration to avoid repeated syscalls
-			now := time.Now()
-
-			// Check for idle timeout before processing request
-			if conn.IsIdle() {
-				// Connection has been idle longer than allowed timeout
-				s.logger.Warn("connection closed due to idle timeout",
-					"remote_addr", conn.RemoteAddr(),
-					"idle_duration", time.Since(conn.LastActivity()),
-					"idle_timeout", conn.config.IdleTimeout,
-				)
-
-				// Record metric
-				if s.metrics != nil {
-					s.metrics.RecordIdleConnectionClosedForServer(s.metricsServerName, "idle")
-				}
-
-				// Send error to client if possible
-				_ = writeResponseFromICAP(conn.Writer(), icap.NewResponseError(
-					icaperrors.ErrIdleTimeout.ICAPStatus,
-					icaperrors.ErrIdleTimeout.Message,
-				))
-				_ = conn.Flush()
-
-				// Close connection
+			keepAliveWait := requestCount > 0
+			if err := s.setWaitReadDeadline(conn, keepAliveWait); err != nil {
 				return
 			}
 
 			// Parse the ICAP request
-			req, err := parseICAPRequest(conn.Reader())
+			requestReader := newRequestDeadlineReader(conn.Reader(), func() error {
+				return s.setActiveReadDeadline(conn)
+			})
+			req, err := parseICAPRequest(requestReader)
 			if err != nil {
-				// Connection closed or error, stop handling
+				s.handleParseError(conn, err, requestReader.Started(), keepAliveWait)
 				return
 			}
+			now := time.Now()
 
 			// Extract client IP
 			req.RemoteAddr = conn.RemoteAddr()
@@ -631,22 +606,29 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				resp = icap.NewResponseError(icap.StatusInternalServerError, err.Error())
 			}
 
+			requestClose := headerHasToken(req.Header, "Connection", "close")
+
 			// Write the response
 			if err := writeResponseFromICAP(conn.Writer(), resp); err != nil {
 				return
 			}
+			if err := s.drainRequestBodies(conn, req); err != nil {
+				s.logger.Debug("closing connection after request body drain failed",
+					"remote_addr", conn.RemoteAddr(),
+					"error", err,
+				)
+				return
+			}
+
+			if requestClose {
+				return
+			}
 
 			// Check for connection close header
-			if connHeader, ok := resp.GetHeader("Connection"); ok {
-				if connHeader == "close" {
-					return
-				}
+			if responseHasConnectionClose(resp) {
+				return
 			}
-
-			// Reset deadline for next request
-			if s.config.ReadTimeout > 0 {
-				_ = conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout)) // fresh time for next request wait
-			}
+			requestCount++
 		}
 	}
 }
