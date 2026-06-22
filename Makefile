@@ -8,11 +8,33 @@ LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION)"
 BINARY_NAME := icap-mock
 BIN_DIR := bin
 CMD_DIR := cmd/icap-mock
+PLATFORM ?=
 
-## build: Build the binary
+## build: Build the binary. Use PLATFORM=linux/amd64 or `make build macos/arm64` for cross-build
 build:
-	@echo "Building $(BINARY_NAME)..."
-	go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	@platform="$(PLATFORM)"; \
+	if [ -z "$$platform" ]; then platform="$(word 2,$(MAKECMDGOALS))"; fi; \
+	if [ -z "$$platform" ]; then \
+		echo "Building $(BINARY_NAME)..."; \
+		go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) ./$(CMD_DIR); \
+	else \
+		os=$${platform%/*}; \
+		arch=$${platform#*/}; \
+		goos="$$os"; \
+		ext=""; \
+		if [ "$$os" = "$$arch" ]; then \
+			echo "Invalid platform '$$platform'. Use OS/ARCH, for example linux/amd64"; \
+			exit 1; \
+		fi; \
+		if [ "$$os" = "macos" ]; then goos="darwin"; fi; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		output="$(BIN_DIR)/$(BINARY_NAME)-$$os-$$arch$$ext"; \
+		echo "Building $$output..."; \
+		GOOS=$$goos GOARCH=$$arch CGO_ENABLED=0 go build $(LDFLAGS) -o "$$output" ./$(CMD_DIR); \
+	fi
+
+linux/% macos/% darwin/% windows/% freebsd/% openbsd/% netbsd/%:
+	@:
 
 ## run: Run the application locally
 run:
