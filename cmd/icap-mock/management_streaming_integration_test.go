@@ -31,6 +31,7 @@ const (
 	integrationOperationTimeout = 4 * time.Second
 	readinessPollInterval       = 25 * time.Millisecond
 	streamingChunkDelay         = "300ms"
+	chunkedFinalChunkToken      = "\r\n0\r\n\r\n"
 )
 
 func TestRealIntegration_ScenarioReloadUpdatesLiveICAPResponses(t *testing.T) {
@@ -529,14 +530,14 @@ func sendRawICAPRequest(addr, rawRequest string, stopOnFinalChunk bool) (string,
 		n, readErr := conn.Read(tmp)
 		if n > 0 {
 			buf.Write(tmp[:n])
-			if stopOnFinalChunk && strings.Contains(buf.String(), "0\r\n\r\n") {
+			if stopOnFinalChunk && strings.Contains(buf.String(), chunkedFinalChunkToken) {
 				return buf.String(), nil
 			}
 		}
 		if readErr == nil {
 			continue
 		}
-		if stopOnFinalChunk && errors.Is(readErr, io.EOF) && strings.Contains(buf.String(), "0\r\n\r\n") {
+		if stopOnFinalChunk && errors.Is(readErr, io.EOF) && strings.Contains(buf.String(), chunkedFinalChunkToken) {
 			return buf.String(), nil
 		}
 		return buf.String(), readErr
