@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+const (
+	metricsEndpointLabelModeDefault = "default"
+	metricsEndpointLabelModePath    = "path"
+)
+
 // ValidationError represents a configuration validation error.
 type ValidationError struct {
 	Value   interface{}
@@ -311,7 +316,7 @@ func (v *Validator) validateMetrics(cfg *MetricsConfig) []ValidationError {
 }
 
 func validMetricsEndpointLabelMode(mode string) bool {
-	return mode == "default" || mode == "path"
+	return mode == metricsEndpointLabelModeDefault || mode == metricsEndpointLabelModePath
 }
 
 // validateMock validates mock configuration.

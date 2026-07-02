@@ -17,6 +17,11 @@ import (
 	"github.com/icap-mock/icap-mock/internal/storage"
 )
 
+const (
+	statusStarting = "starting"
+	statusNotReady = "not_ready"
+)
+
 // Response represents the JSON payload returned by the /health endpoint.
 type Response struct {
 	Time   time.Time `json:"time"`
@@ -391,7 +396,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	case status.ICAPReady:
 		checks["icap_server"] = "ok"
 	default:
-		checks["icap_server"] = "starting"
+		checks["icap_server"] = statusStarting
 	}
 
 	// Check storage status
@@ -401,7 +406,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	case status.StorageReady:
 		checks["storage"] = "ok"
 	default:
-		checks["storage"] = "starting"
+		checks["storage"] = statusStarting
 	}
 
 	// Add scenarios count
@@ -417,7 +422,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		resp.Status = "ready"
 		w.WriteHeader(http.StatusOK)
 	} else {
-		resp.Status = "not_ready"
+		resp.Status = statusNotReady
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 

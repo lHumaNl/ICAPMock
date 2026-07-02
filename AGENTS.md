@@ -29,10 +29,10 @@
 - Scenario matching probe: `go run ./cmd/icap-mock match-test --scenarios ./configs/scenarios/example --path /scan --method REQMOD --verbose`
 - Docker build: `docker build -t icap-mock:latest .`
 - Docker compose: `docker-compose up -d`
-- Docker compose + monitoring: `docker-compose --profile monitoring up -d`
+- Docker compose + monitoring: `docker-compose --profile monitoring up -d prometheus grafana`
 
 ## Config and scenario gotchas
-- Config precedence is `defaults < config file < env`; env prefix is `ICAP_`.
+- Config precedence for `server` is `built-in defaults < config file < env < explicit CLI flags`; env prefix is `ICAP_`.
 - Two config shapes are supported: legacy single-server (`server` + `mock`) and multi-server (`defaults` + `servers`).
 - `make run` points at missing `configs/config.yaml`; use `configs/example.yaml` instead.
 - Scenario v2 requires `method` and `endpoint` in `defaults` or on each scenario.
@@ -44,7 +44,9 @@
 ## Go / CI constraints
 - Module path: `github.com/icap-mock/icap-mock`
 - `go.mod` declares `go 1.25.0`.
-- CI tests Go `1.25` and `1.26`; Docker and release builds use Go `1.26`.
+- CI primary Go is `1.26`; tests run on Go `1.25` and `1.26`; Docker and release builds use Go `1.26`.
+- CI runs `go mod tidy` before lint/tests; local `make lint` uses `modules-download-mode: readonly`, so run `make mod-tidy` after dependency changes.
 - Go source files must keep the header `// Copyright 2026 ICAP Mock`.
 - `goimports` local prefix is `github.com/icap-mock/icap-mock`.
-- `golangci-lint` uses `modules-download-mode: readonly`; if dependencies changed, run `go mod tidy` before `make lint`.
+- Build metadata vars in `cmd/icap-mock/cli_flags.go` are lowercase (`main.version`, `main.gitCommit`, `main.buildDate`); use those names for `-ldflags -X` version injection.
+- Release workflow Docker publishing is disabled until registry secrets are provisioned.
