@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"time"
 
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/storage"
@@ -49,7 +50,11 @@ func (p *MockProcessor) attachStream(resp *icap.Response, tmpl *storage.Response
 		return streamICAPError("failed to attach stream", fmt.Errorf("no encapsulated HTTP message"))
 	}
 	target.Body = nil
-	target.BodyStream = newBodyStream(tmpl.Stream, payload)
+	bodyStream, err := newBodyStream(tmpl.Stream, payload)
+	if err != nil {
+		return streamICAPError("failed to configure stream", err)
+	}
+	target.BodyStream = bodyStream
 	if target.Header == nil {
 		target.Header = make(icap.Header)
 	}
@@ -382,22 +387,79 @@ func streamTarget(resp *icap.Response) *icap.HTTPMessage {
 	return resp.HTTPRequest
 }
 
-func newBodyStream(cfg *storage.StreamConfig, payload icap.StreamPayload) *icap.BodyStream {
-	size, _ := payload.SizeHint()
-	return &icap.BodyStream{
-		Payload:         payload,
-		ChunkSize:       int(cfg.Chunks.Size.Min),
-		ChunkSizeMax:    int(cfg.Chunks.Size.Max),
-		Delay:           cfg.Chunks.Delay.Min,
-		DelayMax:        cfg.Chunks.Delay.Max,
-		Duration:        cfg.Duration.Min,
-		FinishMode:      resolveFinishMode(cfg.Finish),
-		CompletePercent: cfg.Finish.CompletePercent,
-		FinPercent:      cfg.Finish.FinPercent,
-		FinAfterBytes:   cfg.Finish.Fin.After.Bytes.Min,
-		FinAfterTime:    cfg.Finish.Fin.After.Time.Min,
-		TotalBytes:      size,
+func newBodyStream(cfg *storage.StreamConfig, payload icap.StreamPayload) (*icap.BodyStream, error) {
+	size, known := payload.SizeHint()
+	finAfterBytes, finAfterBytesSet, err := resolveFinAfterBytes(cfg, size, known)
+	if err != nil {
+		return nil, err
 	}
+	finAfterTime := resolveFinAfterTime(cfg)
+	stream := &icap.BodyStream{
+		Payload:          payload,
+		ChunkSize:        int(cfg.Chunks.Size.Min),
+		ChunkSizeMax:     int(cfg.Chunks.Size.Max),
+		Delay:            cfg.Chunks.Delay.Min,
+		DelayMax:         cfg.Chunks.Delay.Max,
+		Duration:         cfg.Duration.Min,
+		FinishMode:       resolveFinishMode(cfg.Finish),
+		CompletePercent:  cfg.Finish.CompletePercent,
+		FinPercent:       cfg.Finish.FinPercent,
+		FinAfterBytes:    finAfterBytes,
+		FinAfterBytesSet: finAfterBytesSet,
+		FinAfterTime:     finAfterTime,
+		DelayStopAfter:   resolveDelayStopAfter(cfg),
+		TotalBytes:       streamTotalBytes(cfg, size, finAfterBytes, finAfterBytesSet),
+	}
+	return stream, nil
+}
+
+func resolveDelayStopAfter(cfg *storage.StreamConfig) time.Duration {
+	if !cfg.Send.Duration.IsSet || !cfg.Throttle.Every.IsSet {
+		return 0
+	}
+	if cfg.Finish.Mode != "" && cfg.Finish.Mode != icap.StreamFinishComplete {
+		return 0
+	}
+	return cfg.Send.Duration.Min
+}
+
+func resolveFinAfterTime(cfg *storage.StreamConfig) time.Duration {
+	if cfg.Send.Percent.IsSet && cfg.Send.Duration.IsSet {
+		return cfg.Send.Duration.Min
+	}
+	return cfg.Finish.Fin.After.Time.Min
+}
+
+func resolveFinAfterBytes(cfg *storage.StreamConfig, size int64, known bool) (bodyBytes int64, set bool, err error) {
+	if cfg.Send.Percent.IsSet {
+		return resolvePercentFINBytes(cfg.Send.Percent, size, known)
+	}
+	if cfg.Finish.Fin.After.Bytes.IsSet {
+		return cfg.Finish.Fin.After.Bytes.Min, true, nil
+	}
+	return 0, false, nil
+}
+
+func resolvePercentFINBytes(percent storage.PercentSpec, size int64, known bool) (bodyBytes int64, set bool, err error) {
+	if !known {
+		return 0, false, fmt.Errorf("send.percent requires a known stream source size")
+	}
+	selected := selectStreamPercent(percent)
+	return (size * int64(selected)) / 100, true, nil
+}
+
+func streamTotalBytes(cfg *storage.StreamConfig, size, finBytes int64, finBytesSet bool) int64 {
+	if cfg.Send.Percent.IsSet && finBytesSet {
+		return finBytes
+	}
+	return size
+}
+
+func selectStreamPercent(percent storage.PercentSpec) int {
+	if percent.Max <= percent.Min {
+		return percent.Min
+	}
+	return percent.Min + rand.Intn(percent.Max-percent.Min+1) //nolint:gosec // scenario randomness is non-security.
 }
 
 func resolveFinishMode(f storage.StreamFinishConfig) string {

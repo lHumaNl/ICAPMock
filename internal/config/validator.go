@@ -298,9 +298,20 @@ func (v *Validator) validateMetrics(cfg *MetricsConfig) []ValidationError {
 				Value:   cfg.Path,
 			})
 		}
+		if !validMetricsEndpointLabelMode(cfg.EndpointLabelMode) {
+			errors = append(errors, ValidationError{
+				Field:   "metrics.endpoint_label_mode",
+				Message: "endpoint label mode must be one of: default, path",
+				Value:   cfg.EndpointLabelMode,
+			})
+		}
 	}
 
 	return errors
+}
+
+func validMetricsEndpointLabelMode(mode string) bool {
+	return mode == "default" || mode == "path"
 }
 
 // validateMock validates mock configuration.

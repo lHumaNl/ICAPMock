@@ -842,6 +842,48 @@ func TestConvertV2_BranchesWithTemplates(t *testing.T) {
 	}
 }
 
+func TestConvertV2_BlockIsNullableAndInherited(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"REQMOD"},
+			Endpoint: EndpointList{"/scan"},
+			ResponseTemplates: map[string]ResponseTemplateV2{
+				"base": {Inline: &InlineResponseV2{Status: 200, HTTPStatus: 403, Block: boolPtr(true)}},
+			},
+		},
+		Scenarios: map[string]ScenarioEntryV2{
+			"explicit-false": {Use: "base", Block: boolPtr(false)},
+			"weighted": {
+				Responses: []WeightedResponseV2{{Weight: 1, Use: "base", Block: boolPtr(false)}},
+			},
+		},
+	}
+
+	scenarios, err := ConvertV2ToScenarios(file, []string{"explicit-false", "weighted"})
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if got := scenarios[0].Response.Block; got == nil || *got {
+		t.Fatalf("explicit-false block = %v, want explicit false", got)
+	}
+	if got := scenarios[1].WeightedResponses[0].Block; got == nil || *got {
+		t.Fatalf("weighted block = %v, want explicit false", got)
+	}
+}
+
+func TestResolveResponseRef_BlockOverlay(t *testing.T) {
+	resolved, err := resolveResponseRef(
+		ResponseTemplate{Use: "base", Block: boolPtr(false)},
+		map[string]ResponseTemplate{"base": {ICAPStatus: 200, Block: boolPtr(true)}},
+	)
+	if err != nil {
+		t.Fatalf("resolveResponseRef() error = %v", err)
+	}
+	if resolved.Block == nil || *resolved.Block {
+		t.Fatalf("resolved block = %v, want explicit false", resolved.Block)
+	}
+}
+
 func TestConvertV2_BranchesRejectInlineOnSameLevel(t *testing.T) {
 	file := &ScenarioFileV2{
 		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
@@ -859,6 +901,10 @@ func TestConvertV2_BranchesRejectInlineOnSameLevel(t *testing.T) {
 	if !containsString(err.Error(), "branches cannot be combined") {
 		t.Errorf("error: %v", err)
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func TestConvertV2_UnknownTemplateRef(t *testing.T) {

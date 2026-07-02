@@ -155,6 +155,7 @@ type ScenarioEntryV2 struct {
 	Set          map[string]string    `yaml:"set,omitempty"`
 	HTTPSet      map[string]string    `yaml:"http_set,omitempty"`
 	Stream       *StreamConfig        `yaml:"stream,omitempty"`
+	Block        *bool                `yaml:"block,omitempty"`
 	Method       MethodList           `yaml:"method,omitempty"`
 	Endpoint     EndpointList         `yaml:"endpoint,omitempty"`
 	Use          string               `yaml:"use,omitempty"`
@@ -180,6 +181,7 @@ type BranchV2 struct {
 	Set          map[string]string    `yaml:"set,omitempty"`
 	HTTPSet      map[string]string    `yaml:"http_set,omitempty"`
 	Stream       *StreamConfig        `yaml:"stream,omitempty"`
+	Block        *bool                `yaml:"block,omitempty"`
 	Use          string               `yaml:"use,omitempty"`
 	Body         string               `yaml:"body,omitempty"`
 	BodyFile     string               `yaml:"body_file,omitempty"`
@@ -205,6 +207,7 @@ type InlineResponseV2 struct {
 	Set          map[string]string `yaml:"set,omitempty"`
 	HTTPSet      map[string]string `yaml:"http_set,omitempty"`
 	Stream       *StreamConfig     `yaml:"stream,omitempty"`
+	Block        *bool             `yaml:"block,omitempty"`
 	Use          string            `yaml:"use,omitempty"`
 	Body         string            `yaml:"body,omitempty"`
 	BodyFile     string            `yaml:"body_file,omitempty"`
@@ -259,6 +262,7 @@ type WeightedResponseV2 struct {
 	Set          map[string]string `yaml:"set,omitempty"`
 	HTTPSet      map[string]string `yaml:"http_set,omitempty"`
 	Stream       *StreamConfig     `yaml:"stream,omitempty"`
+	Block        *bool             `yaml:"block,omitempty"`
 	Body         string            `yaml:"body,omitempty"`
 	HTTPBody     string            `yaml:"http_body,omitempty"`
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty"`
@@ -384,7 +388,7 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 
 		// Validate mutual exclusion: branches vs scenario-level response.
 		hasBranches := len(entry.Branches) > 0
-		hasInline := entry.Status != 0 || entry.HTTPStatus != 0 || entry.Body != "" || entry.BodyFile != "" || entry.Error != "" || entry.Delay != "" || len(entry.Responses) > 0 || entry.Use != "" || entry.Stream != nil
+		hasInline := entry.Status != 0 || entry.HTTPStatus != 0 || entry.Body != "" || entry.BodyFile != "" || entry.Error != "" || entry.Delay != "" || len(entry.Responses) > 0 || entry.Use != "" || entry.Stream != nil || entry.Block != nil
 		if hasBranches && hasInline {
 			return nil, fmt.Errorf("scenario %q: branches cannot be combined with scenario-level response fields (status/body/use/responses/...) on the same level — move the fallback into an explicit catch-all branch", name)
 		}
@@ -442,6 +446,7 @@ func resolveScenarioResponse(name string, entry ScenarioEntryV2, file *ScenarioF
 		Set:          entry.Set,
 		HTTPSet:      entry.HTTPSet,
 		Stream:       entry.Stream,
+		Block:        entry.Block,
 		Use:          entry.Use,
 		Body:         entry.Body,
 		BodyFile:     entry.BodyFile,
@@ -470,6 +475,7 @@ func buildBranches(scenarioName string, in []BranchV2, file *ScenarioFileV2) ([]
 			Set:          b.Set,
 			HTTPSet:      b.HTTPSet,
 			Stream:       b.Stream,
+			Block:        b.Block,
 			Use:          b.Use,
 			Body:         b.Body,
 			BodyFile:     b.BodyFile,
@@ -582,6 +588,7 @@ func buildWeightedList(
 			Set:          wr.Set,
 			HTTPSet:      wr.HTTPSet,
 			Stream:       wr.Stream,
+			Block:        wr.Block,
 			Use:          wr.Use,
 			Body:         wr.Body,
 			HTTPBody:     wr.HTTPBody,
@@ -610,6 +617,7 @@ func buildWeightedList(
 			Headers:      tpl.Headers,
 			HTTPHeaders:  tpl.HTTPHeaders,
 			Stream:       tpl.Stream,
+			Block:        tpl.Block,
 			ResponseName: selectedResponseName(wr.Use, baseName),
 			ICAPStatus:   tpl.ICAPStatus,
 			HTTPStatus:   tpl.HTTPStatus,
@@ -665,6 +673,7 @@ func inlineToTemplate(
 		Headers:      headers,
 		HTTPHeaders:  inline.HTTPSet,
 		Stream:       inline.Stream,
+		Block:        inline.Block,
 		Body:         inline.Body,
 		BodyFile:     inline.BodyFile,
 		HTTPBody:     inline.HTTPBody,
@@ -713,6 +722,9 @@ func mergeInline(base, over InlineResponseV2) InlineResponseV2 {
 	if over.Stream != nil {
 		out.Stream = over.Stream
 	}
+	if over.Block != nil {
+		out.Block = over.Block
+	}
 	if len(over.Set) > 0 {
 		out.Set = mergeHeaders(base.Set, over.Set)
 	}
@@ -730,7 +742,7 @@ func isEmptyInlineExceptUse(i InlineResponseV2) bool {
 	return i.Status == 0 && i.HTTPStatus == 0 &&
 		i.Body == "" && i.BodyFile == "" &&
 		i.HTTPBody == "" && i.HTTPBodyFile == "" && i.Error == "" &&
-		i.Delay == "" &&
+		i.Delay == "" && i.Block == nil &&
 		i.Stream == nil && len(i.Set) == 0 && len(i.HTTPSet) == 0
 }
 

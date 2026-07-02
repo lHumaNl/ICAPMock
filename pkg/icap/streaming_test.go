@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
@@ -46,6 +47,83 @@ func TestBodyStream_WriteTo_FINOmitsFinalChunk(t *testing.T) {
 	}
 	if got := buf.String(); got != "2\r\nab\r\n1\r\nc\r\n" {
 		t.Fatalf("stream output = %q", got)
+	}
+}
+
+func TestBodyStream_WriteTo_FINZeroByteLimitWritesNoBody(t *testing.T) {
+	stream := &icap.BodyStream{
+		Reader:           strings.NewReader("abcd"),
+		ChunkSize:        2,
+		FinishMode:       icap.StreamFinishFIN,
+		FinAfterBytesSet: true,
+	}
+	var buf bytes.Buffer
+
+	if _, err := stream.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if got := buf.String(); got != "" {
+		t.Fatalf("stream output = %q, want empty FIN body", got)
+	}
+}
+
+func TestBodyStream_WriteTo_CompleteLargeChunkSendsFullBody(t *testing.T) {
+	stream := &icap.BodyStream{
+		Reader:     strings.NewReader("abcd"),
+		ChunkSize:  16,
+		FinishMode: icap.StreamFinishComplete,
+	}
+	var buf bytes.Buffer
+
+	if _, err := stream.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if got := buf.String(); got != "4\r\nabcd\r\n0\r\n\r\n" {
+		t.Fatalf("stream output = %q", got)
+	}
+}
+
+func TestBodyStream_WriteTo_AppliesDelayBetweenChunks(t *testing.T) {
+	var sleeps []time.Duration
+	stream := &icap.BodyStream{
+		Reader:     strings.NewReader("abcd"),
+		ChunkSize:  2,
+		FinishMode: icap.StreamFinishComplete,
+		Delay:      3 * time.Millisecond,
+		Sleep: func(delay time.Duration) {
+			sleeps = append(sleeps, delay)
+		},
+	}
+
+	if _, err := stream.WriteTo(&bytes.Buffer{}); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if len(sleeps) != 2 {
+		t.Fatalf("sleep calls = %d, want 2", len(sleeps))
+	}
+	for i, got := range sleeps {
+		if got != 3*time.Millisecond {
+			t.Fatalf("sleep[%d] = %v, want %v", i, got, 3*time.Millisecond)
+		}
+	}
+}
+
+func TestBodyStream_WriteTo_CompleteStopLimitSuppressesDelay(t *testing.T) {
+	var sleeps []time.Duration
+	stream := &icap.BodyStream{
+		Reader:         strings.NewReader("abcd"),
+		ChunkSize:      1,
+		FinishMode:     icap.StreamFinishComplete,
+		Delay:          time.Second,
+		DelayStopAfter: time.Nanosecond,
+		Sleep: func(delay time.Duration) {
+			sleeps = append(sleeps, delay)
+		},
+	}
+
+	assertBodyStreamOutput(t, stream, "1\r\na\r\n1\r\nb\r\n1\r\nc\r\n1\r\nd\r\n0\r\n\r\n")
+	if len(sleeps) != 0 {
+		t.Fatalf("sleep calls = %d, want 0", len(sleeps))
 	}
 }
 

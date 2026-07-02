@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -112,6 +111,12 @@ func (c *ValidateCommand) Run(_ context.Context) error {
 func validateFile(filePath string, seenNames map[string]string) bool {
 	fmt.Printf("\nFile: %s\n", filePath)
 
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Load(filePath); err != nil {
+		fmt.Printf("  [FAIL] runtime validation failed: %v\n", err)
+		return false
+	}
+
 	data, err := os.ReadFile(filePath) //nolint:gosec // path is validated
 	if err != nil {
 		fmt.Printf("  [FAIL] cannot read file: %v\n", err)
@@ -137,7 +142,7 @@ func validateFile(filePath string, seenNames map[string]string) bool {
 			scenarioLabel = fmt.Sprintf("<unnamed #%d>", i+1)
 		}
 
-		errs := validateScenario(s, filePath, seenNames)
+		errs := validateScenarioName(s.Name, filePath, seenNames)
 		if len(errs) == 0 {
 			fmt.Printf("  [OK]   %s\n", scenarioLabel)
 		} else {
@@ -247,23 +252,6 @@ func v2ScenarioNames(data []byte) ([]string, error) {
 	return nil, nil
 }
 
-// validateScenario validates a single scenario and returns a list of errors.
-func validateScenario(s *storage.Scenario, filePath string, seenNames map[string]string) []string {
-	err := make([]string, 0, 7)
-	err = append(err, validateScenarioName(s.Name, filePath, seenNames)...)
-	err = append(err, validateScenarioRegex("path_pattern", s.Match.Path)...)
-	err = append(err, validateScenarioRegex("body_pattern", s.Match.BodyPattern)...)
-	err = append(err, validateScenarioBodyFile(s.Response.BodyFile, filePath)...)
-
-	if s.Priority < 0 {
-		err = append(err, fmt.Sprintf("priority %d is negative", s.Priority))
-	}
-
-	err = append(err, validateScenarioStatuses(s)...)
-
-	return err
-}
-
 func validateScenarioName(name, filePath string, seenNames map[string]string) []string {
 	if name == "" {
 		return []string{"name is empty"}
@@ -276,55 +264,4 @@ func validateScenarioName(name, filePath string, seenNames map[string]string) []
 	seenNames[name] = filePath
 
 	return nil
-}
-
-func validateScenarioRegex(fieldName, pattern string) []string {
-	if pattern == "" {
-		return nil
-	}
-
-	if _, err := regexp.Compile(pattern); err != nil {
-		return []string{fmt.Sprintf("invalid %s regex %q: %v", fieldName, pattern, err)}
-	}
-
-	return nil
-}
-
-func validateScenarioBodyFile(bodyFile, filePath string) []string {
-	if bodyFile == "" {
-		return nil
-	}
-
-	bodyFilePath := bodyFile
-	if !filepath.IsAbs(bodyFilePath) {
-		bodyFilePath = filepath.Join(filepath.Dir(filePath), bodyFilePath)
-	}
-
-	if _, err := os.Stat(bodyFilePath); err != nil {
-		return []string{fmt.Sprintf("body_file %q not found: %v", bodyFile, err)}
-	}
-
-	return nil
-}
-
-func validateScenarioStatuses(s *storage.Scenario) []string {
-	var errs []string
-
-	if len(s.Branches) == 0 {
-		status := s.Response.ICAPStatus
-		if status == 0 {
-			errs = append(errs, "icap_status is 0 (will default to 204 at runtime; consider setting it explicitly)")
-		} else if status < 100 || status > 599 {
-			errs = append(errs, fmt.Sprintf("icap_status %d is out of valid range 100-599", status))
-		}
-	}
-
-	for i := range s.Branches {
-		status := s.Branches[i].Response.ICAPStatus
-		if status != 0 && (status < 100 || status > 599) {
-			errs = append(errs, fmt.Sprintf("branch #%d icap_status %d is out of valid range 100-599", i+1, status))
-		}
-	}
-
-	return errs
 }

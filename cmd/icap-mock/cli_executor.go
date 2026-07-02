@@ -42,6 +42,8 @@ var (
 	errPluginsDisabled = errors.New("plugins are disabled")
 )
 
+const validateDefaultScenarioName = "default"
+
 // PrintVersion prints version information to stdout.
 func PrintVersion() {
 	fmt.Printf("icap-mock version %s\n", version)
@@ -115,9 +117,10 @@ func printMetricsConfig(w io.Writer, cfg *config.Config) {
 	fmt.Fprintf(w, "Metrics Configuration:\n")             //nolint:errcheck
 	fmt.Fprintf(w, "  enabled: %v\n", cfg.Metrics.Enabled) //nolint:errcheck
 	if cfg.Metrics.Enabled {
-		fmt.Fprintf(w, "  host: %s\n", cfg.Metrics.Host) //nolint:errcheck
-		fmt.Fprintf(w, "  port: %d\n", cfg.Metrics.Port) //nolint:errcheck
-		fmt.Fprintf(w, "  path: %s\n", cfg.Metrics.Path) //nolint:errcheck
+		fmt.Fprintf(w, "  host: %s\n", cfg.Metrics.Host)                             //nolint:errcheck
+		fmt.Fprintf(w, "  port: %d\n", cfg.Metrics.Port)                             //nolint:errcheck
+		fmt.Fprintf(w, "  path: %s\n", cfg.Metrics.Path)                             //nolint:errcheck
+		fmt.Fprintf(w, "  endpoint_label_mode: %s\n", cfg.Metrics.EndpointLabelMode) //nolint:errcheck
 	}
 	fmt.Fprintln(w) //nolint:errcheck
 }
@@ -129,27 +132,56 @@ func printMockConfig(w io.Writer, cfg *config.Config, allPassed *bool) {
 	fmt.Fprintf(w, "  scenarios_dir: %s\n", cfg.Mock.ScenariosDir)     //nolint:errcheck
 	fmt.Fprintf(w, "  default_timeout: %s\n", cfg.Mock.DefaultTimeout) //nolint:errcheck
 
-	// Check scenarios directory
 	if cfg.Mock.ScenariosDir != "" {
-		if info, err := os.Stat(cfg.Mock.ScenariosDir); err == nil && info.IsDir() {
-			// Count scenario files
-			files, err := os.ReadDir(cfg.Mock.ScenariosDir)
-			if err == nil {
-				scenarioCount := 0
-				for _, f := range files {
-					name := f.Name()
-					if !f.IsDir() && (strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
-						scenarioCount++
-					}
-				}
-				fmt.Fprintf(w, "  scenarios loaded: %d files found\n", scenarioCount) //nolint:errcheck
-			}
-		} else {
-			fmt.Fprintf(w, "  WARNING: scenarios directory not found: %s\n", cfg.Mock.ScenariosDir) //nolint:errcheck
-			*allPassed = false
-		}
+		validateScenarioDirectory(w, cfg, allPassed)
 	}
 	fmt.Fprintln(w) //nolint:errcheck
+}
+
+func validateScenarioDirectory(w io.Writer, cfg *config.Config, allPassed *bool) {
+	count, err := countScenarioFiles(cfg.Mock.ScenariosDir)
+	if err != nil {
+		fmt.Fprintf(w, "  WARNING: scenarios directory not found: %s\n", cfg.Mock.ScenariosDir) //nolint:errcheck
+		*allPassed = false
+		return
+	}
+	factory := newScenarioRegistryFactory(cfg.Mock.Matching, cfg.Server.MaxBodySize, cfg.Sharding)
+	registry, err := management.LoadScenarioDirectory(cfg.Mock.ScenariosDir, factory)
+	if err != nil {
+		fmt.Fprintf(w, "  ERROR: scenarios validation failed: %v\n", err) //nolint:errcheck
+		*allPassed = false
+		return
+	}
+	validScenarios := countLoadedScenarios(registry.List())
+	fmt.Fprintf(w, "  scenarios loaded: %d files found, %d scenarios valid\n", count, validScenarios) //nolint:errcheck
+}
+
+func countScenarioFiles(dir string) (int, error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, file := range files {
+		if !file.IsDir() && isScenarioYAMLFile(file.Name()) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func isScenarioYAMLFile(name string) bool {
+	return strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")
+}
+
+func countLoadedScenarios(scenarios []*storage.Scenario) int {
+	count := 0
+	for _, scenario := range scenarios {
+		if scenario.Name != validateDefaultScenarioName {
+			count++
+		}
+	}
+	return count
 }
 
 // printChaosConfig prints chaos configuration for validation.
@@ -356,6 +388,7 @@ func startAllServers(
 		srv.SetRouter(rtr)
 		srv.SetMetrics(collector)
 		srv.SetMetricsServerName(entry.name)
+		srv.SetMetricsEndpointLabelMode(cfg.Metrics.EndpointLabelMode)
 
 		log.Info("starting ICAP server",
 			"name", entry.name,

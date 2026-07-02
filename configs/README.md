@@ -69,6 +69,24 @@ servers:
 
 See `example.yaml` for the complete list of available fields with defaults and descriptions.
 
+### Metrics endpoint labels
+
+Prometheus metrics are enabled by default. The incoming request counter uses a bounded endpoint
+label mode to avoid high-cardinality time series:
+
+```yaml
+metrics:
+  enabled: true
+  endpoint_label_mode: default  # default | path
+```
+
+- `default` — emits `endpoint="default"` for every request. This is the safe default.
+- `path` — emits the normalized ICAP URI path without query parameters or fragments.
+
+The `extension` label is extracted from the normalized path in both modes; requests without an
+extension use `extension="none"`. The same setting can be overridden with
+`ICAP_METRICS_ENDPOINT_LABEL_MODE` or `--metrics.endpoint-label-mode`.
+
 ### Body-pattern safety limits
 
 `mock.matching.body_pattern_limit` and `mock.matching.body_pattern_limit_action` protect
@@ -265,6 +283,7 @@ can shape both sides independently:
 | `http_set:`       | Encapsulated HTTP headers                                       |
 | `http_body:`      | Encapsulated HTTP body (inline string)                          |
 | `http_body_file:` | Encapsulated HTTP body (loaded from a file on disk)             |
+| `block:`          | Optional metrics override for allow/block outcome               |
 
 The typical "block page" response uses the HTTP side:
 
@@ -290,6 +309,13 @@ set, e.g. inherited from a template.
 
 Placeholders (`${name}`) from endpoint captures (see below) also expand inside
 `http_body`, `http_set` values, `body`, and `set` values.
+
+`block:` can be set to `true` or `false` on response templates, inline scenario
+responses, branches, and weighted variants. When omitted, the Prometheus
+`block` label is inferred from the selected concrete response after template,
+branch, and weighted resolution: ICAP or wrapped HTTP 4xx/5xx status, `error:`,
+partial stream endings (`stream.end.mode: fin` / `term`, legacy `stream.finish.mode: fin`) or weighted FIN with `fin_percent > 0` means
+`block="true"`; all other responses are `block="false"`.
 
 ### Response templates + `use:` references
 
@@ -384,8 +410,8 @@ scenarios:
     stream:
       source:
         from: request_http_body
-      chunks:
-        size: 16
+      throttle:
+        chunk_size: 16
 
   respmod-stream:
     method: RESPMOD
@@ -394,17 +420,22 @@ scenarios:
     stream:
       source:
         from: response_http_body
-      finish:
+      send:
+        percent: "40%"
+        duration: 250ms
+      throttle:
+        chunk_size: 16
+      end:
         mode: fin
-        fin:
-          close: clean
-          after:
-            bytes: 64
 ```
 
 - `request_http_body` requires an explicit `REQMOD` method.
 - `response_http_body` requires an explicit `RESPMOD` method.
-- `finish.mode` defaults to `complete`; `fin` sends a clean FIN instead of the final terminating chunk.
+- Preferred controls are `send`, `throttle`, and `end`. `end.mode: complete` sends the full body;
+  `end.mode: fin` and `end.mode: term` require partial `send.percent` (`1..99`) plus
+  `send.duration` or `throttle.every`. `fin` closes without a terminating chunk; `term` sends the
+  terminating chunk after the selected partial body. Legacy `chunks` / `duration` / `finish` remain
+  supported for existing files, but cannot be mixed with `send` / `throttle` / `end`.
 
 ### `stream.parts`
 
@@ -453,7 +484,7 @@ scenarios:
   use `multipart.allow_empty: true` or an explicit safe fallback such as `fallback.body`,
   `fallback.body_file`, or a supported `fallback.from` source.
 
-### Weighted complete-vs-FIN ending
+### Legacy weighted complete-vs-FIN ending
 
 ```yaml
 scenarios:

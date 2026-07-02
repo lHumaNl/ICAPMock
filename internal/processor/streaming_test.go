@@ -182,6 +182,87 @@ func TestMockProcessor_ResponseHTTPBodyStreamsAfterWriteToStarts(t *testing.T) {
 	assertStreamWriteReadsBody(t, procResp, reader, 4)
 }
 
+func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t *testing.T) {
+	scenario := rawResponseHTTPBodyStreamScenario()
+	scenario.Response.Stream.Chunks.Delay = storage.DurationSpec{
+		Min:   2 * time.Millisecond,
+		Max:   2 * time.Millisecond,
+		IsSet: true,
+	}
+	scenario.Response.Stream.Finish = storage.StreamFinishConfig{
+		Mode: icap.StreamFinishFIN,
+		Fin: storage.StreamFINConfig{
+			Close: "clean",
+			After: storage.StreamFINAfterConfig{
+				Bytes: storage.SizeSpec{Min: 3, Max: 3, IsSet: true},
+			},
+		},
+	}
+
+	resp, err := processSingleScenario(t, scenario).Process(context.Background(), createLazyRESPMODRequest(t, strings.NewReader("wxyz")))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if resp.HTTPResponse == nil || resp.HTTPResponse.BodyStream == nil {
+		t.Fatal("response BodyStream = nil")
+	}
+	stream := resp.HTTPResponse.BodyStream
+	if stream.ChunkSize != 2 {
+		t.Fatalf("ChunkSize = %d, want 2", stream.ChunkSize)
+	}
+	if stream.Delay != 2*time.Millisecond {
+		t.Fatalf("Delay = %v, want %v", stream.Delay, 2*time.Millisecond)
+	}
+	if stream.FinishMode != icap.StreamFinishFIN {
+		t.Fatalf("FinishMode = %q, want %q", stream.FinishMode, icap.StreamFinishFIN)
+	}
+	if stream.FinAfterBytes != 3 {
+		t.Fatalf("FinAfterBytes = %d, want 3", stream.FinAfterBytes)
+	}
+	if got, ok := resp.GetHeader("Connection"); !ok || got != "close" {
+		t.Fatalf("Connection header = %q, %v, want close, true", got, ok)
+	}
+}
+
+func TestMockProcessor_NewFINPercentStreamCapsBodyBytes(t *testing.T) {
+	scenario := newPercentFINStreamScenario("abcdefghij", 40)
+	resp, err := processSingleScenario(t, scenario).Process(context.Background(), createTestRESPMODRequest(t))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	stream := resp.HTTPResponse.BodyStream
+	if stream.FinAfterBytes != 4 || !stream.FinAfterBytesSet {
+		t.Fatalf("FinAfterBytes = %d/%v, want 4/true", stream.FinAfterBytes, stream.FinAfterBytesSet)
+	}
+	stream.Sleep = func(time.Duration) {}
+	assertStreamOutput(t, resp, "3\r\nabc\r\n1\r\nd\r\n")
+}
+
+func TestMockProcessor_NewCompleteDurationWithThrottleSetsStopLimit(t *testing.T) {
+	scenario := newCompleteDurationThrottleScenario()
+	resp, err := processSingleScenario(t, scenario).Process(context.Background(), createTestRESPMODRequest(t))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	stream := resp.HTTPResponse.BodyStream
+	if stream.Delay != 3*time.Millisecond {
+		t.Fatalf("Delay = %v, want 3ms", stream.Delay)
+	}
+	if stream.DelayStopAfter != 5*time.Millisecond {
+		t.Fatalf("DelayStopAfter = %v, want 5ms", stream.DelayStopAfter)
+	}
+}
+
+func TestMockProcessor_NewFINPercentRequiresKnownSize(t *testing.T) {
+	scenario := newRawPercentFINStreamScenario()
+	proc := processSingleScenario(t, scenario)
+	_, err := proc.Process(context.Background(), createLazyRESPMODRequest(t, strings.NewReader("abcd")))
+	cause := errors.Unwrap(err)
+	if err == nil || cause == nil || !strings.Contains(cause.Error(), "known stream source size") {
+		t.Fatalf("Process() error = %v, want known size error", err)
+	}
+}
+
 func TestMockProcessor_MultipartSelectorStreamsAfterWriteToStarts(t *testing.T) {
 	body, contentType := multipartTestBody(t)
 	reader := newProcessorByteCountingReader(body)
@@ -947,6 +1028,43 @@ func rawHTTPBodyStreamScenario(method, source string) *storage.Scenario {
 			Chunks: storage.StreamChunksConfig{Size: storage.SizeSpec{Min: 2, Max: 2, IsSet: true}},
 			Finish: storage.StreamFinishConfig{Mode: icap.StreamFinishComplete},
 		}},
+	}
+}
+
+func newPercentFINStreamScenario(body string, percent int) *storage.Scenario {
+	scenario := responseBodyStreamScenario(icap.StreamFinishComplete)
+	scenario.Response.Stream = newPercentFINStream("body", body, percent)
+	return scenario
+}
+
+func newRawPercentFINStreamScenario() *storage.Scenario {
+	scenario := rawHTTPBodyStreamScenario(icap.MethodRESPMOD, "response_http_body")
+	scenario.Response.Stream = newPercentFINStream("response_http_body", "", 40)
+	return scenario
+}
+
+func newCompleteDurationThrottleScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name:  "complete-duration-throttle",
+		Match: storage.MatchRule{Methods: []string{icap.MethodRESPMOD}},
+		Response: storage.ResponseTemplate{ICAPStatus: 200, Stream: &storage.StreamConfig{
+			Source:   storage.StreamSourceConfig{From: "body", Body: "abcd"},
+			Send:     storage.StreamSendConfig{Duration: storage.DurationSpec{Min: 5 * time.Millisecond, Max: 5 * time.Millisecond, IsSet: true}},
+			Throttle: storage.StreamThrottleConfig{Every: storage.DurationSpec{Min: 3 * time.Millisecond, Max: 3 * time.Millisecond, IsSet: true}},
+		}},
+		Priority: 100,
+	}
+}
+
+func newPercentFINStream(source, body string, percent int) *storage.StreamConfig {
+	return &storage.StreamConfig{
+		Source: storage.StreamSourceConfig{From: source, Body: body},
+		Send: storage.StreamSendConfig{
+			Percent:  storage.PercentSpec{Min: percent, Max: percent, IsSet: true},
+			Duration: storage.DurationSpec{Min: time.Millisecond, Max: time.Millisecond, IsSet: true},
+		},
+		Throttle: storage.StreamThrottleConfig{ChunkSize: storage.SizeSpec{Min: 3, Max: 3, IsSet: true}},
+		End:      storage.StreamEndConfig{Mode: icap.StreamFinishFIN},
 	}
 }
 

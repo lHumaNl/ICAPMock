@@ -48,6 +48,9 @@ func mergeResponseTemplate(base, over ResponseTemplate) ResponseTemplate {
 	if over.Stream != nil {
 		out.Stream = over.Stream
 	}
+	if over.Block != nil {
+		out.Block = over.Block
+	}
 	return out
 }
 

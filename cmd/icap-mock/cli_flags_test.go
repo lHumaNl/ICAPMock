@@ -146,6 +146,7 @@ func TestServerCommand_MetricsFlags(t *testing.T) {
 		"-metrics.host", "127.0.0.1",
 		"-metrics.port", "9091",
 		"-metrics.path", "/custom-metrics",
+		"-metrics.endpoint-label-mode", "path",
 	})
 	if err != nil {
 		t.Fatalf("Failed to parse flags: %v", err)
@@ -161,6 +162,9 @@ func TestServerCommand_MetricsFlags(t *testing.T) {
 	}
 	if cmd.metricsPath != "/custom-metrics" {
 		t.Errorf("metricsPath = %q, want '/custom-metrics'", cmd.metricsPath)
+	}
+	if cmd.metricsEndpointMode != "path" {
+		t.Errorf("metricsEndpointMode = %q, want 'path'", cmd.metricsEndpointMode)
 	}
 }
 

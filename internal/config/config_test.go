@@ -32,6 +32,7 @@ func TestConfig_SetDefaults(t *testing.T) {
 		{true, "Metrics.Enabled", "Metrics.Enabled"},
 		{9090, "Metrics.Port", "Metrics.Port"},
 		{"/metrics", "Metrics.Path", "Metrics.Path"},
+		{"default", "Metrics.EndpointLabelMode", "Metrics.EndpointLabelMode"},
 
 		// Mock defaults
 		{"mock", "Mock.DefaultMode", "Mock.DefaultMode"},
@@ -84,6 +85,8 @@ func TestConfig_SetDefaults(t *testing.T) {
 				actual = cfg.Metrics.Port
 			case "Metrics.Path":
 				actual = cfg.Metrics.Path
+			case "Metrics.EndpointLabelMode":
+				actual = cfg.Metrics.EndpointLabelMode
 
 			// Mock
 			case "Mock.DefaultMode":

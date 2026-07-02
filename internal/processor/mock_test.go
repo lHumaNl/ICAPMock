@@ -160,6 +160,81 @@ func TestMockProcessor_RecordsScenarioMetrics(t *testing.T) {
 	}
 }
 
+func TestMockProcessor_RecordsSelectedWeightedBlockOutcome(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(weightedExplicitAllowScenario()); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	proc.SetMetrics(collector)
+
+	_, err = proc.Process(context.Background(), createTestREQMODRequest(t))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	labels := map[string]string{"scenario": "weighted-explicit-allow", "response": "500", "block": "false"}
+	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 1 {
+		t.Errorf("scenario request count = %v, want 1", got)
+	}
+}
+
+func TestMockProcessor_RecordsBranchWeightedBlockOutcome(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(branchWeightedExplicitAllowScenario()); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	proc.SetMetrics(collector)
+
+	req := createTestREQMODRequest(t)
+	req.Header.Set("X-Branch", "selected")
+	_, err = proc.Process(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	labels := map[string]string{"scenario": "branch-weighted-explicit-allow", "response": "500", "block": "false"}
+	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 1 {
+		t.Errorf("scenario request count = %v, want 1", got)
+	}
+}
+
+func TestResponseBlocks(t *testing.T) {
+	tests := []struct {
+		response storage.ResponseTemplate
+		name     string
+		want     bool
+	}{
+		{name: "clean status", response: storage.ResponseTemplate{ICAPStatus: 204}},
+		{name: "icap 4xx", response: storage.ResponseTemplate{ICAPStatus: 404}, want: true},
+		{name: "http 5xx", response: storage.ResponseTemplate{ICAPStatus: 200, HTTPStatus: 503}, want: true},
+		{name: "error response", response: storage.ResponseTemplate{ICAPStatus: 200, Error: "boom"}, want: true},
+		{name: "stream fin", response: storage.ResponseTemplate{Stream: &storage.StreamConfig{Finish: storage.StreamFinishConfig{Mode: "fin"}}}, want: true},
+		{name: "stream term", response: storage.ResponseTemplate{Stream: &storage.StreamConfig{End: storage.StreamEndConfig{Mode: "term"}}}, want: true},
+		{name: "weighted fin", response: storage.ResponseTemplate{Stream: &storage.StreamConfig{Finish: storage.StreamFinishConfig{Mode: "weighted", FinPercent: 1}}}, want: true},
+		{name: "explicit false", response: storage.ResponseTemplate{ICAPStatus: 500, Block: processorBoolPtr(false)}},
+		{name: "explicit true", response: storage.ResponseTemplate{ICAPStatus: 204, Block: processorBoolPtr(true)}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := responseBlocks(&tt.response); got != tt.want {
+				t.Errorf("responseBlocks() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func namedResponseScenario() *storage.Scenario {
 	return &storage.Scenario{
 		Name:     "named-scenario",
@@ -172,14 +247,55 @@ func namedResponseScenario() *storage.Scenario {
 	}
 }
 
+func weightedExplicitAllowScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name:     "weighted-explicit-allow",
+		Match:    storage.MatchRule{Methods: []string{icap.MethodREQMOD}},
+		Priority: 100,
+		Response: storage.ResponseTemplate{ICAPStatus: 204},
+		WeightedResponses: []storage.WeightedResponse{{
+			ICAPStatus: 500,
+			Block:      processorBoolPtr(false),
+			Weight:     1,
+		}},
+	}
+}
+
+func branchWeightedExplicitAllowScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name:     "branch-weighted-explicit-allow",
+		Match:    storage.MatchRule{Methods: []string{icap.MethodREQMOD}},
+		Priority: 100,
+		Response: storage.ResponseTemplate{ICAPStatus: 204},
+		Branches: []storage.Branch{{
+			Match:    storage.MatchRule{Headers: map[string]string{"X-Branch": "selected"}},
+			Response: storage.ResponseTemplate{ICAPStatus: 204},
+			WeightedResponses: []storage.WeightedResponse{{
+				ICAPStatus: 500,
+				Block:      processorBoolPtr(false),
+				Weight:     1,
+			}},
+		}},
+	}
+}
+
+func processorBoolPtr(v bool) *bool {
+	return &v
+}
+
 func scenarioRequestMetricValue(t *testing.T, reg prometheus.Gatherer, scenario, response string) float64 {
+	t.Helper()
+	return scenarioRequestMetricValueWithLabels(t, reg, map[string]string{"scenario": scenario, "response": response})
+}
+
+func scenarioRequestMetricValueWithLabels(t *testing.T, reg prometheus.Gatherer, labels map[string]string) float64 {
 	t.Helper()
 	for _, mf := range gatherProcessorTestMetrics(t, reg) {
 		if mf.GetName() != "icap_scenario_requests_total" {
 			continue
 		}
 		for _, metric := range mf.GetMetric() {
-			if metricHasLabels(metric, scenario, response) {
+			if metricHasLabels(metric, labels) {
 				return metric.GetCounter().GetValue()
 			}
 		}
@@ -196,12 +312,17 @@ func gatherProcessorTestMetrics(t *testing.T, reg prometheus.Gatherer) []*dto.Me
 	return mfs
 }
 
-func metricHasLabels(metric *dto.Metric, scenario, response string) bool {
+func metricHasLabels(metric *dto.Metric, want map[string]string) bool {
 	labels := make(map[string]string, len(metric.GetLabel()))
 	for _, label := range metric.GetLabel() {
 		labels[label.GetName()] = label.GetValue()
 	}
-	return labels["scenario"] == scenario && labels["response"] == response
+	for name, value := range want {
+		if labels[name] != value {
+			return false
+		}
+	}
+	return true
 }
 
 // TestMockProcessor_NoMatch tests behavior when no scenario matches.

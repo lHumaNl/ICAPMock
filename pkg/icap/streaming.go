@@ -14,6 +14,7 @@ import (
 const (
 	StreamFinishComplete = "complete"
 	StreamFinishFIN      = "fin"
+	StreamFinishTerm     = "term"
 	StreamFinishWeighted = "weighted"
 )
 
@@ -27,21 +28,23 @@ type IntnRandom interface{ Intn(n int) int }
 //
 //nolint:govet // field order groups injectable dependencies before scalar settings.
 type BodyStream struct {
-	Reader          io.Reader
-	Payload         StreamPayload
-	Rand            IntnRandom
-	FinishMode      string
-	Sleep           func(time.Duration)
-	ChunkSize       int
-	ChunkSizeMax    int
-	CompletePercent int
-	FinPercent      int
-	FinAfterBytes   int64
-	TotalBytes      int64
-	Delay           time.Duration
-	DelayMax        time.Duration
-	Duration        time.Duration
-	FinAfterTime    time.Duration
+	Reader           io.Reader
+	Payload          StreamPayload
+	Rand             IntnRandom
+	FinishMode       string
+	Sleep            func(time.Duration)
+	ChunkSize        int
+	ChunkSizeMax     int
+	CompletePercent  int
+	FinPercent       int
+	FinAfterBytes    int64
+	FinAfterBytesSet bool
+	TotalBytes       int64
+	Delay            time.Duration
+	DelayMax         time.Duration
+	Duration         time.Duration
+	FinAfterTime     time.Duration
+	DelayStopAfter   time.Duration
 }
 
 type flushWriter interface{ Flush() error }
@@ -140,7 +143,7 @@ func (s *BodyStream) writeChunks(w *countingWriter, reader io.Reader, mode strin
 				return bodyBytes, err
 			}
 			bodyBytes += int64(n)
-			s.sleepBetweenChunks(readErr)
+			s.sleepBetweenChunks(readErr, started)
 		}
 		if errors.Is(readErr, io.EOF) {
 			return bodyBytes, nil
@@ -165,7 +168,7 @@ func (s *BodyStream) readNext(reader io.Reader, buf []byte, written int64, mode 
 }
 
 func (s *BodyStream) remainingFINBytes(written int64, mode string) int64 {
-	if mode != StreamFinishFIN || s.FinAfterBytes <= 0 {
+	if !partialFinishMode(mode) || !s.hasFINByteLimit() {
 		return -1
 	}
 	remaining := s.FinAfterBytes - written
@@ -176,13 +179,21 @@ func (s *BodyStream) remainingFINBytes(written int64, mode string) int64 {
 }
 
 func (s *BodyStream) finTriggered(mode string, written int64, started time.Time) bool {
-	if mode != StreamFinishFIN {
+	if !partialFinishMode(mode) {
 		return false
 	}
-	if s.FinAfterBytes > 0 && written >= s.FinAfterBytes {
+	if s.hasFINByteLimit() && written >= s.FinAfterBytes {
 		return true
 	}
 	return s.FinAfterTime > 0 && time.Since(started) >= s.FinAfterTime
+}
+
+func partialFinishMode(mode string) bool {
+	return mode == StreamFinishFIN || mode == StreamFinishTerm
+}
+
+func (s *BodyStream) hasFINByteLimit() bool {
+	return s.FinAfterBytesSet || s.FinAfterBytes > 0
 }
 
 func (s *BodyStream) resolveFinishMode() string {
@@ -195,9 +206,9 @@ func (s *BodyStream) resolveFinishMode() string {
 	return StreamFinishFIN
 }
 
-func (s *BodyStream) sleepBetweenChunks(readErr error) {
-	delay := s.nextDelay()
-	if readErr != nil || delay <= 0 {
+func (s *BodyStream) sleepBetweenChunks(readErr error, started time.Time) {
+	delay := s.nextSleepDelay(readErr, started)
+	if delay <= 0 {
 		return
 	}
 	if s.Sleep != nil {
@@ -205,6 +216,24 @@ func (s *BodyStream) sleepBetweenChunks(readErr error) {
 		return
 	}
 	time.Sleep(delay)
+}
+
+func (s *BodyStream) nextSleepDelay(readErr error, started time.Time) time.Duration {
+	if readErr != nil {
+		return 0
+	}
+	delay := s.nextDelay()
+	if delay <= 0 || s.DelayStopAfter <= 0 {
+		return delay
+	}
+	remaining := s.DelayStopAfter - time.Since(started)
+	if remaining <= 0 {
+		return 0
+	}
+	if delay > remaining {
+		return remaining
+	}
+	return delay
 }
 
 func (s *BodyStream) nextDelay() time.Duration {

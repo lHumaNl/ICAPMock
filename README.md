@@ -91,6 +91,7 @@ health:
 metrics:
   enabled: true
   port: 9090
+  endpoint_label_mode: default  # safe default; use path to label normalized paths
 
 logging:
   level: "info"
@@ -122,6 +123,7 @@ health:
 metrics:
   enabled: true
   port: 9090
+  endpoint_label_mode: default
 ```
 
 See `configs/example.yaml` for a full annotated configuration reference.
@@ -258,6 +260,7 @@ Mechanics:
 - **`use: <name>`** references a template at scenario, branch, or weighted-variant level.
 - **`defaults.use:`** is the file-wide fallback applied when no scenario matched.
 - **`set:` / `body:`** set the ICAP envelope headers and body. **`http_set:` / `http_body:` / `http_body_file:`** set the encapsulated HTTP response (what the origin client actually receives). `Content-Length` on the wrapped response is recomputed automatically from the body size unless you declare it explicitly in `http_set:` (use `"auto"` to force recompute).
+- **`block:`** optionally overrides the scenario metrics block label. If omitted, block is inferred from the selected concrete response: ICAP or wrapped HTTP 4xx/5xx status, `error:`, partial stream endings (`stream.end.mode: fin` / `term`, legacy `stream.finish.mode: fin`), or weighted FIN with `fin_percent > 0`.
 - **`branches:`** holds several `when` / `when_http` → response pairs inside one scenario; first match wins. If none match, the scenario is skipped and the registry moves to the next scenario.
 - **`endpoint:`** accepts a scalar or a list; each entry may include `{name}` captures that become regex groups in the path. Captured values are surfaced as `${name}` in `body`, `set`, and `http_headers`; use `$${` for a literal.
 - **`method:`** accepts a scalar or a list, allowing one scenario to serve REQMOD and RESPMOD on the same port without duplication.
@@ -275,8 +278,8 @@ scenarios:
     stream:
       source:
         from: request_http_body
-      chunks:
-        size: 16
+      throttle:
+        chunk_size: 16
 
   multipart-upload-stream:
     endpoint: /stream/multipart-upload
@@ -291,17 +294,18 @@ scenarios:
       fallback:
         body: "no matching multipart parts selected\n"
 
-  weighted-finish-stream:
-    endpoint: /stream/weighted-finish
+  partial-term-stream:
+    endpoint: /stream/partial-term
     status: 200
     stream:
       source: { from: body, body: "preview-approved" }
-      finish:
-        mode: weighted
-        complete_percent: 80
-        fin_percent: 20
-        fin:
-          close: clean
+      send:
+        percent: "40%"
+        duration: 250ms
+      throttle:
+        chunk_size: 4
+      end:
+        mode: term
 ```
 
 Notes:
@@ -312,8 +316,12 @@ Notes:
 - `fallback.raw_file` is for non-multipart raw source bodies only. For multipart selector misses,
   use `multipart.allow_empty: true` or an explicit safe fallback such as `fallback.body`,
   `fallback.body_file`, or a supported `fallback.from` source.
-- `finish.mode: fin` closes with a clean FIN; `finish.mode: weighted` randomly chooses between a
-  normal terminating chunk and a clean FIN using `complete_percent` + `fin_percent`.
+- Preferred stream controls are `send`, `throttle`, and `end`. `end.mode: complete` sends the full
+  body and permits `send.duration` and/or `throttle` pacing. `end.mode: fin` and `end.mode: term`
+  require a partial `send.percent` (`1..99`) plus `send.duration` or `throttle.every`, and never send
+  more than that selected percentage. `fin` closes without the terminating chunk; `term` sends the
+  terminating chunk after the selected partial body. Legacy `chunks` / `duration` / `finish` remain
+  supported for existing files, but cannot be mixed with `send` / `throttle` / `end`.
 
 ---
 
@@ -344,10 +352,13 @@ Prometheus metrics are served at `http://localhost:9090/metrics` by default.
 
 Available metrics include:
 
-- `icap_requests_total{server,method}` — total ICAP request count
+- `icap_requests_total{server,method}` — legacy ICAP request count for REQMOD/RESPMOD handlers
+- `icap_incoming_requests_total{server,method,endpoint,extension,result,icap_status,blocked}` — handled ICAP requests with bounded endpoint labels
 - `icap_request_duration_seconds{server,method}` — request latency histogram
+- `icap_response_size_bytes{server,method,body}` — response body size histogram, with `body="icap"` or `body="http"`
 - `icap_active_connections{server}` — current open connections per configured server
-- `icap_scenario_requests_total{server,scenario,response}` — scenario hits; unmatched default pass-through responses use `scenario="fallback"`
+- `icap_scenario_requests_total{server,scenario,response,block}` — scenario hits; unmatched default pass-through responses use `scenario="fallback"`
+- `icap_scenario_response_duration_seconds{server,scenario,response,block}` — scenario response latency histogram
 - `icap_scenarios_loaded{server}` — currently loaded scenario count
 - `icap_api_requests_total{server,route,method,status_code}` — management API calls with bounded route labels
 - `icap_api_errors_total{server,route,method,status_code,error_type}` — failed management API calls

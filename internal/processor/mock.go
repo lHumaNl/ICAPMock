@@ -171,6 +171,9 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		if wr.Stream != nil {
 			merged.Stream = wr.Stream
 		}
+		if wr.Block != nil {
+			merged.Block = wr.Block
+		}
 		if wr.Delay.Min > 0 || wr.Delay.Max > 0 {
 			selectedDelay = &wr.Delay
 		}
@@ -549,7 +552,13 @@ func (p *MockProcessor) recordScenarioMetrics(
 	if p.metrics == nil || response == nil {
 		return
 	}
-	p.metrics.RecordScenarioRequestForServer(p.server, scenario, scenarioResponseLabel(response), time.Since(start))
+	p.metrics.RecordScenarioRequestForServerWithBlock(
+		p.server,
+		scenario,
+		scenarioResponseLabel(response),
+		responseBlocks(response),
+		time.Since(start),
+	)
 }
 
 func scenarioResponseLabel(response *storage.ResponseTemplate) string {

@@ -36,6 +36,7 @@ type ServerCommand struct {
 	logFormat               string
 	logOutput               string
 	metricsPath             string
+	metricsEndpointMode     string
 	maxBodySize             int64
 	rateLimitRPS            float64
 	replaySpeed             float64
@@ -113,6 +114,7 @@ func NewServerCommand() *ServerCommand {
 	cmd.fs.StringVar(&cmd.metricsHost, "metrics.host", "", "Metrics server host (from config)")
 	cmd.fs.IntVar(&cmd.metricsPort, "metrics.port", 0, "Metrics server port (from config)")
 	cmd.fs.StringVar(&cmd.metricsPath, "metrics.path", "", "Metrics endpoint path (from config)")
+	cmd.fs.StringVar(&cmd.metricsEndpointMode, "metrics.endpoint-label-mode", "", "Endpoint label mode for incoming metrics: default, path")
 
 	// Register mock flags
 	cmd.fs.StringVar(&cmd.mockMode, "mock.mode", "", "Processing mode: echo, mock, script (from config)")
@@ -178,6 +180,7 @@ func NewServerCommand() *ServerCommand {
 	cmd.fs.StringVar(&cmd.metricsHost, "metrics-host", "", "Alias for --metrics.host")
 	cmd.fs.IntVar(&cmd.metricsPort, "metrics-port", 0, "Alias for --metrics.port")
 	cmd.fs.StringVar(&cmd.metricsPath, "metrics-path", "", "Alias for --metrics.path")
+	cmd.fs.StringVar(&cmd.metricsEndpointMode, "metrics-endpoint-label-mode", "", "Alias for --metrics.endpoint-label-mode")
 	cmd.fs.StringVar(&cmd.mockMode, "mock-mode", "", "Alias for --mock.mode")
 	cmd.fs.StringVar(&cmd.scenariosDir, "mock-scenarios-dir", "", "Alias for --mock.scenarios-dir")
 	cmd.fs.StringVar(&cmd.mockTimeout, "mock-timeout", "", "Alias for --mock.timeout")
@@ -506,6 +509,12 @@ func (c *ServerCommand) applyFeatureOverrides(cfg *config.Config) {
 }
 
 func (c *ServerCommand) applyMetricsAndMockOverrides(cfg *config.Config) {
+	c.applyMetricsOverrides(cfg)
+	c.applyMockOverrides(cfg)
+	c.applyChaosOverrides(cfg)
+}
+
+func (c *ServerCommand) applyMetricsOverrides(cfg *config.Config) {
 	if c.flagWasSet("metrics.enabled", "metrics-enabled") {
 		cfg.Metrics.Enabled = c.metricsEnabled
 	}
@@ -518,6 +527,12 @@ func (c *ServerCommand) applyMetricsAndMockOverrides(cfg *config.Config) {
 	if c.flagWasSet("metrics.path", "metrics-path") {
 		cfg.Metrics.Path = c.metricsPath
 	}
+	if c.flagWasSet("metrics.endpoint-label-mode", "metrics-endpoint-label-mode") {
+		cfg.Metrics.EndpointLabelMode = c.metricsEndpointMode
+	}
+}
+
+func (c *ServerCommand) applyMockOverrides(cfg *config.Config) {
 	if c.flagWasSet("mock.mode", "mock-mode") {
 		cfg.Mock.DefaultMode = c.mockMode
 	}
@@ -529,6 +544,9 @@ func (c *ServerCommand) applyMetricsAndMockOverrides(cfg *config.Config) {
 			cfg.Mock.DefaultTimeout = d
 		}
 	}
+}
+
+func (c *ServerCommand) applyChaosOverrides(cfg *config.Config) {
 	if c.flagWasSet("chaos.enabled", "chaos-enabled") {
 		cfg.Chaos.Enabled = c.chaosEnabled
 	}

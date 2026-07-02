@@ -329,6 +329,7 @@ func (l *Loader) loadMetricsEnv(cfg *Config) {
 	l.envStr("METRICS_HOST", &cfg.Metrics.Host)
 	l.envInt("METRICS_PORT", &cfg.Metrics.Port)
 	l.envStr("METRICS_PATH", &cfg.Metrics.Path)
+	l.envStr("METRICS_ENDPOINT_LABEL_MODE", &cfg.Metrics.EndpointLabelMode)
 }
 
 func (l *Loader) loadMockEnv(cfg *Config) {
@@ -522,6 +523,7 @@ func mergeMetricsConfig(dst, src *Config) {
 	mergeStr(&dst.Metrics.Host, src.Metrics.Host)
 	mergeInt(&dst.Metrics.Port, src.Metrics.Port)
 	mergeStr(&dst.Metrics.Path, src.Metrics.Path)
+	mergeStr(&dst.Metrics.EndpointLabelMode, src.Metrics.EndpointLabelMode)
 }
 
 func mergeMockConfig(dst, src *Config) {

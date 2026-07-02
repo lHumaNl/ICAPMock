@@ -10,12 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/icap-mock/icap-mock/internal/config"
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/logger"
+	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
@@ -513,8 +515,55 @@ func TestScriptProcessor_ResponseBodyIsExposedToScript(t *testing.T) {
 	assert.Equal(t, []byte("response-body"), resp.Body)
 }
 
+func TestScriptProcessor_RecordsBlockMetricFromReturnedStatus(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	require.NoError(t, err)
+
+	proc := NewScriptProcessor(scriptRegistry(`return 500;`), nil, 5*time.Second)
+	proc.SetMetrics(collector)
+
+	resp, err := proc.Process(context.Background(), scriptBodyRequest(icap.MethodREQMOD, nil))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, 500, resp.StatusCode)
+
+	labels := map[string]string{"scenario": "script-test", "response": "500", "block": "true"}
+	assert.Equal(t, float64(1), scenarioRequestMetricValueWithLabels(t, reg, labels))
+}
+
+func TestScriptProcessor_RecordsExplicitNonBlockMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	require.NoError(t, err)
+
+	proc := NewScriptProcessor(&mockScenarioRegistry{scenario: &storage.Scenario{
+		Name: "script-explicit-allow",
+		Response: storage.ResponseTemplate{
+			Script: `return 500;`,
+			Block:  processorBoolPtr(false),
+		},
+	}}, nil, 5*time.Second)
+	proc.SetMetrics(collector)
+
+	resp, err := proc.Process(context.Background(), scriptBodyRequest(icap.MethodREQMOD, nil))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	labels := map[string]string{"scenario": "script-explicit-allow", "response": "500", "block": "false"}
+	assert.Equal(t, float64(1), scenarioRequestMetricValueWithLabels(t, reg, labels))
+}
+
+func TestScriptProcessor_BlockMetricUsesHTTPResponseStatus(t *testing.T) {
+	resp := icap.NewResponse(icap.StatusOK)
+	resp.SetHTTPResponse(&icap.HTTPMessage{Status: "503", Header: icap.NewHeader()})
+
+	assert.True(t, scriptResponseBlocks(&storage.ResponseTemplate{}, &resp))
+	assert.False(t, scriptResponseBlocks(&storage.ResponseTemplate{Block: processorBoolPtr(false)}, &resp))
+}
+
 func scriptRegistry(script string) storage.ScenarioRegistry {
-	return &mockScenarioRegistry{scenario: &storage.Scenario{Response: storage.ResponseTemplate{Script: script}}}
+	return &mockScenarioRegistry{scenario: &storage.Scenario{Name: "script-test", Response: storage.ResponseTemplate{Script: script}}}
 }
 
 func scriptBodyRequest(method string, body io.Reader) *icap.Request {

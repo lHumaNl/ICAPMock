@@ -653,7 +653,35 @@ func (p *ScriptProcessor) recordScriptScenarioMetrics(
 	if p.metrics == nil || scenario == nil || template == nil {
 		return
 	}
-	p.metrics.RecordScenarioRequestForServer(p.server, scenario.Name, scriptResponseLabel(template, resp), time.Since(start))
+	p.metrics.RecordScenarioRequestForServerWithBlock(
+		p.server,
+		scenario.Name,
+		scriptResponseLabel(template, resp),
+		scriptResponseBlocks(template, resp),
+		time.Since(start),
+	)
+}
+
+func scriptResponseBlocks(template *storage.ResponseTemplate, resp **icap.Response) bool {
+	if template.Block != nil {
+		return *template.Block
+	}
+	if resp != nil && *resp != nil {
+		return icapResponseAutoBlocks(*resp)
+	}
+	return responseBlocks(template)
+}
+
+func icapResponseAutoBlocks(resp *icap.Response) bool {
+	return isBlockStatus(resp.StatusCode) || httpResponseAutoBlocks(resp.HTTPResponse)
+}
+
+func httpResponseAutoBlocks(resp *icap.HTTPMessage) bool {
+	if resp == nil {
+		return false
+	}
+	status, err := strconv.Atoi(resp.Status)
+	return err == nil && isBlockStatus(status)
 }
 
 func scriptResponseLabel(template *storage.ResponseTemplate, resp **icap.Response) string {

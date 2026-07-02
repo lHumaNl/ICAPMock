@@ -125,6 +125,7 @@ type ICAPServer struct {
 	logger                     *slog.Logger
 	metrics                    *metrics.Collector
 	metricsServerName          string
+	metricsEndpointLabelMode   string
 	goroutineConfig            GoroutineMonitorConfig
 	wg                         sync.WaitGroup
 	goroutinePeak              int
@@ -167,15 +168,16 @@ func NewServer(cfg *config.ServerConfig, pool *ConnectionPool, logger *slog.Logg
 	}
 
 	return &ICAPServer{
-		config:            cfg,
-		pool:              pool,
-		semaphore:         make(chan struct{}, cfg.MaxConnections),
-		stopChan:          make(chan struct{}),
-		logger:            logger,
-		metricsServerName: "default",
-		goroutineConfig:   DefaultGoroutineMonitorConfig(),
-		goroutineBaseline: runtime.NumGoroutine(),
-		goroutinePeak:     runtime.NumGoroutine(),
+		config:                   cfg,
+		pool:                     pool,
+		semaphore:                make(chan struct{}, cfg.MaxConnections),
+		stopChan:                 make(chan struct{}),
+		logger:                   logger,
+		metricsServerName:        "default",
+		metricsEndpointLabelMode: metrics.EndpointLabelModeDefault,
+		goroutineConfig:          DefaultGoroutineMonitorConfig(),
+		goroutineBaseline:        runtime.NumGoroutine(),
+		goroutinePeak:            runtime.NumGoroutine(),
 	}, nil
 }
 
@@ -203,6 +205,13 @@ func (s *ICAPServer) SetMetrics(m *metrics.Collector) {
 func (s *ICAPServer) SetMetricsServerName(name string) {
 	if name != "" {
 		s.metricsServerName = name
+	}
+}
+
+// SetMetricsEndpointLabelMode sets the endpoint label mode for incoming metrics.
+func (s *ICAPServer) SetMetricsEndpointLabelMode(mode string) {
+	if metrics.ValidEndpointLabelMode(mode) {
+		s.metricsEndpointLabelMode = mode
 	}
 }
 
@@ -605,6 +614,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			if err != nil {
 				resp = icap.NewResponseError(icap.StatusInternalServerError, err.Error())
 			}
+			s.recordIncomingRequest(req, resp)
 
 			requestClose := headerHasToken(req.Header, "Connection", "close")
 

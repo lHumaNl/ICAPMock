@@ -248,8 +248,23 @@ func (h *baseHandler) recordRequestMetrics(start time.Time, resp *icap.Response,
 	if err != nil {
 		h.getMetrics().RecordErrorForServer(h.server, errorLabel)
 	}
-	if resp != nil && len(resp.Body) > 0 {
-		h.getMetrics().RecordResponseSizeForServer(h.server, h.method, int64(len(resp.Body)))
+	h.recordResponseSizeMetrics(resp)
+}
+
+func (h *baseHandler) recordResponseSizeMetrics(resp *icap.Response) {
+	if resp == nil || h.getMetrics() == nil {
+		return
+	}
+	if len(resp.Body) > 0 {
+		h.getMetrics().RecordResponseBodySizeForServer(h.server, h.method, metrics.ResponseBodyICAP, int64(len(resp.Body)))
+	}
+	h.recordHTTPBodySize(resp.HTTPRequest)
+	h.recordHTTPBodySize(resp.HTTPResponse)
+}
+
+func (h *baseHandler) recordHTTPBodySize(message *icap.HTTPMessage) {
+	if message != nil && len(message.Body) > 0 {
+		h.getMetrics().RecordResponseBodySizeForServer(h.server, h.method, metrics.ResponseBodyHTTP, int64(len(message.Body)))
 	}
 }
 

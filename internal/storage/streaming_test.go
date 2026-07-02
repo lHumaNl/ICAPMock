@@ -71,6 +71,82 @@ scenarios:
 	}
 }
 
+func TestScenarioRegistry_Load_NewStreamControls(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{"complete", streamYAML(newCompleteStreamControls())},
+		{"fin-percent", streamYAML(newFINStreamControls("40%"))},
+		{"fin-percent-range", streamYAML(newFINStreamControls("30%-60%"))},
+		{"term-percent", streamYAML(newTermStreamControls("40%"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewScenarioRegistry()
+			if err := registry.Load(writeScenarioFile(t, tt.yaml)); err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestScenarioRegistry_Add_NormalizedNewStreamControls(t *testing.T) {
+	loaded := NewScenarioRegistry()
+	if err := loaded.Load(writeScenarioFile(t, streamYAML(newFINStreamControls("40%")))); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	dst := NewScenarioRegistry()
+	if err := dst.Add(firstNonDefaultScenario(t, loaded.List())); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+}
+
+func TestScenarioRegistry_Add_NormalizedStreamParts(t *testing.T) {
+	loaded := NewScenarioRegistry()
+	if err := loaded.Load(writeScenarioFile(t, streamTopLevelPartsYAML(t))); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	dst := NewScenarioRegistry()
+	if err := dst.Add(firstNonDefaultScenario(t, loaded.List())); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+}
+
+func TestScenarioRegistry_Load_InvalidNewStreamControls(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{"fin-no-percent", streamYAML("end:\n        mode: fin\n      throttle:\n        every: 1ms")},
+		{"term-no-percent", streamYAML("end:\n        mode: term\n      throttle:\n        every: 1ms")},
+		{"fin-no-pacing", streamYAML("send:\n        percent: 40\n      end:\n        mode: fin")},
+		{"term-no-pacing", streamYAML("send:\n        percent: 40\n      end:\n        mode: term")},
+		{"fin-zero-percent", streamYAML("send:\n        percent: 0\n        duration: 1ms\n      end:\n        mode: fin")},
+		{"term-full-percent", streamYAML(newTermStreamControls("100%"))},
+		{"fin-full-percent", streamYAML(newFINStreamControls("100%"))},
+		{"complete-percent", streamYAML("send:\n        percent: 40\n      end:\n        mode: complete")},
+		{"end-finish-conflict", streamYAML("end:\n        mode: fin\n      finish:\n        mode: fin")},
+		{"send-duration-conflict", streamYAML("send:\n        duration: 1ms\n      duration: 1ms")},
+		{"send-finish-conflict", streamYAML("send:\n        duration: 1ms\n      finish:\n        mode: fin")},
+		{"throttle-finish-conflict", streamYAML("throttle:\n        every: 1ms\n      finish:\n        mode: fin")},
+		{"throttle-size-conflict", streamYAML("throttle:\n        chunk_size: 4\n      chunks:\n        size: 2")},
+		{"throttle-every-conflict", streamYAML("throttle:\n        every: 1ms\n      chunks:\n        delay: 1ms")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewScenarioRegistry()
+			if err := registry.Load(writeScenarioFile(t, tt.yaml)); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestScenarioRegistry_Load_StreamCanonicalHTTPBodySources(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -199,6 +275,18 @@ func streamYAML(fragment string) string {
 	return "defaults:\n  method: REQMOD\n  endpoint: /scan\nscenarios:\n  s:\n    status: 200\n    stream:\n      source:\n        from: body\n        body: data\n      " + fragment + "\n"
 }
 
+func newCompleteStreamControls() string {
+	return "throttle:\n        chunk_size: 2\n        every: 1ms\n      send:\n        duration: 5ms\n      end:\n        mode: complete"
+}
+
+func newFINStreamControls(percent string) string {
+	return "send:\n        percent: \"" + percent + "\"\n        duration: 5ms\n      throttle:\n        chunk_size: 2\n      end:\n        mode: fin"
+}
+
+func newTermStreamControls(percent string) string {
+	return "send:\n        percent: \"" + percent + "\"\n        duration: 5ms\n      throttle:\n        chunk_size: 2\n      end:\n        mode: term"
+}
+
 func streamYAMLWithBody(body string) string {
 	return "defaults:\n  method: REQMOD\n  endpoint: /scan\nscenarios:\n  s:\n    status: 200\n    stream:\n      " + body + "\n"
 }
@@ -239,4 +327,15 @@ func writeScenarioFile(t *testing.T, content string) string {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	return path
+}
+
+func firstNonDefaultScenario(t *testing.T, scenarios []*Scenario) *Scenario {
+	t.Helper()
+	for _, scenario := range scenarios {
+		if scenario.Name != defaultScenarioName {
+			return scenario
+		}
+	}
+	t.Fatal("no non-default scenarios")
+	return nil
 }

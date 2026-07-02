@@ -24,23 +24,50 @@ const (
 	streamSourceBodyFile         = "body_file"
 	streamFinishComplete         = "complete"
 	streamFinishFIN              = "fin"
+	streamFinishTerm             = "term"
 	streamFinishWeighted         = "weighted"
 	defaultStreamChunkSize       = 1
 )
 
 // StreamConfig defines gradual chunked encapsulated body streaming.
+//
+//nolint:govet // field order follows the YAML schema groups for readability.
 type StreamConfig struct {
-	Fallback  StreamFallbackConfig  `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	Source    StreamSourceConfig    `yaml:"source,omitempty" json:"source,omitempty"`
-	Parts     []StreamPartConfig    `yaml:"parts,omitempty" json:"parts,omitempty"`
-	From      string                `yaml:"from,omitempty" json:"from,omitempty"`
-	Body      string                `yaml:"body,omitempty" json:"body,omitempty"`
-	BodyFile  string                `yaml:"body_file,omitempty" json:"body_file,omitempty"`
-	Multipart StreamMultipartConfig `yaml:"multipart,omitempty" json:"multipart,omitempty"`
-	Finish    StreamFinishConfig    `yaml:"finish,omitempty" json:"finish,omitempty"`
-	Chunks    StreamChunksConfig    `yaml:"chunks,omitempty" json:"chunks,omitempty"`
-	Duration  DurationSpec          `yaml:"duration,omitempty" json:"duration,omitempty"`
-	PartsSet  bool                  `yaml:"-" json:"-"`
+	Fallback        StreamFallbackConfig  `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Source          StreamSourceConfig    `yaml:"source,omitempty" json:"source,omitempty"`
+	Parts           []StreamPartConfig    `yaml:"parts,omitempty" json:"parts,omitempty"`
+	From            string                `yaml:"from,omitempty" json:"from,omitempty"`
+	Body            string                `yaml:"body,omitempty" json:"body,omitempty"`
+	BodyFile        string                `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	Multipart       StreamMultipartConfig `yaml:"multipart,omitempty" json:"multipart,omitempty"`
+	Send            StreamSendConfig      `yaml:"send,omitempty" json:"send,omitempty"`
+	Throttle        StreamThrottleConfig  `yaml:"throttle,omitempty" json:"throttle,omitempty"`
+	End             StreamEndConfig       `yaml:"end,omitempty" json:"end,omitempty"`
+	Finish          StreamFinishConfig    `yaml:"finish,omitempty" json:"finish,omitempty"`
+	Chunks          StreamChunksConfig    `yaml:"chunks,omitempty" json:"chunks,omitempty"`
+	Duration        DurationSpec          `yaml:"duration,omitempty" json:"duration,omitempty"`
+	PartsSet        bool                  `yaml:"-" json:"-"`
+	derivedControls bool                  `yaml:"-" json:"-"` // legacy fields were populated from send/throttle/end.
+}
+
+// StreamSendConfig controls how much data to send and over what duration.
+type StreamSendConfig struct {
+	Percent  PercentSpec  `yaml:"percent,omitempty" json:"percent,omitempty"`
+	Duration DurationSpec `yaml:"duration,omitempty" json:"duration,omitempty"`
+	IsSet    bool         `yaml:"-" json:"-"`
+}
+
+// StreamThrottleConfig controls chunk sizing and inter-chunk pacing.
+type StreamThrottleConfig struct {
+	ChunkSize SizeSpec     `yaml:"chunk_size,omitempty" json:"chunk_size,omitempty"`
+	Every     DurationSpec `yaml:"every,omitempty" json:"every,omitempty"`
+	IsSet     bool         `yaml:"-" json:"-"`
+}
+
+// StreamEndConfig controls whether the stream completes, closes with FIN, or terminates early.
+type StreamEndConfig struct {
+	Mode  string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	IsSet bool   `yaml:"-" json:"-"`
 }
 
 // StreamSourceConfig selects bytes to stream.
@@ -63,7 +90,7 @@ type StreamChunksConfig struct {
 	Delay DurationSpec `yaml:"delay,omitempty" json:"delay,omitempty"`
 }
 
-// StreamFinishConfig controls final chunk vs clean FIN termination.
+// StreamFinishConfig controls final chunk, clean FIN, and weighted termination.
 type StreamFinishConfig struct {
 	Mode            string          `yaml:"mode,omitempty" json:"mode,omitempty"`
 	Fin             StreamFINConfig `yaml:"fin,omitempty" json:"fin,omitempty"`
@@ -94,6 +121,13 @@ type SizeSpec struct {
 type DurationSpec struct {
 	Min   time.Duration
 	Max   time.Duration
+	IsSet bool
+}
+
+// PercentSpec is an inclusive percentage or percentage range.
+type PercentSpec struct {
+	Min   int
+	Max   int
 	IsSet bool
 }
 
@@ -162,10 +196,7 @@ func validateStreamConfig(s *StreamConfig, methods MethodList) error {
 	if err := validateStreamFallback(s.Fallback, methods); err != nil {
 		return err
 	}
-	if err := validateStreamTiming(s); err != nil {
-		return err
-	}
-	return validateStreamFinish(&s.Finish)
+	return validateStreamControls(s)
 }
 
 func validateStreamSources(s *StreamConfig, methods MethodList) error {
@@ -317,22 +348,32 @@ func validateStreamTiming(s *StreamConfig) error {
 	return nil
 }
 
-func validateStreamFinish(f *StreamFinishConfig) error {
+func validateStreamFinish(s *StreamConfig) error {
+	f := &s.Finish
 	if f.Mode == "" {
 		f.Mode = streamFinishComplete
 	}
 	if !validFinishMode(f.Mode) {
-		return fmt.Errorf("finish.mode must be complete, fin, or weighted")
+		return fmt.Errorf("finish.mode must be complete, fin, term, or weighted")
 	}
 	switch f.Mode {
 	case streamFinishComplete:
 		return validateCompleteFinish(f)
 	case streamFinishFIN:
 		return validateFINFinish(f)
+	case streamFinishTerm:
+		return validateTermFinish(s)
 	case streamFinishWeighted:
 		return validateWeightedFinish(f)
 	}
 	return nil
+}
+
+func validateTermFinish(s *StreamConfig) error {
+	if !s.derivedControls {
+		return fmt.Errorf("finish.mode term requires send/throttle/end controls")
+	}
+	return validatePartialEndControls(s, streamFinishTerm)
 }
 
 func validateCompleteFinish(f *StreamFinishConfig) error {
@@ -387,7 +428,8 @@ func hasFinishFINConfig(fin StreamFINConfig) bool {
 }
 
 func validFinishMode(mode string) bool {
-	return mode == streamFinishComplete || mode == streamFinishFIN || mode == streamFinishWeighted
+	return mode == streamFinishComplete || mode == streamFinishFIN ||
+		mode == streamFinishTerm || mode == streamFinishWeighted
 }
 
 func validPercent(v int) bool { return v >= 0 && v <= 100 }

@@ -50,6 +50,7 @@ type Collector struct {
 	// Request metrics
 	requestsTotal        *prometheus.CounterVec
 	requestDuration      *prometheus.HistogramVec
+	incomingRequests     *prometheus.CounterVec
 	requestsInFlight     *prometheus.GaugeVec
 	requestSize          *prometheus.HistogramVec
 	responseSize         *prometheus.HistogramVec
@@ -69,12 +70,12 @@ type Collector struct {
 	goroutinesCurrent prometheus.Gauge
 
 	// Mock metrics
-	scenariosMatched      *prometheus.CounterVec
-	scenarioRequests      *prometheus.CounterVec
-	scenarioResponseTime  *prometheus.GaugeVec
-	scenariosLoaded       *prometheus.GaugeVec
-	scenariosLoadedLabels map[string]struct{}
-	scenarioLatencyWindow *scenarioLatencyWindows
+	scenariosMatched         *prometheus.CounterVec
+	scenarioRequests         *prometheus.CounterVec
+	scenarioResponseDuration *prometheus.HistogramVec
+	scenariosLoaded          *prometheus.GaugeVec
+	scenariosLoadedLabels    map[string]struct{}
+	scenarioLabels           *scenarioLabelLimiter
 
 	// Chaos metrics
 	chaosInjected *prometheus.CounterVec
@@ -195,6 +196,14 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			},
 			[]string{"server", "method"},
 		),
+		incomingRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "icap",
+				Name:      "incoming_requests_total",
+				Help:      "Total number of handled ICAP requests by bounded endpoint labels and outcome.",
+			},
+			[]string{"server", "method", "endpoint", "extension", "result", "icap_status", "blocked"},
+		),
 		requestsInFlight: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "icap",
@@ -216,10 +225,10 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "response_size_bytes",
-				Help:      "Size of ICAP response bodies in bytes by server and method.",
+				Help:      "Size of ICAP and encapsulated HTTP response bodies in bytes by server, method, and body type.",
 				Buckets:   sizeBuckets,
 			},
-			[]string{"server", "method"},
+			[]string{"server", "method", "body"},
 		),
 		previewRequestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -304,17 +313,18 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.CounterOpts{
 				Namespace: "icap",
 				Name:      "scenario_requests_total",
-				Help:      "Total number of matched scenario requests by server, scenario and selected response.",
+				Help:      "Total number of matched scenario requests by server, scenario, selected response, and block outcome.",
 			},
-			[]string{"server", "scenario", "response"},
+			[]string{"server", "scenario", "response", "block"},
 		),
-		scenarioResponseTime: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
+		scenarioResponseDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
 				Namespace: "icap",
-				Name:      "scenario_response_time_seconds",
-				Help:      "Rolling scenario response-time statistics in seconds by server, scenario, response, and stat.",
+				Name:      "scenario_response_duration_seconds",
+				Help:      "Scenario response duration in seconds by server, scenario, selected response, and block outcome.",
+				Buckets:   durationBuckets,
 			},
-			[]string{"server", "scenario", "response", "stat"},
+			[]string{"server", "scenario", "response", "block"},
 		),
 		scenariosLoaded: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -324,10 +334,7 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			},
 			[]string{"server"},
 		),
-		scenarioLatencyWindow: newScenarioLatencyWindows(
-			scenarioLatencyWindowCapacity,
-			maxScenarioLatencySeries,
-		),
+		scenarioLabels: newScenarioLabelLimiter(maxScenarioLatencySeries),
 
 		// Chaos metrics
 		chaosInjected: prometheus.NewCounterVec(
@@ -696,6 +703,7 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 	reg.MustRegister(
 		c.requestsTotal,
 		c.requestDuration,
+		c.incomingRequests,
 		c.requestsInFlight,
 		c.requestSize,
 		c.responseSize,
@@ -709,7 +717,7 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		c.goroutinesCurrent,
 		c.scenariosMatched,
 		c.scenarioRequests,
-		c.scenarioResponseTime,
+		c.scenarioResponseDuration,
 		c.scenariosLoaded,
 		c.chaosInjected,
 		c.rateLimitExceeded,
@@ -785,6 +793,13 @@ func (c *Collector) RecordRequestDurationForServer(server, method string, durati
 	c.requestDuration.WithLabelValues(normalizedMetricLabel(server), method).Observe(duration.Seconds())
 }
 
+// RecordIncomingRequest increments the handled ICAP request counter.
+func (c *Collector) RecordIncomingRequest(server, method, endpoint, extension, result, status string, blocked bool) {
+	c.incomingRequests.WithLabelValues(
+		normalizedMetricLabel(server), method, endpoint, extension, result, status, blockMetricLabel(blocked),
+	).Inc()
+}
+
 // IncRequestsInFlight increments the gauge tracking requests currently being processed.
 // This should be called when a request starts being processed.
 //
@@ -827,12 +842,17 @@ func (c *Collector) RecordRequestSizeForServer(server, method string, sizeBytes 
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordResponseSize(method string, sizeBytes int64) {
-	c.RecordResponseSizeForServer(defaultServerMetricLabel, method, sizeBytes)
+	c.RecordResponseBodySizeForServer(defaultServerMetricLabel, method, ResponseBodyICAP, sizeBytes)
 }
 
-// RecordResponseSizeForServer records response body size by server and method.
+// RecordResponseSizeForServer records ICAP response body size by server and method.
 func (c *Collector) RecordResponseSizeForServer(server, method string, sizeBytes int64) {
-	c.responseSize.WithLabelValues(normalizedMetricLabel(server), method).Observe(float64(sizeBytes))
+	c.RecordResponseBodySizeForServer(server, method, ResponseBodyICAP, sizeBytes)
+}
+
+// RecordResponseBodySizeForServer records response body size by server, method, and body type.
+func (c *Collector) RecordResponseBodySizeForServer(server, method, body string, sizeBytes int64) {
+	c.responseSize.WithLabelValues(normalizedMetricLabel(server), method, normalizeBodyLabel(body)).Observe(float64(sizeBytes))
 }
 
 // RecordPreviewRequest increments the counter for preview requests.
@@ -934,12 +954,12 @@ func (c *Collector) RecordScenarioMatchedForServer(server, scenario string) {
 	c.scenariosMatched.WithLabelValues(server, scenario).Inc()
 }
 
-// RecordScenarioRequest records a matched scenario request and rolling latency stats.
+// RecordScenarioRequest records a matched scenario request and duration histogram sample.
 // The response label should be a response/template name when available, or a status code.
 // User-supplied reserved labels are escaped before cardinality admission.
 // New (scenario, response) pairs beyond the cardinality cap are aggregated into
 // the reserved __overflow__ labels before any scenario Prometheus vector is
-// touched. This keeps request counters and latency gauges bounded and consistent.
+// touched. This keeps request counters and latency histograms bounded and consistent.
 //
 // This method is safe for concurrent use.
 func (c *Collector) RecordScenarioRequest(scenario, response string, duration time.Duration) {
@@ -948,20 +968,39 @@ func (c *Collector) RecordScenarioRequest(scenario, response string, duration ti
 
 // RecordScenarioRequestForServer records a matched scenario request by server.
 func (c *Collector) RecordScenarioRequestForServer(server, scenario, response string, duration time.Duration) {
+	c.RecordScenarioRequestForServerWithBlock(server, scenario, response, false, duration)
+}
+
+// RecordScenarioRequestForServerWithBlock records a matched scenario request by server and block outcome.
+func (c *Collector) RecordScenarioRequestForServerWithBlock(
+	server, scenario, response string,
+	block bool,
+	duration time.Duration,
+) {
 	server = normalizedMetricLabel(server)
 	scenario = normalizedMetricLabel(scenario)
 	response = normalizedMetricLabel(response)
-	observation := c.scenarioLatencyWindow.observe(server, scenario, response, duration.Seconds())
-	c.scenariosMatched.WithLabelValues(observation.server, observation.scenario).Inc()
-	c.scenarioRequests.WithLabelValues(observation.server, observation.scenario, observation.response).Inc()
-	for _, stat := range observation.stats {
-		c.scenarioResponseTime.WithLabelValues(
-			observation.server,
-			observation.scenario,
-			observation.response,
-			stat.name,
-		).Set(stat.value)
+	blockLabel := blockMetricLabel(block)
+	if duration < 0 {
+		duration = 0
 	}
+	labels := c.scenarioLabels.admit(scenarioMetricKey{server, scenario, response, blockLabel})
+	c.scenariosMatched.WithLabelValues(labels.server, labels.scenario).Inc()
+	c.scenarioRequests.WithLabelValues(
+		labels.server,
+		labels.scenario,
+		labels.response,
+		labels.block,
+	).Inc()
+	c.scenarioResponseDuration.WithLabelValues(labels.server, labels.scenario, labels.response, labels.block).
+		Observe(duration.Seconds())
+}
+
+func blockMetricLabel(block bool) string {
+	if block {
+		return "true"
+	}
+	return "false"
 }
 
 // SetScenariosLoaded sets the current loaded scenario count for a server.

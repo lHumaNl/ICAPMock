@@ -196,6 +196,12 @@ metrics:
   # Type: string | Default: "/metrics"
   path: "/metrics"
 
+  # Controls the endpoint label on icap_incoming_requests_total.
+  # Use "default" to avoid high-cardinality series, or "path" to emit the
+  # normalized ICAP URI path without query parameters or fragments.
+  # Type: string | Values: "default", "path" | Default: "default"
+  endpoint_label_mode: "default"
+
 
 # =============================================================================
 # LOGGING — structured log output

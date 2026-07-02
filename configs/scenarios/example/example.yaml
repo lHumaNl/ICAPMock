@@ -55,11 +55,14 @@
 #     http_body_file: Encapsulated HTTP response body (from disk)
 #     stream:         Streamed encapsulated body (request/response passthrough,
 #                     multipart selection, clean FIN endings, etc.)
+#     block:          Optional allow/block metrics override (true or false)
 #
 # Block pages use the http_* fields so the origin client sees a real HTTP/1.1
 # response with proper Content-Type and a chunk-encoded body. Content-Length
 # on the wrapped response is recomputed automatically to match http_body
 # unless you pin it explicitly in http_set (use "auto" to force recompute).
+# If block is omitted, scenario metrics infer block=true from the selected
+# concrete response when it has ICAP/HTTP 4xx-5xx, error:, or FIN streaming.
 #
 # STREAMING NOTES
 # ---------------
@@ -146,6 +149,7 @@ defaults:
     blocked-page:                # synthesized HTTP block page
       status: 200                # ICAP: modified response follows
       http_status: 403           # wrapped HTTP status
+      block: true                # optional; auto-detected from http_status
       http_set:                  # wrapped HTTP headers
         Content-Type: "text/html"
       http_body: "<html><body><h1>Blocked</h1></body></html>"
@@ -495,9 +499,9 @@ scenarios:
     stream:
       source:
         from: request_http_body
-      chunks:
-        size: 16
-        delay: 5ms
+      throttle:
+        chunk_size: 16
+        every: 5ms
 
 
   # ---------------------------------------------------------------------------
@@ -512,18 +516,38 @@ scenarios:
     stream:
       source:
         from: response_http_body
-      chunks:
-        size: 16
-      finish:
+      send:
+        percent: "40%"
+        duration: 250ms
+      throttle:
+        chunk_size: 16
+      end:
         mode: fin
-        fin:
-          close: clean
-          after:
-            bytes: 64
 
 
   # ---------------------------------------------------------------------------
-  # 12. stream.parts — compose several sources in order
+  # 12. STREAM response_http_body + TERM — partial body with terminating chunk
+  # ---------------------------------------------------------------------------
+  # Trigger: RESPMOD to a dedicated endpoint. Demonstrates early valid chunked
+  # termination after a selected percentage of the wrapped response body.
+  stream-response-http-body-term:
+    method: RESPMOD
+    endpoint: /stream/response-http-body-term
+    status: 200
+    stream:
+      source:
+        from: response_http_body
+      send:
+        percent: "40%"
+        duration: 250ms
+      throttle:
+        chunk_size: 16
+      end:
+        mode: term
+
+
+  # ---------------------------------------------------------------------------
+  # 13. stream.parts — compose several sources in order
   # ---------------------------------------------------------------------------
   # The mock concatenates the wrapped HTTP response body, an inline marker, and
   # the raw ICAP response body source in one streamed output.
@@ -536,12 +560,12 @@ scenarios:
         - from: response_http_body
         - body: "\n-- streamed by icap-mock --\n"
         - from: response_body
-      chunks:
-        size: 12
+      throttle:
+        chunk_size: 12
 
 
   # ---------------------------------------------------------------------------
-  # 13. MULTIPART selectors + safe fallback
+  # 14. MULTIPART selectors + safe fallback
   # ---------------------------------------------------------------------------
   # Trigger: multipart/form-data upload on REQMOD. Select the form field named
   # "comment" plus file parts whose filename matches the regex. If that selector
@@ -559,12 +583,12 @@ scenarios:
           filename: ".*\\.(txt|bin)$"
       fallback:
         body: "no matching multipart parts selected\n"
-      chunks:
-        size: 16
+      throttle:
+        chunk_size: 16
 
 
   # ---------------------------------------------------------------------------
-  # 14. Weighted complete-vs-FIN ending
+  # 15. Weighted complete-vs-FIN ending
   # ---------------------------------------------------------------------------
   # 80% of responses end normally with the terminating chunk; 20% end with a
   # clean FIN after some bytes have been sent.

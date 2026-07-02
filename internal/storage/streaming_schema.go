@@ -295,6 +295,12 @@ func streamSourceEmpty(src StreamSourceConfig) bool {
 }
 
 func countPartSources(part StreamPartConfig) int {
+	if part.From == streamSourceBody && part.Body != "" && part.BodyFile == "" {
+		return 1
+	}
+	if part.From == streamSourceBodyFile && part.BodyFile != "" && part.Body == "" {
+		return 1
+	}
 	return boolCount(part.From != "", part.Body != "", part.BodyFile != "")
 }
 

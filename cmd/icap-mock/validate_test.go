@@ -30,13 +30,7 @@ func TestValidateMode_ValidConfig(t *testing.T) {
 
 	// Create a valid scenario file
 	scenarioFile := filepath.Join(scenariosDir, "test.yaml")
-	scenarioContent := `
-name: test-scenario
-triggers:
-  - service: REQMOD
-responses:
-  - status: 200
-`
+	scenarioContent := validValidationScenarioYAML("test-scenario")
 	if err := os.WriteFile(scenarioFile, []byte(scenarioContent), 0o644); err != nil {
 		t.Fatalf("Failed to write scenario file: %v", err)
 	}
@@ -292,7 +286,8 @@ func TestValidateMode_ScenarioFileCount(t *testing.T) {
 
 			for _, fileName := range tt.fileNames {
 				filePath := filepath.Join(scenariosDir, fileName)
-				if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
+				content := validValidationScenarioYAML(fileName)
+				if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 					t.Fatalf("Failed to write file %s: %v", fileName, err)
 				}
 			}
@@ -748,6 +743,7 @@ func TestValidateMode_MetricsConfiguration(t *testing.T) {
 		"host: 127.0.0.1",
 		"port: 9091",
 		"path: /custom-metrics",
+		"endpoint_label_mode: default",
 	}
 
 	for _, val := range expectedMetrics {
@@ -795,7 +791,8 @@ func TestValidateMode_MultipleScenarioFiles(t *testing.T) {
 	// Create multiple scenario files
 	for i := 1; i <= 5; i++ {
 		fileName := filepath.Join(scenariosDir, "scenario"+string(rune('0'+i))+".yaml")
-		if err := os.WriteFile(fileName, []byte("name: test"), 0o644); err != nil {
+		content := validValidationScenarioYAML("scenario" + string(rune('0'+i)))
+		if err := os.WriteFile(fileName, []byte(content), 0o644); err != nil {
 			t.Fatalf("Failed to write scenario file: %v", err)
 		}
 	}
