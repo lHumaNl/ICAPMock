@@ -108,6 +108,31 @@ func TestBodyStream_WriteTo_AppliesDelayBetweenChunks(t *testing.T) {
 	}
 }
 
+func TestBodyStream_WriteTo_AppliesStartDelayBeforeChunkDelays(t *testing.T) {
+	var sleeps []time.Duration
+	stream := &icap.BodyStream{
+		Reader:     strings.NewReader("abcd"),
+		ChunkSize:  2,
+		FinishMode: icap.StreamFinishComplete,
+		StartDelay: 5 * time.Millisecond,
+		Delay:      3 * time.Millisecond,
+		Sleep: func(delay time.Duration) {
+			sleeps = append(sleeps, delay)
+		},
+	}
+
+	assertBodyStreamOutput(t, stream, "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n")
+	want := []time.Duration{5 * time.Millisecond, 3 * time.Millisecond, 3 * time.Millisecond}
+	if len(sleeps) != len(want) {
+		t.Fatalf("sleep calls = %v, want %v", sleeps, want)
+	}
+	for i := range want {
+		if sleeps[i] != want[i] {
+			t.Fatalf("sleep calls = %v, want %v", sleeps, want)
+		}
+	}
+}
+
 func TestBodyStream_WriteTo_CompleteStopLimitSuppressesDelay(t *testing.T) {
 	var sleeps []time.Duration
 	stream := &icap.BodyStream{

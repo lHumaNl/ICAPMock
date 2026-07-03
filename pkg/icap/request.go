@@ -145,11 +145,15 @@ func lazyLoadBody(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]
 }
 
 func lazyLoadBodyLimited(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]byte, loaded *bool, bodyErr *error, maxBytes int64, errFmt string) ([]byte, error) { //nolint:gocritic // ptrToRefParam: pointer needed to read from caller's io.Reader field
+	return lazyLoadBodyLimitedWithCapacity(once, mu, reader, body, loaded, bodyErr, maxBytes, -1, errFmt)
+}
+
+func lazyLoadBodyLimitedWithCapacity(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, body *[]byte, loaded *bool, bodyErr *error, maxBytes, capacity int64, errFmt string) ([]byte, error) { //nolint:gocritic // ptrToRefParam: pointer needed to read from caller's io.Reader field
 	once.Do(func() {
 		if *reader == nil {
 			return
 		}
-		data, err := readAllLimited(*reader, maxBytes)
+		data, err := readAllLimitedWithCapacity(*reader, maxBytes, capacity)
 		mu.Lock()
 		if err != nil {
 			*bodyErr = fmt.Errorf(errFmt, err)
@@ -170,21 +174,6 @@ func lazyLoadBodyLimited(once *sync.Once, mu *sync.RWMutex, reader *io.Reader, b
 		return nil, fmt.Errorf("%w: max %d bytes", ErrBodyTooLarge, maxBytes)
 	}
 	return *body, *bodyErr
-}
-
-func readAllLimited(reader io.Reader, maxBytes int64) ([]byte, error) {
-	if maxBytes < 0 {
-		return io.ReadAll(reader)
-	}
-	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
-	data, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > maxBytes {
-		return nil, fmt.Errorf("%w: max %d bytes", ErrBodyTooLarge, maxBytes)
-	}
-	return data, nil
 }
 
 // HTTPMessage represents an embedded HTTP request or response.
@@ -219,14 +208,16 @@ type HTTPMessage struct {
 // For O(1) memory usage with large bodies, use BodyReader directly instead,
 // but note that direct BodyReader access bypasses thread-safety.
 func (m *HTTPMessage) GetBody() ([]byte, error) {
-	return lazyLoadBody(&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, "loading body: %w")
+	return lazyLoadBodyLimitedWithCapacity(
+		&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, -1, m.contentLengthHint(), "loading body: %w",
+	)
 }
 
 // GetBodyLimited returns the body content without reading more than maxBytes+1
 // from BodyReader. It stores ErrBodyTooLarge for oversized lazy-loaded bodies.
 func (m *HTTPMessage) GetBodyLimited(maxBytes int64) ([]byte, error) {
-	return lazyLoadBodyLimited(
-		&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, maxBytes, "loading body: %w",
+	return lazyLoadBodyLimitedWithCapacity(
+		&m.bodyOnce, &m.mu, &m.BodyReader, &m.Body, &m.bodyLoaded, &m.bodyErr, maxBytes, m.contentLengthHint(), "loading body: %w",
 	)
 }
 

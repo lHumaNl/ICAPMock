@@ -476,6 +476,16 @@ type ServerConfig struct {
 	TrustedProxies      []string  `yaml:"trusted_proxies" json:"trusted_proxies"`
 }
 
+// EffectiveMaxBodySize returns the configured body size limit.
+// An explicit max_body_size: 0 means unlimited; a zero value that was never
+// configured falls back to defaultLimit for manually constructed configs.
+func (c ServerConfig) EffectiveMaxBodySize(defaultLimit int64) int64 {
+	if c.MaxBodySize == 0 && !c.maxBodySizeSet {
+		return defaultLimit
+	}
+	return c.MaxBodySize
+}
+
 func applyJSONMaxBodySize(raw json.RawMessage, value *int64, present *bool) error {
 	if len(raw) == 0 {
 		return nil

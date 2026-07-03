@@ -87,7 +87,7 @@ func bufferedStreamPayload(stream *storage.StreamConfig, req *icap.Request, limi
 	if err != nil {
 		return nil, err
 	}
-	return icap.NewBytesStreamPayload(body), nil
+	return icap.NewBorrowedBytesStreamPayload(body), nil
 }
 
 func rawHTTPBodyStreamPayload(from string, req *icap.Request, limit int64) (icap.StreamPayload, error) {
@@ -95,8 +95,11 @@ func rawHTTPBodyStreamPayload(from string, req *icap.Request, limit int64) (icap
 	if err != nil {
 		return nil, err
 	}
-	payload, err := icap.NewHTTPMessageBodyStreamPayload(msg, limit)
-	return payload, streamBodyReadError(err, limit)
+	body, err := httpMessageBody(msg, limit)
+	if err != nil {
+		return nil, err
+	}
+	return icap.NewBorrowedBytesStreamPayload(body), nil
 }
 
 func streamSourcePayload(
@@ -319,14 +322,41 @@ func httpResponseBody(req *icap.Request, limit int64) ([]byte, error) {
 }
 
 func httpMessageBody(msg *icap.HTTPMessage, limit int64) ([]byte, error) {
-	if streamBodyLimitUnlimited(limit) {
-		return msg.GetBody()
+	if httpBodySizeExceedsLimit(msg, limit) {
+		return nil, streamBodyLimitError(limit)
 	}
-	body, err := msg.GetBodyLimited(limit)
+
+	var (
+		body []byte
+		err  error
+	)
+	if streamBodyLimitUnlimited(limit) {
+		body, err = msg.GetBody()
+	} else {
+		body, err = msg.GetBodyLimited(limit)
+	}
 	if err != nil {
 		return nil, streamBodyReadError(err, limit)
 	}
+	msg.SetLoadedBody(body)
 	return body, nil
+}
+
+func httpBodySizeExceedsLimit(msg *icap.HTTPMessage, limit int64) bool {
+	size, ok := httpBodyContentLength(msg)
+	return ok && !streamBodyLimitUnlimited(limit) && size > limit
+}
+
+func httpBodyContentLength(msg *icap.HTTPMessage) (int64, bool) {
+	if msg == nil || msg.Header == nil {
+		return 0, false
+	}
+	value, ok := msg.Header.Get("Content-Length")
+	if !ok {
+		return 0, false
+	}
+	size, err := strconv.ParseInt(value, 10, 64)
+	return size, err == nil && size >= 0
 }
 
 func readStreamFile(path string, limit int64) ([]byte, error) {
@@ -407,6 +437,8 @@ func newBodyStream(cfg *storage.StreamConfig, payload icap.StreamPayload) (*icap
 		FinAfterBytes:    finAfterBytes,
 		FinAfterBytesSet: finAfterBytesSet,
 		FinAfterTime:     finAfterTime,
+		StartDelay:       cfg.StartDelay.Min,
+		StartDelayMax:    cfg.StartDelay.Max,
 		DelayStopAfter:   resolveDelayStopAfter(cfg),
 		TotalBytes:       streamTotalBytes(cfg, size, finAfterBytes, finAfterBytesSet),
 	}

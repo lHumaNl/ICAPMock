@@ -651,6 +651,29 @@ func TestMockProcessor_StreamResponseBody(t *testing.T) {
 	}
 }
 
+func TestMockProcessor_PassThroughSharesBodyWithoutMutatingRequest(t *testing.T) {
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(passThroughRESPMODScenario()); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	req := createTestRESPMODRequest(t)
+	original := string(req.HTTPResponse.Body)
+
+	resp, err := NewMockProcessor(registry, createTestLogger(t)).Process(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if &resp.HTTPResponse.Body[0] != &req.HTTPResponse.Body[0] {
+		t.Fatal("pass-through body was copied instead of shared")
+	}
+	if _, err := resp.WriteTo(&bytes.Buffer{}); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if string(req.HTTPResponse.Body) != original {
+		t.Fatalf("request body mutated: got %q, want %q", string(req.HTTPResponse.Body), original)
+	}
+}
+
 func TestMockProcessor_StreamFINModeSetsConnectionClose(t *testing.T) {
 	registry := storage.NewScenarioRegistry()
 	if err := registry.Add(responseBodyStreamScenario(icap.StreamFinishFIN)); err != nil {
@@ -728,6 +751,15 @@ func responseBodyStreamScenario(mode string) *storage.Scenario {
 				Finish: finish,
 			},
 		},
+		Priority: 100,
+	}
+}
+
+func passThroughRESPMODScenario() *storage.Scenario {
+	return &storage.Scenario{
+		Name:     "pass-through-response-body",
+		Match:    storage.MatchRule{Methods: []string{icap.MethodRESPMOD}},
+		Response: storage.ResponseTemplate{ICAPStatus: 200},
 		Priority: 100,
 	}
 }

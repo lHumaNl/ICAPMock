@@ -3,12 +3,9 @@
 package icap
 
 import (
-	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
-	"net/textproto"
 	"strconv"
 	"strings"
 
@@ -187,15 +184,7 @@ func cloneHTTPMessage(m *HTTPMessage) *HTTPMessage {
 
 // WriteTo writes the response to an io.Writer.
 func (r *Response) WriteTo(w io.Writer) (int64, error) {
-	if r.hasBodyStream() {
-		return r.writeStreamingTo(w)
-	}
-
-	buf := pool.ResponseBufferPool.Get()
-	defer pool.ResponseBufferPool.Put(buf)
-
-	r.writeToBuffer(buf)
-	return buf.WriteTo(w)
+	return r.writeDirectTo(w)
 }
 
 // writeToBuffer writes the response content to a bytes.Buffer.
@@ -293,6 +282,7 @@ func (r *Response) BuildEncapsulatedHeader() string {
 		offset += r.calculateHTTPMessageSize(r.HTTPRequest, true)
 		if hasHTTPMessageBody(r.HTTPRequest) {
 			parts = append(parts, fmt.Sprintf("req-body=%d", offset))
+			offset += calculateHTTPMessageBodySize(r.HTTPRequest)
 		}
 	}
 
@@ -338,29 +328,19 @@ func (r *Response) calculateHTTPMessageSize(m *HTTPMessage, isRequest bool) int 
 	return size
 }
 
-func (r *Response) hasBodyStream() bool {
-	return (r.HTTPRequest != nil && r.HTTPRequest.BodyStream != nil) ||
-		(r.HTTPResponse != nil && r.HTTPResponse.BodyStream != nil)
-}
-
 func hasHTTPMessageBody(m *HTTPMessage) bool {
 	return len(m.Body) > 0 || m.BodyStream != nil
 }
 
-func (r *Response) writeStreamingTo(w io.Writer) (int64, error) {
-	cw := &countingWriter{w: w}
-	buf := pool.ResponseBufferPool.Get()
-	defer pool.ResponseBufferPool.Put(buf)
+func calculateHTTPMessageBodySize(m *HTTPMessage) int {
+	if len(m.Body) > 0 {
+		return chunkedEncodedSize(len(m.Body))
+	}
+	return 0
+}
 
-	r.writeEnvelopeToBuffer(buf)
-	if err := r.writeStreamingMessage(cw, buf, r.HTTPRequest, true); err != nil {
-		return cw.n, err
-	}
-	if err := r.writeStreamingMessage(cw, buf, r.HTTPResponse, false); err != nil {
-		return cw.n, err
-	}
-	_, err := cw.Write(buf.Bytes())
-	return cw.n, err
+func chunkedEncodedSize(bodySize int) int {
+	return len(strconv.FormatInt(int64(bodySize), 16)) + bodySize + len("\r\n\r\n0\r\n\r\n")
 }
 
 func (r *Response) writeEnvelopeToBuffer(buf *bytes.Buffer) {
@@ -373,29 +353,15 @@ func (r *Response) writeEnvelopeToBuffer(buf *bytes.Buffer) {
 	if r.Header != nil {
 		r.Header.WriteToBuffer(buf)
 	}
-	if encap := r.BuildEncapsulatedHeader(); encap != "" {
+	if r.HTTPRequest != nil || r.HTTPResponse != nil {
+		encap := r.BuildEncapsulatedHeader()
+		if encap == "" {
+			buf.WriteString("\r\n")
+			return
+		}
 		buf.WriteString("Encapsulated: " + encap + "\r\n")
 	}
 	buf.WriteString("\r\n")
-}
-
-func (r *Response) writeStreamingMessage(cw *countingWriter, buf *bytes.Buffer, m *HTTPMessage, isReq bool) error {
-	if m == nil {
-		return nil
-	}
-	r.writeHTTPMessageHead(buf, m, isReq)
-	if m.BodyStream == nil {
-		if len(m.Body) > 0 {
-			return WriteChunkedBody(buf, m.Body)
-		}
-		return nil
-	}
-	if _, err := cw.Write(buf.Bytes()); err != nil {
-		return err
-	}
-	buf.Reset()
-	_, err := m.BodyStream.WriteTo(cw)
-	return err
 }
 
 // WriteChunkedBody writes the body using chunked transfer encoding.
@@ -422,73 +388,4 @@ func (r *Response) String() string {
 
 	r.writeToBuffer(buf)
 	return buf.String()
-}
-
-// MaxResponseBodySize is the maximum allowed size for reading response bodies (100 MB).
-const MaxResponseBodySize = 100 * 1024 * 1024
-
-// ReadResponse reads and parses an ICAP response from an io.Reader.
-func ReadResponse(r io.Reader) (*Response, error) { //nolint:gocyclo // ICAP response parsing is inherently sequential
-	data, err := io.ReadAll(io.LimitReader(r, MaxResponseBodySize))
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse status line
-	lines := bytes.SplitN(data, []byte("\r\n"), 2)
-	if len(lines) < 1 {
-		return nil, fmt.Errorf("invalid response: empty")
-	}
-
-	statusLine := string(lines[0])
-	parts := strings.SplitN(statusLine, " ", 3)
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("invalid status line: %s", statusLine)
-	}
-
-	// Parse version and status code
-	proto := parts[0]
-	statusCode, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("invalid status code: %s", parts[1])
-	}
-
-	resp := NewResponse(statusCode)
-	resp.Proto = proto
-
-	// Parse headers and body from remainder
-	if len(lines) < 2 || len(lines[1]) == 0 {
-		return resp, nil
-	}
-
-	// Use textproto to parse ICAP headers
-	tp := textproto.NewReader(bufio.NewReader(bytes.NewReader(lines[1])))
-	headerMap, err := tp.ReadMIMEHeader()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("reading headers: %w", err)
-	}
-
-	for k, v := range headerMap {
-		resp.Header[CanonicalHeaderKey(k)] = v
-	}
-
-	// Parse Encapsulated header if present
-	if encapStr, exists := resp.Header.Get("Encapsulated"); exists {
-		encap, err := ParseEncapsulatedHeader(encapStr)
-		if err != nil {
-			return nil, fmt.Errorf("parsing Encapsulated header: %w", err)
-		}
-
-		// Read the body: everything after headers (after the blank line)
-		// Find the blank line that separates headers from body
-		headerEnd := bytes.Index(lines[1], []byte("\r\n\r\n"))
-		if headerEnd >= 0 {
-			bodyData := lines[1][headerEnd+4:]
-			if len(bodyData) > 0 && !encap.IsEmpty() && encap.NullBody == encapNotSet {
-				resp.Body = bodyData
-			}
-		}
-	}
-
-	return resp, nil
 }

@@ -5,6 +5,7 @@ package icap_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -261,6 +262,47 @@ func TestResponseWithHTTPResponse(t *testing.T) {
 	}
 }
 
+func TestResponseWriteToDirectMatchesBufferedString(t *testing.T) {
+	resp := icap.NewResponse(200)
+	resp.SetHTTPResponse(&icap.HTTPMessage{
+		Proto:      "HTTP/1.1",
+		Status:     "201",
+		StatusText: "Created",
+		Header:     icap.Header{"Content-Type": {"text/plain"}},
+		Body:       []byte("direct body"),
+	})
+
+	var out bytes.Buffer
+	written, err := resp.WriteTo(&out)
+	if err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if written != int64(out.Len()) {
+		t.Fatalf("WriteTo() bytes = %d, len = %d", written, out.Len())
+	}
+	if got, want := out.String(), resp.String(); got != want {
+		t.Fatalf("direct output mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestReleaseBodiesClearsBodyReferences(t *testing.T) {
+	req := &icap.Request{Body: []byte("icap"), BodyReader: strings.NewReader("raw")}
+	req.HTTPRequest = &icap.HTTPMessage{Body: []byte("req"), BodyReader: strings.NewReader("http")}
+	resp := icap.NewResponse(200)
+	resp.Body = []byte("resp")
+	resp.HTTPResponse = &icap.HTTPMessage{Body: []byte("http-resp"), BodyStream: &icap.BodyStream{}}
+
+	req.ReleaseBodies()
+	resp.ReleaseBodies()
+
+	if req.Body != nil || req.BodyReader != nil || req.HTTPRequest.Body != nil || req.HTTPRequest.BodyReader != nil {
+		t.Fatal("request body references were not released")
+	}
+	if resp.Body != nil || resp.HTTPResponse.Body != nil || resp.HTTPResponse.BodyStream != nil {
+		t.Fatal("response body references were not released")
+	}
+}
+
 // TestResponseClone tests cloning a response.
 func TestResponseClone(t *testing.T) {
 	original := icap.NewResponse(200)
@@ -395,6 +437,47 @@ func TestResponseBuildEncapsulated(t *testing.T) {
 	if !strings.Contains(encap, "req-hdr") {
 		t.Errorf("Encapsulated header should contain req-hdr: %s", encap)
 	}
+}
+
+func TestResponseWriteToOffsetsRequestBodyBeforeHTTPResponse(t *testing.T) {
+	resp := icap.NewResponse(icap.StatusOK)
+	resp.HTTPRequest = &icap.HTTPMessage{
+		Method: "POST", URI: "/upload", Proto: "HTTP/1.1",
+		Header: icap.Header{"Host": {"origin.example"}}, Body: []byte("abcde"),
+	}
+	resp.HTTPResponse = &icap.HTTPMessage{
+		Proto: "HTTP/1.1", Status: "200", StatusText: "OK", Header: icap.NewHeader(),
+	}
+
+	var buf bytes.Buffer
+	if _, err := resp.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	body := responseEncapsulatedBody(t, buf.String())
+	encap := responseEncapsulatedHeader(t, buf.String())
+	if !strings.Contains(encap, fmt.Sprintf("res-hdr=%d", strings.Index(body, "HTTP/1.1 200 OK"))) {
+		t.Fatalf("Encapsulated = %q does not match body %q", encap, body)
+	}
+}
+
+func responseEncapsulatedBody(t *testing.T, output string) string {
+	t.Helper()
+	parts := strings.SplitN(output, "\r\n\r\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("response missing header terminator: %q", output)
+	}
+	return parts[1]
+}
+
+func responseEncapsulatedHeader(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(output, "\r\n") {
+		if strings.HasPrefix(line, "Encapsulated: ") {
+			return strings.TrimPrefix(line, "Encapsulated: ")
+		}
+	}
+	t.Fatalf("response missing Encapsulated header: %q", output)
+	return ""
 }
 
 // TestResponseWriteChunkedBody tests writing body with chunked encoding.

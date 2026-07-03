@@ -69,6 +69,17 @@ func TestServerMaxBodySizeExplicitZeroOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestServerMaxBodySizeEnvZeroOverridesDefault(t *testing.T) {
+	t.Setenv("ICAP_SERVER_MAX_BODY_SIZE", "0")
+	cfg, err := NewLoader().Load(LoadOptions{})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Server.MaxBodySize != 0 {
+		t.Fatalf("Server.MaxBodySize = %d, want 0", cfg.Server.MaxBodySize)
+	}
+}
+
 func TestMultiServerDefaultsMaxBodySizeExplicitZero(t *testing.T) {
 	cfg := loadConfigYAML(t, "defaults:\n  max_body_size: 0\n"+multiServerYAML("av", ""))
 	serverCfg := multiServerConfig(cfg, "av")

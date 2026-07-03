@@ -45,6 +45,7 @@ type StreamConfig struct {
 	End             StreamEndConfig       `yaml:"end,omitempty" json:"end,omitempty"`
 	Finish          StreamFinishConfig    `yaml:"finish,omitempty" json:"finish,omitempty"`
 	Chunks          StreamChunksConfig    `yaml:"chunks,omitempty" json:"chunks,omitempty"`
+	StartDelay      DurationSpec          `yaml:"start_delay,omitempty" json:"start_delay,omitempty"`
 	Duration        DurationSpec          `yaml:"duration,omitempty" json:"duration,omitempty"`
 	PartsSet        bool                  `yaml:"-" json:"-"`
 	derivedControls bool                  `yaml:"-" json:"-"` // legacy fields were populated from send/throttle/end.
@@ -344,6 +345,9 @@ func validateStreamTiming(s *StreamConfig) error {
 	}
 	if s.Chunks.Delay.IsSet && s.Duration.IsSet {
 		return fmt.Errorf("chunks.delay and duration are mutually exclusive")
+	}
+	if s.StartDelay.IsSet && s.StartDelay.Min <= 0 {
+		return fmt.Errorf("start_delay must be positive")
 	}
 	return nil
 }

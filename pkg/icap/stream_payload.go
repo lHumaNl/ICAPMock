@@ -69,6 +69,13 @@ type maxBytesReadCloser struct {
 // NewBytesStreamPayload creates a replayable byte-backed stream payload.
 func NewBytesStreamPayload(body []byte) StreamPayload {
 	data := bytes.Clone(body)
+	return NewBorrowedBytesStreamPayload(data)
+}
+
+// NewBorrowedBytesStreamPayload creates a replayable payload without copying body.
+// The caller must keep body immutable for the payload's lifetime.
+func NewBorrowedBytesStreamPayload(body []byte) StreamPayload {
+	data := body
 	return NewReplayableStreamPayload(func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}, int64(len(data)))

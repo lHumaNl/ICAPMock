@@ -30,75 +30,7 @@ type streamHTTPSource struct {
 }
 
 func multipartStreamPayload(stream *storage.StreamConfig, req *icap.Request, limit int64) (icap.StreamPayload, error) {
-	if multipartRequiresBufferedResolution(stream) {
-		return bufferedStreamPayload(stream, req, limit)
-	}
-	msg, err := streamHTTPMessage(stream.Source.From, req)
-	if err != nil {
-		return nil, err
-	}
-	boundary, err := multipartBoundary(msg)
-	if err != nil {
-		return multipartContentTypeFallback(stream, req, limit, err)
-	}
-	return liveMultipartStreamPayload(stream, msg, boundary, req, limit)
-}
-
-func multipartRequiresBufferedResolution(stream *storage.StreamConfig) bool {
-	// raw_file and from fallbacks need access to the original raw source body
-	// after selector parsing has failed. A live multipart reader is consumed by
-	// that point, so keep the established buffered path for those fallbacks.
-	return stream.Fallback.RawFile.IsSet || stream.Fallback.From != ""
-}
-
-func liveMultipartStreamPayload(
-	stream *storage.StreamConfig,
-	msg *icap.HTTPMessage,
-	boundary string,
-	req *icap.Request,
-	limit int64,
-) (icap.StreamPayload, error) {
-	source, err := icap.NewHTTPMessageBodyStreamPayload(msg, limit)
-	if err != nil {
-		return nil, streamBodyReadError(err, limit)
-	}
-	var fallback icap.StreamPayload
-	if stream.Fallback.IsSet() {
-		fallback, err = multipartFallbackPayload(stream.Fallback, req, limit)
-		if err != nil {
-			return nil, err
-		}
-	}
-	cfg := stream.Multipart
-	return multipartSelectorPayload{source: source, fallback: fallback, cfg: &cfg, boundary: boundary, limit: limit}, nil
-}
-
-func multipartContentTypeFallback(
-	stream *storage.StreamConfig,
-	req *icap.Request,
-	limit int64,
-	contentTypeErr error,
-) (icap.StreamPayload, error) {
-	if stream.Fallback.IsSet() {
-		return multipartFallbackPayload(stream.Fallback, req, limit)
-	}
-	return nil, contentTypeErr
-}
-
-func multipartFallbackPayload(
-	fallback storage.StreamFallbackConfig,
-	req *icap.Request,
-	limit int64,
-) (icap.StreamPayload, error) {
-	switch {
-	case fallback.Body != "":
-		return inlineStreamPayload(fallback.Body, limit)
-	case fallback.BodyFile != "":
-		return fileStreamPayload(fallback.BodyFile, limit)
-	case fallback.From != "":
-		return rawHTTPBodyStreamPayload(fallback.From, req, limit)
-	}
-	return nil, fmt.Errorf("fallback is empty")
+	return bufferedStreamPayload(stream, req, limit)
 }
 
 func resolveMultipartStream(stream *storage.StreamConfig, req *icap.Request, limit int64) ([]byte, error) {

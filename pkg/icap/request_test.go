@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,43 @@ import (
 
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+func TestHTTPMessageGetBodyPreallocatesContentLength(t *testing.T) {
+	body := "preallocated"
+	msg := &icap.HTTPMessage{
+		Header:     icap.Header{"Content-Length": {strconv.Itoa(len(body))}},
+		BodyReader: strings.NewReader(body),
+	}
+
+	got, err := msg.GetBodyLimited(int64(len(body)))
+	if err != nil {
+		t.Fatalf("GetBodyLimited() error = %v", err)
+	}
+	if string(got) != body {
+		t.Fatalf("GetBodyLimited() = %q, want %q", string(got), body)
+	}
+	if cap(got) != len(body) {
+		t.Fatalf("body capacity = %d, want %d", cap(got), len(body))
+	}
+}
+
+func TestHTTPMessageGetBodyDoesNotTrustHugeContentLength(t *testing.T) {
+	msg := &icap.HTTPMessage{
+		Header:     icap.Header{"Content-Length": {strconv.FormatInt(1<<62, 10)}},
+		BodyReader: strings.NewReader("ok"),
+	}
+
+	got, err := msg.GetBody()
+	if err != nil {
+		t.Fatalf("GetBody() error = %v", err)
+	}
+	if string(got) != "ok" {
+		t.Fatalf("GetBody() = %q, want ok", string(got))
+	}
+	if cap(got) > 64*1024 {
+		t.Fatalf("body capacity = %d, want small allocation", cap(got))
+	}
+}
 
 // TestParseRequest tests parsing ICAP requests.
 func TestParseRequest(t *testing.T) {

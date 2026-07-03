@@ -543,7 +543,7 @@ func TestServerHonorsConnectionCloseAfterDrainingUnreadBody(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load())
 }
 
-func TestServerClosesConnectionAfterOversizedRESPMODBodyDrain(t *testing.T) {
+func TestServerClosesConnectionAfterOversizedRESPMODBodyReceive(t *testing.T) {
 	var calls atomic.Int32
 	srv := newConnectionLifecycleTestServerWithRESPMODConfig(t, time.Second, time.Second, 8, &calls)
 	defer srv.Stop(context.Background())
@@ -555,13 +555,10 @@ func TestServerClosesConnectionAfterOversizedRESPMODBodyDrain(t *testing.T) {
 
 	_, err = conn.Write([]byte(respmodChunkedRequest(srv.Addr().String(), "")))
 	require.NoError(t, err)
-	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
-	require.Contains(t, readICAPResponseStatus(t, reader), "200")
-	require.Equal(t, int32(1), calls.Load())
-
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
 	_, err = reader.ReadByte()
 	requireIdleCloseError(t, err)
+	require.Equal(t, int32(0), calls.Load())
 }
 
 func TestServerClosesConnectionWhenRESPMODBodyStallsPastReadTimeout(t *testing.T) {
@@ -575,8 +572,6 @@ func TestServerClosesConnectionWhenRESPMODBodyStallsPastReadTimeout(t *testing.T
 
 	_, err = conn.Write([]byte(respmodChunkedRequestWithBody(srv.Addr().String(), "", "5\r\nhel")))
 	require.NoError(t, err)
-	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
-	require.Contains(t, readICAPResponseStatus(t, reader), "200")
 
 	time.Sleep(350 * time.Millisecond)
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(500*time.Millisecond)))

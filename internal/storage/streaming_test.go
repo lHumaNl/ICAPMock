@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestScenarioRegistry_Load_StreamUseTemplate(t *testing.T) {
@@ -57,6 +58,7 @@ scenarios:
         from: request_body
       chunks:
         size: 1
+      start_delay: 2ms-4ms
       duration: 1ms
       finish:
         mode: complete
@@ -66,8 +68,12 @@ scenarios:
 	if err := registry.Load(scenarioFile); err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if registry.List()[0].Response.Stream == nil {
+	stream := registry.List()[0].Response.Stream
+	if stream == nil {
 		t.Fatal("expected stream config")
+	}
+	if stream.StartDelay.Min != 2*time.Millisecond || stream.StartDelay.Max != 4*time.Millisecond {
+		t.Fatalf("StartDelay = %v-%v, want 2ms-4ms", stream.StartDelay.Min, stream.StartDelay.Max)
 	}
 }
 
@@ -187,6 +193,7 @@ func TestScenarioRegistry_Load_InvalidStreamConfigs(t *testing.T) {
 		yaml string
 	}{
 		{"delay-with-duration", streamYAML("chunks:\n        delay: 1ms\n      duration: 1ms")},
+		{"zero-start-delay", streamYAML("start_delay: 0s")},
 		{"zero-chunk", streamYAML("chunks:\n        size: 0")},
 		{"bad-finish", streamYAML("finish:\n        mode: reset")},
 		{"bad-weight", streamYAML("finish:\n        mode: weighted\n        complete_percent: 70\n        fin_percent: 20")},

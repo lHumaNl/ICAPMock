@@ -131,6 +131,16 @@ func (s *ICAPServer) drainRequestBodies(conn *Connection, req *icap.Request) err
 	return drainRequestBodies(req, s.drainBodyLimit())
 }
 
+func (s *ICAPServer) receiveRequestBodies(conn *Connection, req *icap.Request) error {
+	if shouldDeferBodyReceive(req) {
+		return nil
+	}
+	if err := s.setActiveReadDeadline(conn); err != nil {
+		return err
+	}
+	return receiveRequestBodies(req, s.drainBodyLimit())
+}
+
 func (s *ICAPServer) setDrainReadDeadline(conn *Connection) error {
 	timeout := s.config.ReadTimeout
 	if timeout <= 0 {
@@ -140,10 +150,20 @@ func (s *ICAPServer) setDrainReadDeadline(conn *Connection) error {
 }
 
 func (s *ICAPServer) drainBodyLimit() int64 {
-	if s.config.MaxBodySize > 0 {
-		return s.config.MaxBodySize
-	}
-	return defaultDrainBodyLimit
+	return s.config.EffectiveMaxBodySize(defaultDrainBodyLimit)
+}
+
+func shouldDeferBodyReceive(req *icap.Request) bool {
+	return req != nil && req.IsPreviewMode()
+}
+
+func shouldDrainAfterResponse(req *icap.Request) bool {
+	return !shouldDeferBodyReceive(req) || requestBodiesLoaded(req)
+}
+
+func requestBodiesLoaded(req *icap.Request) bool {
+	return (req.HTTPRequest == nil || req.HTTPRequest.IsBodyLoaded()) &&
+		(req.HTTPResponse == nil || req.HTTPResponse.IsBodyLoaded()) && req.IsBodyLoaded()
 }
 
 func drainRequestBodies(req *icap.Request, maxBytes int64) error {
@@ -156,6 +176,20 @@ func drainRequestBodies(req *icap.Request, maxBytes int64) error {
 	}
 	if !hadHTTPBodyReader && shouldDrainRawBody(req) {
 		return drainRawChunkedBody(req, maxBytes)
+	}
+	return nil
+}
+
+func receiveRequestBodies(req *icap.Request, maxBytes int64) error {
+	hadHTTPBodyReader := hasHTTPBodyReader(req)
+	if err := receiveHTTPMessageBody(req.HTTPRequest, maxBytes, "HTTP request body"); err != nil {
+		return err
+	}
+	if err := receiveHTTPMessageBody(req.HTTPResponse, maxBytes, "HTTP response body"); err != nil {
+		return err
+	}
+	if !hadHTTPBodyReader && shouldDrainRawBody(req) {
+		return receiveRawChunkedBody(req, maxBytes)
 	}
 	return nil
 }
@@ -176,6 +210,25 @@ func drainHTTPMessageBody(message *icap.HTTPMessage, maxBytes int64, name string
 	return nil
 }
 
+func receiveHTTPMessageBody(message *icap.HTTPMessage, maxBytes int64, name string) error {
+	if message == nil || message.IsBodyLoaded() || message.BodyReader == nil {
+		return nil
+	}
+	body, err := loadHTTPMessageBody(message, maxBytes)
+	if err != nil {
+		return fmt.Errorf("receiving %s: %w", name, err)
+	}
+	message.SetLoadedBody(body)
+	return nil
+}
+
+func loadHTTPMessageBody(message *icap.HTTPMessage, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return message.GetBody()
+	}
+	return message.GetBodyLimited(maxBytes)
+}
+
 func shouldDrainRawBody(req *icap.Request) bool {
 	return req.BodyReader != nil && req.HTTPRequest == nil && req.HTTPResponse == nil &&
 		(req.Encapsulated.HasReqBody() || req.Encapsulated.HasResBody())
@@ -193,7 +246,42 @@ func drainRawChunkedBody(req *icap.Request, maxBytes int64) error {
 	return nil
 }
 
+func receiveRawChunkedBody(req *icap.Request, maxBytes int64) error {
+	if req.IsBodyLoaded() || req.BodyReader == nil {
+		return nil
+	}
+	reader := req.BodyReader
+	if _, ok := reader.(*icap.ChunkedReader); !ok {
+		reader = icap.NewChunkedReader(reader)
+	}
+	body, err := readLimitedBody(reader, maxBytes)
+	if err != nil {
+		return fmt.Errorf("receiving raw ICAP body: %w", err)
+	}
+	req.SetLoadedBody(body)
+	return nil
+}
+
+func readLimitedBody(reader io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return io.ReadAll(reader)
+	}
+	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if limited.N == 0 {
+		return nil, fmt.Errorf("%w: max %d bytes", ErrBodyTooLarge, maxBytes)
+	}
+	return body, nil
+}
+
 func drainLimited(reader io.Reader, maxBytes int64, name string) error {
+	if maxBytes <= 0 {
+		_, err := io.Copy(io.Discard, reader)
+		return err
+	}
 	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
 	if _, err := io.Copy(io.Discard, limited); err != nil {
 		return fmt.Errorf("draining %s: %w", name, err)

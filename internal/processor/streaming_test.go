@@ -97,22 +97,14 @@ func TestMockProcessor_StreamResponseBodyReadsOnlyLimit(t *testing.T) {
 	proc := NewMockProcessorWithMaxBodySize(registry, createTestLogger(t), limit)
 	resp, err := proc.Process(context.Background(), req)
 
-	if err != nil {
-		t.Fatalf("Process() error = %v", err)
+	if !errors.Is(err, errStreamSourceBodyTooLarge) {
+		t.Fatalf("Process() error = %v, want body limit error", err)
 	}
-	if reader.read != 0 {
-		t.Fatalf("read %d bytes before WriteTo, want 0", reader.read)
-	}
-	var out bytes.Buffer
-	_, err = resp.WriteTo(&out)
-	if !errors.Is(err, icap.ErrBodyTooLarge) {
-		t.Fatalf("WriteTo() error = %v, want body limit error", err)
+	if resp != nil {
+		t.Fatalf("Process() response = %v, want nil", resp)
 	}
 	if reader.read > limit+1 {
 		t.Fatalf("read %d bytes, want at most %d", reader.read, limit+1)
-	}
-	if strings.Contains(out.String(), "0\r\n\r\n") {
-		t.Fatalf("overflow response wrote final chunk: %q", out.String())
 	}
 }
 
@@ -150,13 +142,14 @@ func TestMockProcessor_UnknownSizeStreamClearsStaleContentLength(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if _, ok := resp.HTTPResponse.Header.Get("Content-Length"); ok {
-		t.Fatal("Content-Length remained on unknown-size stream response")
+	if got, ok := resp.HTTPResponse.Header.Get("Content-Length"); !ok || got != "4" {
+		t.Fatalf("Content-Length = %q, %v, want 4, true", got, ok)
 	}
-	assertNoBodyReadBeforeWrite(t, reader)
+	assertBodyReadDuringProcess(t, reader, 4)
+	assertBodyReaderCleared(t, req.HTTPRequest)
 }
 
-func TestMockProcessor_RequestHTTPBodyStreamsAfterWriteToStarts(t *testing.T) {
+func TestMockProcessor_RequestHTTPBodyStreamReadsDuringProcess(t *testing.T) {
 	reader := &fixedSizeCountingReader{remaining: 4}
 	req := createLazyREQMODRequest(t, reader)
 	resp := processSingleScenario(t, rawRequestHTTPBodyStreamScenario())
@@ -165,11 +158,12 @@ func TestMockProcessor_RequestHTTPBodyStreamsAfterWriteToStarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	assertNoBodyReadBeforeWrite(t, reader)
-	assertStreamWriteReadsBody(t, procResp, reader, 4)
+	assertBodyReadDuringProcess(t, reader, 4)
+	assertBodyReaderCleared(t, req.HTTPRequest)
+	assertStreamOutput(t, procResp, "2\r\nxx\r\n2\r\nxx\r\n0\r\n\r\n")
 }
 
-func TestMockProcessor_ResponseHTTPBodyStreamsAfterWriteToStarts(t *testing.T) {
+func TestMockProcessor_ResponseHTTPBodyStreamReadsDuringProcess(t *testing.T) {
 	reader := &fixedSizeCountingReader{remaining: 4}
 	req := createLazyRESPMODRequest(t, reader)
 	resp := processSingleScenario(t, rawResponseHTTPBodyStreamScenario())
@@ -178,8 +172,9 @@ func TestMockProcessor_ResponseHTTPBodyStreamsAfterWriteToStarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	assertNoBodyReadBeforeWrite(t, reader)
-	assertStreamWriteReadsBody(t, procResp, reader, 4)
+	assertBodyReadDuringProcess(t, reader, 4)
+	assertBodyReaderCleared(t, req.HTTPResponse)
+	assertStreamOutput(t, procResp, "2\r\nxx\r\n2\r\nxx\r\n0\r\n\r\n")
 }
 
 func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t *testing.T) {
@@ -187,6 +182,11 @@ func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t
 	scenario.Response.Stream.Chunks.Delay = storage.DurationSpec{
 		Min:   2 * time.Millisecond,
 		Max:   2 * time.Millisecond,
+		IsSet: true,
+	}
+	scenario.Response.Stream.StartDelay = storage.DurationSpec{
+		Min:   5 * time.Millisecond,
+		Max:   7 * time.Millisecond,
 		IsSet: true,
 	}
 	scenario.Response.Stream.Finish = storage.StreamFinishConfig{
@@ -212,6 +212,9 @@ func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t
 	}
 	if stream.Delay != 2*time.Millisecond {
 		t.Fatalf("Delay = %v, want %v", stream.Delay, 2*time.Millisecond)
+	}
+	if stream.StartDelay != 5*time.Millisecond || stream.StartDelayMax != 7*time.Millisecond {
+		t.Fatalf("StartDelay = %v-%v, want 5ms-7ms", stream.StartDelay, stream.StartDelayMax)
 	}
 	if stream.FinishMode != icap.StreamFinishFIN {
 		t.Fatalf("FinishMode = %q, want %q", stream.FinishMode, icap.StreamFinishFIN)
@@ -256,14 +259,16 @@ func TestMockProcessor_NewCompleteDurationWithThrottleSetsStopLimit(t *testing.T
 func TestMockProcessor_NewFINPercentRequiresKnownSize(t *testing.T) {
 	scenario := newRawPercentFINStreamScenario()
 	proc := processSingleScenario(t, scenario)
-	_, err := proc.Process(context.Background(), createLazyRESPMODRequest(t, strings.NewReader("abcd")))
-	cause := errors.Unwrap(err)
-	if err == nil || cause == nil || !strings.Contains(cause.Error(), "known stream source size") {
-		t.Fatalf("Process() error = %v, want known size error", err)
+	resp, err := proc.Process(context.Background(), createLazyRESPMODRequest(t, strings.NewReader("abcd")))
+	if err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if resp.HTTPResponse.BodyStream.FinAfterBytes != 1 {
+		t.Fatalf("FinAfterBytes = %d, want 1", resp.HTTPResponse.BodyStream.FinAfterBytes)
 	}
 }
 
-func TestMockProcessor_MultipartSelectorStreamsAfterWriteToStarts(t *testing.T) {
+func TestMockProcessor_MultipartSelectorReadsDuringProcess(t *testing.T) {
 	body, contentType := multipartTestBody(t)
 	reader := newProcessorByteCountingReader(body)
 	req := createLazyREQMODRequest(t, reader)
@@ -274,8 +279,9 @@ func TestMockProcessor_MultipartSelectorStreamsAfterWriteToStarts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	assertNoByteBodyReadBeforeWrite(t, reader)
-	assertStreamOutput(t, resp, "5\r\nhello\r\n3\r\nEXE\r\n0\r\n\r\n")
+	assertByteBodyReadDuringProcess(t, reader, int64(len(body)))
+	assertBodyReaderCleared(t, req.HTTPRequest)
+	assertStreamOutput(t, resp, "8\r\nhelloEXE\r\n0\r\n\r\n")
 }
 
 func TestMockProcessor_MultipartStreamingEnforcesSourceLimit(t *testing.T) {
@@ -285,13 +291,9 @@ func TestMockProcessor_MultipartStreamingEnforcesSourceLimit(t *testing.T) {
 	req.HTTPRequest.Header.Set("Content-Type", contentType)
 	proc := processSingleScenarioWithLimit(t, multipartSelectorStreamScenario(selectedMultipart()), 8)
 
-	resp, err := proc.Process(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Process() error = %v", err)
-	}
-	_, err = resp.WriteTo(&bytes.Buffer{})
+	_, err := proc.Process(context.Background(), req)
 	if !errors.Is(err, errStreamSourceBodyTooLarge) {
-		t.Fatalf("WriteTo() error = %v, want stream body limit error", err)
+		t.Fatalf("Process() error = %v, want stream body limit error", err)
 	}
 }
 
@@ -301,10 +303,7 @@ func TestMockProcessor_MultipartStreamingNoMatchModes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := createLazyMultipartREQMODRequest(t, body, contentType)
 			resp, err := processSingleScenario(t, tt.scenario).Process(context.Background(), req)
-			if err != nil {
-				t.Fatalf("Process() error = %v", err)
-			}
-			assertMultipartStreamingNoMatch(t, resp, tt.want, tt.wantErr)
+			assertMultipartStreamingNoMatch(t, resp, err, tt.want, tt.wantErr)
 		})
 	}
 }
@@ -325,7 +324,7 @@ func TestMockProcessor_MultipartRawFileFallbackRemainsBuffered(t *testing.T) {
 	}
 }
 
-func TestMockProcessor_LiveHTTPBodyStreamSecondWriteFails(t *testing.T) {
+func TestMockProcessor_BufferedHTTPBodyStreamWritesTwice(t *testing.T) {
 	reader := &fixedSizeCountingReader{remaining: 4}
 	proc := processSingleScenario(t, rawResponseHTTPBodyStreamScenario())
 	resp, err := proc.Process(context.Background(), createLazyRESPMODRequest(t, reader))
@@ -335,8 +334,8 @@ func TestMockProcessor_LiveHTTPBodyStreamSecondWriteFails(t *testing.T) {
 	if _, err := resp.WriteTo(&bytes.Buffer{}); err != nil {
 		t.Fatalf("first WriteTo() error = %v", err)
 	}
-	if _, err := resp.WriteTo(&bytes.Buffer{}); !errors.Is(err, icap.ErrStreamPayloadConsumed) {
-		t.Fatalf("second WriteTo() error = %v, want ErrStreamPayloadConsumed", err)
+	if _, err := resp.WriteTo(&bytes.Buffer{}); err != nil {
+		t.Fatalf("second WriteTo() error = %v", err)
 	}
 }
 
@@ -368,22 +367,22 @@ func TestMockProcessor_RepeatedCachedHTTPBodyPartsAreReplayable(t *testing.T) {
 	assertStreamOutput(t, resp, "1\r\nw\r\n1\r\nx\r\n1\r\ny\r\n1\r\nz\r\n1\r\nw\r\n1\r\nx\r\n1\r\ny\r\n1\r\nz\r\n")
 }
 
-func BenchmarkMockProcessor_RawHTTPBodyStreamDoesNotReadPayload(b *testing.B) {
+func BenchmarkMockProcessor_RawHTTPBodyStreamBuffersPayload(b *testing.B) {
 	proc := processSingleScenarioB(b, rawResponseHTTPBodyStreamScenario())
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		reader := &fixedSizeCountingReader{remaining: 64 << 20}
-		if _, err := proc.Process(context.Background(), createLazyRESPMODRequestB(b, reader)); err != nil {
-			b.Fatalf("Process() error = %v", err)
+		if _, err := proc.Process(context.Background(), createLazyRESPMODRequestB(b, reader)); err == nil {
+			b.Fatal("Process() error = nil, want body limit error")
 		}
-		if reader.read != 0 {
-			b.Fatalf("read %d bytes before WriteTo, want 0", reader.read)
+		if reader.read == 0 {
+			b.Fatal("body was not read during Process")
 		}
 	}
 }
 
-// BenchmarkMockProcessor_RawHTTPBodyStreamProcessOnlyLarge measures only Process()
-// for a large live HTTP body to verify the processor keeps the payload unread.
+// BenchmarkMockProcessor_RawHTTPBodyStreamProcessOnlyLarge measures Process()
+// for a large live HTTP body after buffering it for response safety.
 func BenchmarkMockProcessor_RawHTTPBodyStreamProcessOnlyLarge(b *testing.B) {
 	const bodySize = 16 << 20
 	proc := processSingleScenarioUnlimitedB(b, benchmarkRawHTTPBodyStreamScenario())
@@ -398,14 +397,14 @@ func BenchmarkMockProcessor_RawHTTPBodyStreamProcessOnlyLarge(b *testing.B) {
 		if _, err := proc.Process(ctx, createLazyRESPMODRequestB(b, reader)); err != nil {
 			b.Fatalf("Process() error = %v", err)
 		}
-		if reader.read != 0 {
-			b.Fatalf("read %d bytes before WriteTo, want 0", reader.read)
+		if reader.read != bodySize {
+			b.Fatalf("read %d bytes during Process, want %d", reader.read, bodySize)
 		}
 	}
 }
 
 // BenchmarkMockProcessor_RawHTTPBodyStreamProcessAndWriteDiscardLarge measures the
-// end-to-end streaming path for a large live HTTP body without buffering output.
+// end-to-end buffered input and streaming output path for a large live HTTP body.
 func BenchmarkMockProcessor_RawHTTPBodyStreamProcessAndWriteDiscardLarge(b *testing.B) {
 	const bodySize = 16 << 20
 	proc := processSingleScenarioUnlimitedB(b, benchmarkRawHTTPBodyStreamScenario())
@@ -421,14 +420,11 @@ func BenchmarkMockProcessor_RawHTTPBodyStreamProcessAndWriteDiscardLarge(b *test
 		if err != nil {
 			b.Fatalf("Process() error = %v", err)
 		}
-		if reader.read != 0 {
-			b.Fatalf("read %d bytes before WriteTo, want 0", reader.read)
+		if reader.read != bodySize {
+			b.Fatalf("read %d bytes during Process, want %d", reader.read, bodySize)
 		}
 		if _, err := resp.WriteTo(io.Discard); err != nil {
 			b.Fatalf("WriteTo() error = %v", err)
-		}
-		if reader.read != bodySize {
-			b.Fatalf("read %d bytes after WriteTo, want %d", reader.read, bodySize)
 		}
 	}
 }
@@ -983,24 +979,24 @@ func assertNoBodyReadBeforeWrite(t *testing.T, reader *fixedSizeCountingReader) 
 	}
 }
 
-func assertNoByteBodyReadBeforeWrite(t *testing.T, reader *processorByteCountingReader) {
+func assertBodyReadDuringProcess(t *testing.T, reader *fixedSizeCountingReader, want int64) {
 	t.Helper()
-	if reader.read != 0 {
-		t.Fatalf("read %d bytes before WriteTo, want 0", reader.read)
+	if reader.read != want {
+		t.Fatalf("read %d bytes during Process, want %d", reader.read, want)
 	}
 }
 
-func assertStreamWriteReadsBody(t *testing.T, resp *icap.Response, reader *fixedSizeCountingReader, want int64) {
+func assertByteBodyReadDuringProcess(t *testing.T, reader *processorByteCountingReader, want int64) {
 	t.Helper()
-	var out bytes.Buffer
-	if _, err := resp.WriteTo(&out); err != nil {
-		t.Fatalf("WriteTo() error = %v", err)
-	}
 	if reader.read != want {
-		t.Fatalf("read %d bytes, want %d", reader.read, want)
+		t.Fatalf("read %d bytes during Process, want %d", reader.read, want)
 	}
-	if !strings.Contains(out.String(), "2\r\nxx\r\n2\r\nxx\r\n0\r\n\r\n") {
-		t.Fatalf("streamed body missing: %q", out.String())
+}
+
+func assertBodyReaderCleared(t *testing.T, message *icap.HTTPMessage) {
+	t.Helper()
+	if message.BodyReader != nil {
+		t.Fatal("BodyReader was not cleared after Process")
 	}
 }
 
@@ -1226,17 +1222,22 @@ func assertNoMatchMode(t *testing.T, got []byte, err error, want string, wantErr
 	}
 }
 
-func assertMultipartStreamingNoMatch(t *testing.T, resp *icap.Response, want string, wantErr bool) {
+func assertMultipartStreamingNoMatch(t *testing.T, resp *icap.Response, err error, want string, wantErr bool) {
 	t.Helper()
-	var out bytes.Buffer
-	_, err := resp.WriteTo(&out)
 	if wantErr && !errors.Is(err, errNoMultipartPartsMatched) {
-		t.Fatalf("WriteTo() error = %v, want no-match error", err)
+		t.Fatalf("Process() error = %v, want no-match error", err)
 	}
 	if !wantErr && err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if wantErr {
+		return
+	}
+	var out bytes.Buffer
+	if _, err := resp.WriteTo(&out); err != nil {
 		t.Fatalf("WriteTo() error = %v", err)
 	}
-	if !wantErr && want != "" && !strings.Contains(out.String(), want) {
+	if want != "" && !strings.Contains(out.String(), want) {
 		t.Fatalf("streamed body = %q, want %q", out.String(), want)
 	}
 }

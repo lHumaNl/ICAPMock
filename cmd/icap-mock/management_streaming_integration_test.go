@@ -29,6 +29,7 @@ import (
 
 const (
 	integrationOperationTimeout = 4 * time.Second
+	noResponseProbeTimeout      = 150 * time.Millisecond
 	readinessPollInterval       = 25 * time.Millisecond
 	streamingChunkDelay         = "300ms"
 	chunkedFinalChunkToken      = "\r\n0\r\n\r\n"
@@ -123,15 +124,54 @@ func TestRealIntegration_REQMODRequestHTTPBodyStreamingCompleteWithStagedReads(t
 	}
 	defer conn.Close()
 
-	firstStage := readUntilToken(t, conn, "2\r\nab\r\n")
-	assertContains(t, firstStage, "HTTP/1.1 403 Forbidden")
-	assertContains(t, firstStage, "2\r\nab\r\n")
-	assertNotContains(t, firstStage, "2\r\ncd\r\n")
-	assertNotContains(t, firstStage, "0\r\n\r\n")
+	assertNoResponseAvailable(t, conn)
 
 	writeConnString(t, conn, "2\r\ncd\r\n0\r\n\r\n")
-	remainder := readUntilToken(t, conn, "0\r\n\r\n")
-	assertContains(t, remainder, "2\r\ncd\r\n0\r\n\r\n")
+	response := readUntilToken(t, conn, "0\r\n\r\n")
+	assertContains(t, response, "HTTP/1.1 403 Forbidden")
+	assertContains(t, response, "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n")
+}
+
+func TestRealIntegration_REQMODNonStreamingWaitsForFullUploadBeforeResponding(t *testing.T) {
+	scenariosDir := t.TempDir()
+	writeTestFile(t, filepath.Join(scenariosDir, "neutral-request-http-body-buffered.yaml"), requestHTTPBodyBufferedScenarioYAML())
+
+	rt := startIntegrationRuntime(t, scenariosDir)
+	t.Cleanup(rt.Close)
+
+	conn, err := openStreamingConn(rt.icapAddr, buildREQMODRequestHead(rt.icapURL("/request-http-buffered"), "/origin/request-http-buffered", map[string]string{"Content-Type": "application/octet-stream"}, 4)+"2\r\nab\r\n")
+	if err != nil {
+		t.Fatalf("open staged non-streaming request: %v", err)
+	}
+	defer conn.Close()
+
+	assertNoResponseAvailable(t, conn)
+	writeConnString(t, conn, "2\r\ncd\r\n0\r\n\r\n")
+	response := readUntilToken(t, conn, "\r\n\r\n")
+	assertContains(t, response, "ICAP/1.0 204")
+}
+
+func TestRealIntegration_StreamStartDelayWaitsAfterFullUploadBeforeFirstChunk(t *testing.T) {
+	scenariosDir := t.TempDir()
+	writeTestFile(t, filepath.Join(scenariosDir, "neutral-stream-start-delay.yaml"), streamStartDelayScenarioYAML())
+
+	rt := startIntegrationRuntime(t, scenariosDir)
+	t.Cleanup(rt.Close)
+
+	conn, err := openStreamingConn(rt.icapAddr, buildREQMODRequest(rt.icapURL("/stream-start-delay"), "/origin/stream-start-delay", "abcd"))
+	if err != nil {
+		t.Fatalf("open stream start_delay request: %v", err)
+	}
+	defer conn.Close()
+
+	start := time.Now()
+	assertNoResponseAvailableWithin(t, conn, 60*time.Millisecond)
+	response := readUntilToken(t, conn, "2\r\nab\r\n")
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
+		t.Fatalf("first response chunk arrived too early after %v", elapsed)
+	}
+	assertContains(t, response, "HTTP/1.1 403 Forbidden")
+	assertContains(t, response, "2\r\nab\r\n")
 }
 
 func TestRealIntegration_REQMODRequestHTTPBodyFINClosesWithoutFinalChunk(t *testing.T) {
@@ -176,7 +216,7 @@ func TestRealIntegration_MultipartSelectorStreamsFieldsAndFilenameMatches(t *tes
 
 	body, contentType := buildNeutralMultipartBody(t)
 	resp := rt.sendAndReadUntilFinalChunk(t, buildREQMODRequestWithHeaders(rt.icapURL("/multipart-select"), "/origin/multipart-select", body, map[string]string{"Content-Type": contentType}))
-	assertContains(t, resp, "5\r\nhello\r\n4\r\nSAFE\r\n0\r\n\r\n")
+	assertContains(t, resp, "9\r\nhelloSAFE\r\n0\r\n\r\n")
 	assertNotContains(t, resp, "skip-field")
 	assertNotContains(t, resp, "IGNORE")
 }
@@ -493,6 +533,43 @@ func readUntilToken(t *testing.T, conn net.Conn, token string) string {
 	return got
 }
 
+func assertNoResponseAvailable(t *testing.T, conn net.Conn) {
+	t.Helper()
+	assertNoResponseAvailableWithin(t, conn, noResponseProbeTimeout)
+}
+
+func assertNoResponseAvailableWithin(t *testing.T, conn net.Conn, timeout time.Duration) {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("set no-response read deadline: %v", err)
+	}
+	var probe [1]byte
+	n, err := conn.Read(probe[:])
+	if n > 0 {
+		t.Fatalf("server sent response before request body completed: %q", string(probe[:n]))
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("read before body completion error = %v, want timeout", err)
+	}
+}
+
+func readUntilEOF(t *testing.T, conn net.Conn) (string, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	tmp := make([]byte, 256)
+	for {
+		if err := conn.SetReadDeadline(time.Now().Add(integrationOperationTimeout)); err != nil {
+			return buf.String(), err
+		}
+		n, err := conn.Read(tmp)
+		buf.Write(tmp[:n])
+		if err != nil {
+			return buf.String(), err
+		}
+	}
+}
+
 func readConnUntilToken(conn net.Conn, token string, timeout time.Duration) (string, error) {
 	var buf bytes.Buffer
 	tmp := make([]byte, 256)
@@ -564,15 +641,18 @@ func buildREQMODRequestHead(serviceURL, httpPath string, headers map[string]stri
 }
 
 func buildRESPMODRequest(serviceURL, httpPath, responseBody string) string {
+	return buildRESPMODRequestHead(serviceURL, httpPath, responseBody) + chunked(responseBody)
+}
+
+func buildRESPMODRequestHead(serviceURL, httpPath, responseBody string) string {
 	requestHead := "GET " + httpPath + " HTTP/1.1\r\n" +
 		"Host: origin.example\r\n\r\n"
 	responseHead := "HTTP/1.1 200 OK\r\n" +
 		"Content-Length: " + strconv.Itoa(len(responseBody)) + "\r\n\r\n"
-	chunkedBody := chunked(responseBody)
 	return "RESPMOD " + serviceURL + " ICAP/1.0\r\n" +
 		"Host: " + hostFromICAPURL(serviceURL) + "\r\n" +
 		"Encapsulated: req-hdr=0, res-hdr=" + strconv.Itoa(len(requestHead)) + ", res-body=" + strconv.Itoa(len(requestHead)+len(responseHead)) + "\r\n\r\n" +
-		requestHead + responseHead + chunkedBody
+		requestHead + responseHead
 }
 
 func chunked(body string) string {
@@ -771,6 +851,33 @@ func requestHTTPBodyCompleteScenarioYAML() string {
       finish:
         mode: complete
 `, streamingChunkDelay)
+}
+
+func requestHTTPBodyBufferedScenarioYAML() string {
+	return `scenarios:
+  neutral_request_http_body_buffered:
+    method: REQMOD
+    endpoint: /request-http-buffered
+    status: 204
+`
+}
+
+func streamStartDelayScenarioYAML() string {
+	return `scenarios:
+  neutral_stream_start_delay:
+    method: REQMOD
+    endpoint: /stream-start-delay
+    status: 200
+    http_status: 403
+    stream:
+      source:
+        from: request_body
+      start_delay: 120ms
+      chunks:
+        size: 2
+      finish:
+        mode: complete
+`
 }
 
 func requestHTTPBodyFINScenarioYAML() string {

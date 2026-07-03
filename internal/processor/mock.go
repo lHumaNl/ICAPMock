@@ -289,7 +289,7 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 
 			resp.SetHTTPResponse(httpResp)
 		} else {
-			httpReq, err := p.cloneHTTPMessageForResponse(req.HTTPRequest, scenario.Response.Stream != nil)
+			httpReq, err := p.cloneHTTPMessageForResponse(req.HTTPRequest, shouldSkipOriginalBody(scenario, httpBody))
 			if err != nil {
 				return nil, cloneICAPError(err)
 			}
@@ -309,7 +309,7 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 
 	// Handle RESPMOD with HTTP response modification
 	if req.IsRESPMOD() && req.HTTPResponse != nil {
-		httpResp, err := p.cloneHTTPMessageForResponse(req.HTTPResponse, scenario.Response.Stream != nil)
+		httpResp, err := p.cloneHTTPMessageForResponse(req.HTTPResponse, shouldSkipOriginalBody(scenario, httpBody))
 		if err != nil {
 			return nil, cloneICAPError(err)
 		}
@@ -338,6 +338,10 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 	}
 
 	return resp, nil
+}
+
+func shouldSkipOriginalBody(scenario *storage.Scenario, httpBody []byte) bool {
+	return scenario.Response.Stream != nil || len(httpBody) > 0
 }
 
 // loadHTTPBody returns the body bytes for the wrapped HTTP response.
@@ -410,9 +414,7 @@ func (p *MockProcessor) cloneHTTPMessageBody(clone, msg *icap.HTTPMessage) error
 	if len(body) == 0 {
 		return nil
 	}
-	bodyCopy := make([]byte, len(body))
-	copy(bodyCopy, body)
-	clone.SetLoadedBody(bodyCopy)
+	clone.SetLoadedBody(body)
 	return nil
 }
 

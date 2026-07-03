@@ -322,6 +322,8 @@ Notes:
   more than that selected percentage. `fin` closes without the terminating chunk; `term` sends the
   terminating chunk after the selected partial body. Legacy `chunks` / `duration` / `finish` remain
   supported for existing files, but cannot be mixed with `send` / `throttle` / `end`.
+- `stream.start_delay` adds a pre-first-chunk wait after the upload and scenario `delay`, independent
+  from chunk pacing and `send.duration`.
 
 ---
 

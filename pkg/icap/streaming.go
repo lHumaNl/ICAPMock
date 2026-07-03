@@ -40,6 +40,8 @@ type BodyStream struct {
 	FinAfterBytes    int64
 	FinAfterBytesSet bool
 	TotalBytes       int64
+	StartDelay       time.Duration
+	StartDelayMax    time.Duration
 	Delay            time.Duration
 	DelayMax         time.Duration
 	Duration         time.Duration
@@ -95,6 +97,7 @@ func (s *BodyStream) WriteTo(w io.Writer) (written int64, err error) {
 		return 0, err
 	}
 	defer func() { err = joinCloseError(err, closeReader) }()
+	s.sleepBeforeFirstChunk()
 	cw := &countingWriter{w: w}
 	mode := s.resolveFinishMode()
 	_, err = s.writeChunks(cw, reader, mode)
@@ -211,11 +214,30 @@ func (s *BodyStream) sleepBetweenChunks(readErr error, started time.Time) {
 	if delay <= 0 {
 		return
 	}
+	s.sleep(delay)
+}
+
+func (s *BodyStream) sleepBeforeFirstChunk() {
+	delay := s.nextStartDelay()
+	if delay <= 0 {
+		return
+	}
+	s.sleep(delay)
+}
+
+func (s *BodyStream) sleep(delay time.Duration) {
 	if s.Sleep != nil {
 		s.Sleep(delay)
 		return
 	}
 	time.Sleep(delay)
+}
+
+func (s *BodyStream) nextStartDelay() time.Duration {
+	if s.StartDelayMax <= s.StartDelay {
+		return s.StartDelay
+	}
+	return s.StartDelay + time.Duration(s.randomInt(int(s.StartDelayMax-s.StartDelay)))
 }
 
 func (s *BodyStream) nextSleepDelay(readErr error, started time.Time) time.Duration {

@@ -252,6 +252,17 @@ func (l *Loader) envInt64ByteSize(key string, dst *int64) {
 	}
 }
 
+func (l *Loader) envServerMaxBodySize(cfg *Config) {
+	if v := os.Getenv(l.envPrefix + "SERVER_MAX_BODY_SIZE"); v != "" {
+		if i, err := ParseByteSize(v); err == nil {
+			cfg.Server.MaxBodySize = i
+			cfg.Server.maxBodySizeSet = true
+		} else {
+			warnEnvParse(l.envPrefix+"SERVER_MAX_BODY_SIZE", v, err)
+		}
+	}
+}
+
 func (l *Loader) envBodySizeLimit(key string, dst *BodySizeLimit) {
 	if v := os.Getenv(l.envPrefix + key); v != "" {
 		if limit, err := ParseBodySizeLimit(v); err == nil {
@@ -301,7 +312,7 @@ func (l *Loader) loadServerEnv(cfg *Config) {
 	l.envDuration("SERVER_READ_TIMEOUT", &cfg.Server.ReadTimeout)
 	l.envDuration("SERVER_WRITE_TIMEOUT", &cfg.Server.WriteTimeout)
 	l.envInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
-	l.envInt64ByteSize("SERVER_MAX_BODY_SIZE", &cfg.Server.MaxBodySize)
+	l.envServerMaxBodySize(cfg)
 	l.envBool("SERVER_STREAMING", &cfg.Server.Streaming)
 	l.envBool("SERVER_TRUST_CLIENT_IP_HEADER", &cfg.Server.TrustClientIPHeader)
 	l.envStrSlice("SERVER_TRUSTED_PROXIES", &cfg.Server.TrustedProxies)
@@ -495,6 +506,7 @@ func mergeServerConfig(dst, src *Config) {
 	}
 	if src.Server.maxBodySizeSet {
 		dst.Server.MaxBodySize = src.Server.MaxBodySize
+		dst.Server.maxBodySizeSet = true
 	} else {
 		mergeInt64(&dst.Server.MaxBodySize, src.Server.MaxBodySize)
 	}

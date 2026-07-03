@@ -569,8 +569,6 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				s.handleParseError(conn, err, requestReader.Started(), keepAliveWait)
 				return
 			}
-			now := time.Now()
-
 			// Extract client IP
 			req.RemoteAddr = conn.RemoteAddr()
 			req.ClientIP = extractClientIP(
@@ -580,10 +578,15 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				s.config.TrustedProxies,
 			)
 
-			// Reset deadline for processing
-			if s.config.WriteTimeout > 0 {
-				_ = conn.SetWriteDeadline(now.Add(s.config.WriteTimeout))
+			if receiveErr := s.receiveRequestBodies(conn, req); receiveErr != nil {
+				s.logger.Debug("closing connection after request body receive failed",
+					"remote_addr", conn.RemoteAddr(),
+					"error", receiveErr,
+				)
+				releaseLifecycleBodies(req, nil)
+				return
 			}
+			now := time.Now()
 
 			// Create request-scoped context with timeout
 			// Derive from connection context to inherit server shutdown cancellation
@@ -616,19 +619,32 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			}
 			s.recordIncomingRequest(req, resp)
 
-			requestClose := headerHasToken(req.Header, "Connection", "close")
+			drainAfterResponse := shouldDrainAfterResponse(req)
+			requestClose := headerHasToken(req.Header, "Connection", "close") || !drainAfterResponse
 
 			// Write the response
+			if s.config.WriteTimeout > 0 {
+				_ = conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout))
+			}
 			if err := writeResponseFromICAP(conn.Writer(), resp); err != nil {
+				releaseLifecycleBodies(req, resp)
 				return
 			}
-			if err := s.drainRequestBodies(conn, req); err != nil {
-				s.logger.Debug("closing connection after request body drain failed",
+			if drainAfterResponse {
+				if err := s.drainRequestBodies(conn, req); err != nil {
+					s.logger.Debug("closing connection after request body drain failed",
+						"remote_addr", conn.RemoteAddr(),
+						"error", err,
+					)
+					releaseLifecycleBodies(req, resp)
+					return
+				}
+			} else {
+				s.logger.Debug("closing connection with deferred preview body unread",
 					"remote_addr", conn.RemoteAddr(),
-					"error", err,
 				)
-				return
 			}
+			releaseLifecycleBodies(req, resp)
 
 			if requestClose {
 				return
@@ -641,6 +657,11 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			requestCount++
 		}
 	}
+}
+
+func releaseLifecycleBodies(req *icap.Request, resp *icap.Response) {
+	req.ReleaseBodies()
+	resp.ReleaseBodies()
 }
 
 // Stop gracefully stops the server.
