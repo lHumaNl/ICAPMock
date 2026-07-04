@@ -39,7 +39,6 @@ metrics:
   host: "0.0.0.0"
   port: 9091
   path: "/custom-metrics"
-  endpoint_label_mode: "path"
 
 mock:
   scenarios_dir: "./custom-scenarios"
@@ -122,10 +121,6 @@ health:
 	if cfg.Metrics.Path != "/custom-metrics" {
 		t.Errorf("Metrics.Path = %s, want /custom-metrics", cfg.Metrics.Path)
 	}
-	if cfg.Metrics.EndpointLabelMode != "path" {
-		t.Errorf("Metrics.EndpointLabelMode = %s, want path", cfg.Metrics.EndpointLabelMode)
-	}
-
 	// Verify mock config
 	if cfg.Mock.ScenariosDir != "./custom-scenarios" {
 		t.Errorf("Mock.ScenariosDir = %s, want ./custom-scenarios", cfg.Mock.ScenariosDir)
@@ -278,13 +273,12 @@ server:
 func TestLoader_LoadFromEnv(t *testing.T) {
 	// Set environment variables
 	envVars := map[string]string{
-		"ICAP_SERVER_HOST":                 "10.0.0.1",
-		"ICAP_SERVER_PORT":                 "9999",
-		"ICAP_SERVER_MAX_CONNECTIONS":      "5000",
-		"ICAP_LOGGING_LEVEL":               "error",
-		"ICAP_METRICS_ENABLED":             "false",
-		"ICAP_METRICS_ENDPOINT_LABEL_MODE": "path",
-		"ICAP_HEALTH_PORT":                 "9999",
+		"ICAP_SERVER_HOST":            "10.0.0.1",
+		"ICAP_SERVER_PORT":            "9999",
+		"ICAP_SERVER_MAX_CONNECTIONS": "5000",
+		"ICAP_LOGGING_LEVEL":          "error",
+		"ICAP_METRICS_ENABLED":        "false",
+		"ICAP_HEALTH_PORT":            "9999",
 	}
 
 	// Set env vars
@@ -317,9 +311,6 @@ func TestLoader_LoadFromEnv(t *testing.T) {
 	}
 	if cfg.Metrics.Enabled {
 		t.Error("Metrics.Enabled should be false from env")
-	}
-	if cfg.Metrics.EndpointLabelMode != "path" {
-		t.Errorf("Metrics.EndpointLabelMode = %s, want path", cfg.Metrics.EndpointLabelMode)
 	}
 	if cfg.Health.Port != 9999 {
 		t.Errorf("Health.Port = %d, want 9999", cfg.Health.Port)
@@ -434,7 +425,6 @@ func TestLoadOptions(t *testing.T) {
 type mockMetricsCollector struct {
 	reloadCounts     map[string]int
 	lastReloadStatus *bool
-	reloadDurations  []time.Duration
 }
 
 func newMockMetricsCollector() *mockMetricsCollector {
@@ -445,10 +435,6 @@ func newMockMetricsCollector() *mockMetricsCollector {
 
 func (m *mockMetricsCollector) RecordConfigReload(status string) {
 	m.reloadCounts[status]++
-}
-
-func (m *mockMetricsCollector) RecordConfigReloadDuration(duration time.Duration) {
-	m.reloadDurations = append(m.reloadDurations, duration)
 }
 
 func (m *mockMetricsCollector) SetConfigLastReloadStatus(success bool) {
@@ -479,9 +465,6 @@ func TestLoader_LoadWithMetrics_Success(t *testing.T) {
 	if mock.reloadCounts["success"] != 1 {
 		t.Errorf("success count = %d, want 1", mock.reloadCounts["success"])
 	}
-	if len(mock.reloadDurations) != 1 {
-		t.Errorf("duration count = %d, want 1", len(mock.reloadDurations))
-	}
 	if mock.lastReloadStatus == nil || !*mock.lastReloadStatus {
 		t.Error("last reload status should be true (success)")
 	}
@@ -501,9 +484,6 @@ func TestLoader_LoadWithMetrics_Failure(t *testing.T) {
 	// Verify failure metrics were recorded
 	if mock.reloadCounts["failure"] != 1 {
 		t.Errorf("failure count = %d, want 1", mock.reloadCounts["failure"])
-	}
-	if len(mock.reloadDurations) != 1 {
-		t.Errorf("duration count = %d, want 1", len(mock.reloadDurations))
 	}
 	if mock.lastReloadStatus == nil || *mock.lastReloadStatus {
 		t.Error("last reload status should be false (failure)")

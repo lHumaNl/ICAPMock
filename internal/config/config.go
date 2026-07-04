@@ -263,7 +263,6 @@ func (c *Config) SetDefaults() {
 	c.Metrics.Host = defaultHost
 	c.Metrics.Port = 9090
 	c.Metrics.Path = "/metrics"
-	c.Metrics.EndpointLabelMode = metricsEndpointLabelModeDefault
 
 	// Mock defaults
 	c.Mock.DefaultTimeout = 5 * time.Second
@@ -511,11 +510,10 @@ type LoggingConfig struct {
 
 // MetricsConfig contains Prometheus metrics configuration.
 type MetricsConfig struct {
-	EndpointLabelMode string `yaml:"endpoint_label_mode" json:"endpoint_label_mode"`
-	Host              string `yaml:"host" json:"host"`
-	Path              string `yaml:"path" json:"path"`
-	Port              int    `yaml:"port" json:"port"`
-	Enabled           bool   `yaml:"enabled" json:"enabled"`
+	Host    string `yaml:"host" json:"host"`
+	Path    string `yaml:"path" json:"path"`
+	Port    int    `yaml:"port" json:"port"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
 }
 
 // MockConfig contains mock processor configuration.

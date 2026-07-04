@@ -178,7 +178,7 @@ func TestMockProcessor_RecordsSelectedWeightedBlockOutcome(t *testing.T) {
 		t.Fatalf("Process() error = %v", err)
 	}
 
-	labels := map[string]string{"scenario": "weighted-explicit-allow", "response": "500", "block": "false"}
+	labels := map[string]string{"scenario": "weighted-explicit-allow", "response": "500", "outcome": "error"}
 	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 1 {
 		t.Errorf("scenario request count = %v, want 1", got)
 	}
@@ -204,7 +204,7 @@ func TestMockProcessor_RecordsBranchWeightedBlockOutcome(t *testing.T) {
 		t.Fatalf("Process() error = %v", err)
 	}
 
-	labels := map[string]string{"scenario": "branch-weighted-explicit-allow", "response": "500", "block": "false"}
+	labels := map[string]string{"scenario": "branch-weighted-explicit-allow", "response": "500", "outcome": "error"}
 	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 1 {
 		t.Errorf("scenario request count = %v, want 1", got)
 	}
@@ -291,12 +291,12 @@ func scenarioRequestMetricValue(t *testing.T, reg prometheus.Gatherer, scenario,
 func scenarioRequestMetricValueWithLabels(t *testing.T, reg prometheus.Gatherer, labels map[string]string) float64 {
 	t.Helper()
 	for _, mf := range gatherProcessorTestMetrics(t, reg) {
-		if mf.GetName() != "icap_scenario_requests_total" {
+		if mf.GetName() != "icap_scenario_response_duration_seconds" {
 			continue
 		}
 		for _, metric := range mf.GetMetric() {
 			if metricHasLabels(metric, labels) {
-				return metric.GetCounter().GetValue()
+				return float64(metric.GetHistogram().GetSampleCount())
 			}
 		}
 	}

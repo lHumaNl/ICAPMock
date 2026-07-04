@@ -655,7 +655,6 @@ func TestValidateMode_MetricsConfiguration(t *testing.T) {
 		"host: 127.0.0.1",
 		"port: 9091",
 		"path: /custom-metrics",
-		"endpoint_label_mode: default",
 	}
 
 	for _, val := range expectedMetrics {

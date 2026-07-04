@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/icap-mock/icap-mock/internal/handler"
+	metricsinternal "github.com/icap-mock/icap-mock/internal/metrics"
+	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -39,6 +41,8 @@ type Route struct {
 type Router struct {
 	cache    *RouteCache
 	logger   *slog.Logger
+	metrics  *metricsinternal.Collector
+	server   string
 	routes   sync.Map
 	patterns []patternRoute
 	pmu      sync.RWMutex
@@ -56,13 +60,22 @@ type patternRoute struct {
 // It initializes a route cache with default configuration (1000 max entries, 5 minute TTL).
 func NewRouter() *Router {
 	return &Router{
-		cache: NewRouteCache(DefaultMaxEntries, DefaultTTL),
+		cache:  NewRouteCache(DefaultMaxEntries, DefaultTTL),
+		server: "default",
 	}
 }
 
 // SetLogger sets the logger for request logging.
 func (r *Router) SetLogger(logger *slog.Logger) {
 	r.logger = logger
+}
+
+// SetMetricsForServer sets the metrics collector and bounded server label.
+func (r *Router) SetMetricsForServer(collector *metricsinternal.Collector, server string) {
+	r.metrics = collector
+	if server != "" {
+		r.server = server
+	}
 }
 
 // NewRouterWithCache creates a new Router with custom cache configuration.
@@ -76,7 +89,8 @@ func (r *Router) SetLogger(logger *slog.Logger) {
 //	r := NewRouterWithCache(500, 10*time.Minute)
 func NewRouterWithCache(maxEntries int, ttl time.Duration) *Router {
 	return &Router{
-		cache: NewRouteCache(maxEntries, ttl),
+		cache:  NewRouteCache(maxEntries, ttl),
+		server: "default",
 	}
 }
 
@@ -185,20 +199,38 @@ func (r *Router) Serve(ctx context.Context, req *icap.Request) (*icap.Response, 
 	}
 
 	if h == nil {
+		status := icap.StatusNotFound
 		if r.logger != nil {
-			r.logger.Warn("ICAP service not found",
+			r.logger.ErrorContext(ctx, "ICAP service not found",
+				"server", r.server,
+				"stage", metricsinternal.RequestErrorStageRouting,
+				"error_type", metricsinternal.RequestErrorTypeRouteNotFound,
 				"method", req.Method,
 				"uri", req.URI,
-				"status", 404,
+				"status", status,
+				"content_type", requestinfo.ContentTypeLabel(ctx, req),
+				"client_ip", req.ClientIP,
+				"error", "ICAP service not found",
+			)
+		}
+		if r.metrics != nil {
+			r.metrics.RecordRequestErrorForServer(
+				r.server,
+				req.Method,
+				metricsinternal.RequestErrorStageRouting,
+				metricsinternal.RequestErrorTypeRouteNotFound,
+				metricsinternal.NoScenarioMetricLabel,
+				strconv.Itoa(status),
 			)
 		}
 		return icap.NewResponseError(icap.StatusNotFound, "ICAP service not found"), nil
 	}
 
 	if r.logger != nil {
-		r.logger.Info("ICAP request received",
+		r.logger.Debug("ICAP request received",
 			"method", req.Method,
 			"uri", req.URI,
+			"client_ip", req.ClientIP,
 		)
 	}
 

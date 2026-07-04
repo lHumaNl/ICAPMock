@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/metrics"
@@ -26,7 +25,7 @@ func newMetricsHandlerWithPprof(reg prometheus.Gatherer, pprofEnabled bool) http
 	mux := http.NewServeMux()
 
 	// Register metrics endpoint
-	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	mux.Handle("/metrics", metrics.HandlerWithRegistry(reg))
 
 	if pprofEnabled {
 		registerPprofHandlers(mux)

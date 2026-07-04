@@ -514,19 +514,6 @@ func (h *MetricsServerHarness) RecordRequest(method string) {
 	h.collector.RecordRequest(method)
 }
 
-// RecordRequestDuration records a request duration metric.
-//
-// Parameters:
-//   - method: ICAP method
-//   - duration: Request duration
-//
-// Example:
-//
-//	harness.RecordRequestDuration("REQMOD", time.Since(start))
-func (h *MetricsServerHarness) RecordRequestDuration(method string, duration time.Duration) {
-	h.collector.RecordRequestDuration(method, duration)
-}
-
 // StorageServerHarness provides a harness for testing storage operations.
 //
 // Usage:

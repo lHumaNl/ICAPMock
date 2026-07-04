@@ -3,53 +3,80 @@
 package server
 
 import (
+	"context"
 	"strconv"
 
 	metricsinternal "github.com/icap-mock/icap-mock/internal/metrics"
+	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
-const (
-	incomingResultSuccess = "success"
-	incomingResultError   = "error"
-	missingStatusLabel    = "none"
-)
-
-func (s *ICAPServer) recordIncomingRequest(req *icap.Request, resp *icap.Response) {
+func (s *ICAPServer) recordIncomingRequest(ctx context.Context, req *icap.Request, resp *icap.Response) {
 	if s.metrics == nil || req == nil {
 		return
 	}
-	status := icapStatusLabel(resp)
-	s.metrics.RecordIncomingRequest(
+	contentTypeLabel, ok := requestinfo.ContextContentTypeLabel(ctx)
+	if !ok {
+		contentTypeLabel = s.canonicalContentTypeLabel(req)
+	}
+	metadata := requestMetricMetadata(ctx, resp)
+	s.recordIncomingRequestWithLabel(req, resp, contentTypeLabel, metadata)
+}
+
+func (s *ICAPServer) recordIncomingRequestWithLabel(
+	req *icap.Request,
+	resp *icap.Response,
+	contentTypeLabel string,
+	metadata requestMetricLabels,
+) {
+	if s.metrics == nil || req == nil {
+		return
+	}
+	s.metrics.RecordRequestForServerWithContentTypeLabel(
 		s.metricsServerName,
 		req.Method,
-		metricsinternal.NormalizeEndpointLabel(s.metricsEndpointLabelMode, req.URI),
-		metricsinternal.ExtractExtension(req.URI),
-		incomingResult(resp),
-		status,
-		isBlockedResponse(resp),
+		contentTypeLabel,
+		requestOutcome(resp),
+		metadata.response,
+		metadata.scenario,
 	)
 }
 
-func icapStatusLabel(resp *icap.Response) string {
+type requestMetricLabels struct {
+	response string
+	scenario string
+}
+
+func requestMetricMetadata(ctx context.Context, resp *icap.Response) requestMetricLabels {
+	if metadata, ok := requestinfo.ContextScenarioMetadata(ctx); ok {
+		return requestMetricLabels{response: metadata.Response, scenario: metadata.Scenario}
+	}
+	return requestMetricLabels{response: responseMetricLabel(resp), scenario: metricsinternal.NoScenarioMetricLabel}
+}
+
+func responseMetricLabel(resp *icap.Response) string {
 	if resp == nil {
-		return missingStatusLabel
+		return metricsinternal.OutcomeError
 	}
 	return strconv.Itoa(resp.StatusCode)
 }
 
-func incomingResult(resp *icap.Response) string {
-	if resp != nil && resp.StatusCode < icap.StatusBadRequest {
-		return incomingResultSuccess
+func (s *ICAPServer) canonicalContentTypeLabel(req *icap.Request) string {
+	contentType := requestinfo.ContentType(req)
+	if s.metrics != nil {
+		return s.metrics.ContentTypeLabel(contentType)
 	}
-	return incomingResultError
+	return metricsinternal.NormalizeContentTypeLabel(contentType)
 }
 
-func isBlockedResponse(resp *icap.Response) bool {
+func requestOutcome(resp *icap.Response) string {
 	if resp == nil || resp.StatusCode >= icap.StatusBadRequest {
-		return true
+		return metricsinternal.OutcomeError
 	}
-	return encapsulatedHTTPStatusCode(resp) >= icap.StatusBadRequest
+	if encapsulatedHTTPStatusCode(resp) >= icap.StatusBadRequest {
+		return metricsinternal.OutcomeBlocked
+	}
+	return metricsinternal.OutcomeAllowed
 }
 
 func encapsulatedHTTPStatusCode(resp *icap.Response) int {

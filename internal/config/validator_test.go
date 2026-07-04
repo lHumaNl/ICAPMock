@@ -164,38 +164,6 @@ func TestValidator_Validate_LogFormat(t *testing.T) {
 	}
 }
 
-func TestValidator_Validate_MetricsEndpointLabelMode(t *testing.T) {
-	tests := []struct {
-		name        string
-		mode        string
-		expectError bool
-	}{
-		{"valid default", "default", false},
-		{"valid path", "path", false},
-		{"invalid full", "full", true},
-		{"invalid empty", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{}
-			cfg.SetDefaults()
-			cfg.Metrics.EndpointLabelMode = tt.mode
-
-			errors := NewValidator().Validate(cfg)
-			hasModeError := false
-			for _, err := range errors {
-				if err.Field == "metrics.endpoint_label_mode" {
-					hasModeError = true
-				}
-			}
-			if tt.expectError != hasModeError {
-				t.Errorf("metrics endpoint mode error = %v, want %v", hasModeError, tt.expectError)
-			}
-		})
-	}
-}
-
 // TestValidator_Validate_TLS tests TLS configuration validation.
 func TestValidator_Validate_TLS(t *testing.T) {
 	// Create temporary certificate files for testing

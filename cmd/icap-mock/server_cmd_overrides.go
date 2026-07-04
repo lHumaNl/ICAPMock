@@ -174,9 +174,6 @@ func (c *ServerCommand) applyMetricsOverrides(cfg *config.Config) {
 	if c.flagWasSet("metrics.path", "metrics-path") {
 		cfg.Metrics.Path = c.metricsPath
 	}
-	if c.flagWasSet("metrics.endpoint-label-mode", "metrics-endpoint-label-mode") {
-		cfg.Metrics.EndpointLabelMode = c.metricsEndpointMode
-	}
 }
 
 func (c *ServerCommand) applyMockOverrides(cfg *config.Config) {

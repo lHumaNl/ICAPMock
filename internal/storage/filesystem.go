@@ -258,8 +258,6 @@ func (fs *FileStorage) rotationHandler() {
 			}
 
 		DO_ROTATION:
-			// P0 FIX: Record rotation start in metrics
-			startTime := time.Now()
 			if fs.metrics != nil {
 				fs.metrics.IncStorageRotationActive()
 			}
@@ -274,8 +272,6 @@ func (fs *FileStorage) rotationHandler() {
 				}
 			} else if fs.metrics != nil {
 				// Record rotation success in metrics
-				duration := time.Since(startTime)
-				fs.metrics.RecordStorageRotationDuration(duration)
 				fs.metrics.RecordStorageRotation("success")
 				fs.metrics.DecStorageRotationActive()
 			}

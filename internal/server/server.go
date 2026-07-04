@@ -18,6 +18,7 @@ import (
 
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/metrics"
+	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/internal/util"
 	"github.com/icap-mock/icap-mock/pkg/icap"
@@ -121,7 +122,6 @@ type ICAPServer struct {
 	logger                     *slog.Logger
 	metrics                    *metrics.Collector
 	metricsServerName          string
-	metricsEndpointLabelMode   string
 	goroutineConfig            GoroutineMonitorConfig
 	wg                         sync.WaitGroup
 	goroutinePeak              int
@@ -164,16 +164,15 @@ func NewServer(cfg *config.ServerConfig, pool *ConnectionPool, logger *slog.Logg
 	}
 
 	return &ICAPServer{
-		config:                   cfg,
-		pool:                     pool,
-		semaphore:                make(chan struct{}, cfg.MaxConnections),
-		stopChan:                 make(chan struct{}),
-		logger:                   logger,
-		metricsServerName:        "default",
-		metricsEndpointLabelMode: metrics.EndpointLabelModeDefault,
-		goroutineConfig:          DefaultGoroutineMonitorConfig(),
-		goroutineBaseline:        runtime.NumGoroutine(),
-		goroutinePeak:            runtime.NumGoroutine(),
+		config:            cfg,
+		pool:              pool,
+		semaphore:         make(chan struct{}, cfg.MaxConnections),
+		stopChan:          make(chan struct{}),
+		logger:            logger,
+		metricsServerName: "default",
+		goroutineConfig:   DefaultGoroutineMonitorConfig(),
+		goroutineBaseline: runtime.NumGoroutine(),
+		goroutinePeak:     runtime.NumGoroutine(),
 	}, nil
 }
 
@@ -201,13 +200,6 @@ func (s *ICAPServer) SetMetrics(m *metrics.Collector) {
 func (s *ICAPServer) SetMetricsServerName(name string) {
 	if name != "" {
 		s.metricsServerName = name
-	}
-}
-
-// SetMetricsEndpointLabelMode sets the endpoint label mode for incoming metrics.
-func (s *ICAPServer) SetMetricsEndpointLabelMode(mode string) {
-	if metrics.ValidEndpointLabelMode(mode) {
-		s.metricsEndpointLabelMode = mode
 	}
 }
 
@@ -533,10 +525,16 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			req.ClientIP = extractClientIP(conn.RemoteAddr())
 
 			if receiveErr := s.receiveRequestBodies(conn, req); receiveErr != nil {
-				s.logger.Debug("closing connection after request body receive failed",
-					"remote_addr", conn.RemoteAddr(),
-					"error", receiveErr,
+				errorType := bodyReceiveErrorType(receiveErr)
+				s.logRequestError(context.Background(), req, metrics.RequestErrorStageBodyReceive, errorType, receiveErr)
+				s.recordRequestError(
+					context.Background(),
+					req,
+					metrics.RequestErrorStageBodyReceive,
+					errorType,
+					metrics.OutcomeError,
 				)
+				s.recordIncomingRequest(context.Background(), req, nil)
 				releaseLifecycleBodies(req, nil)
 				return
 			}
@@ -555,6 +553,8 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			requestID := util.GenerateRequestID(now)
 			ctx = context.WithValue(ctx, requestIDKey, requestID)
 			ctx = context.WithValue(ctx, clientIPKey, req.ClientIP)
+			ctx = requestinfo.WithContentTypeLabel(ctx, s.canonicalContentTypeLabel(req))
+			ctx = requestinfo.WithScenarioMetadata(ctx)
 
 			// Route and handle the request with request-scoped context
 			var resp *icap.Response
@@ -571,7 +571,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			if err != nil {
 				resp = icap.NewResponseError(icap.StatusInternalServerError, err.Error())
 			}
-			s.recordIncomingRequest(req, resp)
+			s.recordIncomingRequest(ctx, req, resp)
 
 			drainAfterResponse := shouldDrainAfterResponse(req)
 			requestClose := headerHasToken(req.Header, "Connection", "close") || !drainAfterResponse

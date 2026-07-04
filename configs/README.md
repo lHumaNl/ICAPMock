@@ -69,23 +69,31 @@ servers:
 
 See `example.yaml` for the complete list of available fields with defaults and descriptions.
 
-### Metrics endpoint labels
+### Request metrics labels
 
-Prometheus metrics are enabled by default. The incoming request counter uses a bounded endpoint
-label mode to avoid high-cardinality time series:
+Prometheus metrics are enabled by default. The canonical request counter is
+`icap_requests_total{content_type,method,outcome,server,response,scenario}`. The `content_type` label is parsed from
+the encapsulated HTTP `Content-Type` header, lowercased, stripped of parameters, truncated to 120
+characters, and bounded to known or safely admitted media types. REQMOD uses the HTTP request
+header, RESPMOD uses the HTTP response header, and OPTIONS or missing HTTP headers use
+`content_type="none"`.
 
-```yaml
-metrics:
-  enabled: true
-  endpoint_label_mode: default  # default | path
-```
+Outcome values are `allowed`, `blocked`, and `error`.
 
-- `default` — emits `endpoint="default"` for every request. This is the safe default.
-- `path` — emits the normalized ICAP URI path without query parameters or fragments.
+Request error observability uses
+`icap_request_errors_total{server,method,stage,error_type,scenario,response}`. Stages are bounded to
+`context`, `body_receive`, `routing`, `processor_match`, `processor_response`, and
+`processor_build`; error types are likewise bounded (for example `context_canceled`,
+`deadline_exceeded`, `route_not_found`, `no_scenario_match`, and `response_build_failed`). Raw error
+descriptions are emitted only in structured ERROR logs.
 
-The `extension` label is extracted from the normalized path in both modes; requests without an
-extension use `extension="none"`. The same setting can be overridden with
-`ICAP_METRICS_ENDPOINT_LABEL_MODE` or `--metrics.endpoint-label-mode`.
+Scenario response latency uses the classic histogram
+`icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` with
+finite buckets at 0.1-second intervals through 1 second, 0.25-second intervals through 2 seconds,
+0.5-second intervals through 5 seconds, 1-second intervals through 10 seconds, 5-second intervals
+through 60 seconds, and 10-second intervals through 120 seconds. Query quantiles from
+`icap_scenario_response_duration_seconds_bucket` with `le`.
+Request size histograms also remain classic histograms.
 
 ### Body-pattern safety limits
 
@@ -299,11 +307,10 @@ Placeholders (`${name}`) from endpoint captures (see below) also expand inside
 `http_body`, `http_set` values, `body`, and `set` values.
 
 `block:` can be set to `true` or `false` on response templates, inline scenario
-responses, branches, and weighted variants. When omitted, the Prometheus
-`block` label is inferred from the selected concrete response after template,
-branch, and weighted resolution: ICAP or wrapped HTTP 4xx/5xx status, `error:`,
-partial stream endings (`stream.end.mode: fin` / `term`, legacy `stream.finish.mode: fin`) or weighted FIN with `fin_percent > 0` means
-`block="true"`; all other responses are `block="false"`.
+responses, branches, and weighted variants. When omitted, the metrics `outcome`
+label is inferred from the selected concrete response after template, branch,
+and weighted resolution: ICAP errors use `outcome="error"`; wrapped HTTP 4xx/5xx,
+partial stream endings (`stream.end.mode: fin` / `term`, legacy `stream.finish.mode: fin`) or weighted FIN with `fin_percent > 0` use `outcome="blocked"`; all other responses use `outcome="allowed"`.
 
 ### Response templates + `use:` references
 

@@ -148,7 +148,6 @@ func TestExampleIntegrationMetrics(t *testing.T) {
 	harness := NewMetricsServerHarness(t)
 	harness.RecordRequest("REQMOD")
 	harness.RecordRequest("REQMOD")
-	harness.RecordRequestDuration("REQMOD", 100*time.Millisecond)
 
 	// Note: MetricsServerHarness uses real metrics.Collector
 	// For assertions, use mock metrics collector instead
@@ -266,7 +265,6 @@ func TestExampleMockMetrics(t *testing.T) {
 	mock.RecordRequest("REQMOD")
 	mock.RecordRequest("REQMOD")
 	mock.RecordRequest("RESPMOD")
-	mock.RecordRequestDuration("REQMOD", 100*time.Millisecond)
 
 	mock.AssertRequestCount(t, 3)
 	assert.True(t, mock.AssertMethodCalled(t, "REQMOD"))

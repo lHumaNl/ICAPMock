@@ -16,8 +16,8 @@ import (
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/logger"
 	"github.com/icap-mock/icap-mock/internal/metrics"
+	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/internal/storage"
-	"github.com/icap-mock/icap-mock/internal/util"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -94,6 +94,14 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 
 	// Check context before processing
 	if err := ctx.Err(); err != nil {
+		p.logProcessorError(
+			ctx, req, metrics.RequestErrorStageContext, processorContextErrorType(err),
+			metrics.NoScenarioMetricLabel, metrics.OutcomeError, err,
+		)
+		p.recordRequestError(
+			req, metrics.RequestErrorStageContext, processorContextErrorType(err),
+			metrics.NoScenarioMetricLabel, metrics.OutcomeError,
+		)
 		return nil, err
 	}
 
@@ -101,23 +109,29 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 	scenario, err := p.registry.Match(req)
 	if err != nil {
 		if errors.Is(err, storage.ErrNoMatch) {
+			p.logProcessorError(
+				ctx, req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeNoScenarioMatch,
+				metrics.NoScenarioMetricLabel, metrics.OutcomeError, err,
+			)
+			p.recordRequestError(
+				req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeNoScenarioMatch,
+				metrics.NoScenarioMetricLabel, metrics.OutcomeError,
+			)
 			return nil, apperrors.ErrScenarioNotFound
 		}
+		p.logProcessorError(
+			ctx, req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeScenarioMatchFailed,
+			metrics.NoScenarioMetricLabel, metrics.OutcomeError, err,
+		)
+		p.recordRequestError(
+			req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeScenarioMatchFailed,
+			metrics.NoScenarioMetricLabel, metrics.OutcomeError,
+		)
 		return nil, apperrors.NewICAPError(
 			apperrors.ErrInternalServerError.Code,
 			"failed to match scenario",
 			apperrors.ErrInternalServerError.ICAPStatus,
 			err,
-		)
-	}
-
-	// Log matched scenario
-	if p.logger != nil {
-		p.logger.Debug("scenario matched",
-			"request_id", util.RequestIDFromContext(ctx),
-			"scenario", scenario.Name,
-			"method", req.Method,
-			"uri", req.URI,
 		)
 	}
 
@@ -129,6 +143,14 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		idx := scenario.SelectBranch(req)
 		if idx < 0 {
 			// Matcher should have rejected the scenario; defensive guard.
+			p.logProcessorError(
+				ctx, req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeNoScenarioMatch,
+				scenario.Name, metrics.OutcomeError, apperrors.ErrScenarioNotFound,
+			)
+			p.recordRequestError(
+				req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeNoScenarioMatch,
+				scenario.Name, metrics.OutcomeError,
+			)
 			return nil, apperrors.ErrScenarioNotFound
 		}
 		b := &scenario.Branches[idx]
@@ -188,7 +210,10 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		substituted := substituteCaptures(*selectedResponse, req.Captures)
 		selectedResponse = &substituted
 	}
-	defer p.recordScenarioMetrics(scenario.Name, selectedResponse, start)
+	responseLabel := scenarioResponseLabel(selectedResponse)
+	requestinfo.SetScenarioMetadata(ctx, scenario.Name, responseLabel)
+	p.logScenarioMatched(ctx, req, scenario.Name, selectedResponse)
+	defer p.recordScenarioMetrics(ctx, req, scenario.Name, selectedResponse, start)
 
 	// Apply delay
 	var delay time.Duration
@@ -204,18 +229,35 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
+			p.logProcessorError(
+				ctx, req, metrics.RequestErrorStageContext, processorContextErrorType(ctx.Err()),
+				scenario.Name, responseLabel, ctx.Err(),
+			)
+			p.recordRequestError(
+				req, metrics.RequestErrorStageContext, processorContextErrorType(ctx.Err()),
+				scenario.Name, responseLabel,
+			)
 			return nil, ctx.Err()
 		}
 	}
 
 	// Handle the effective selected response error before building bodies/files.
 	if selectedResponse.Error != "" {
-		return nil, apperrors.NewICAPError(
+		err := apperrors.NewICAPError(
 			apperrors.ErrInternalServerError.Code,
 			selectedResponse.Error,
 			apperrors.ErrInternalServerError.ICAPStatus,
 			nil,
 		)
+		p.logProcessorError(
+			ctx, req, metrics.RequestErrorStageProcessorResponse, metrics.RequestErrorTypeScenarioResponseError,
+			scenario.Name, responseLabel, err,
+		)
+		p.recordRequestError(
+			req, metrics.RequestErrorStageProcessorResponse, metrics.RequestErrorTypeScenarioResponseError,
+			scenario.Name, responseLabel,
+		)
+		return nil, err
 	}
 
 	// Build response
@@ -223,6 +265,14 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 	effectiveScenario.Response = *selectedResponse
 	resp, err := p.buildResponse(&effectiveScenario, req)
 	if err != nil {
+		p.logProcessorError(
+			ctx, req, metrics.RequestErrorStageProcessorBuild, metrics.RequestErrorTypeResponseBuildFailed,
+			scenario.Name, responseLabel, err,
+		)
+		p.recordRequestError(
+			req, metrics.RequestErrorStageProcessorBuild, metrics.RequestErrorTypeResponseBuildFailed,
+			scenario.Name, responseLabel,
+		)
 		return nil, err
 	}
 
@@ -547,20 +597,41 @@ func substituteString(s string, vars map[string]string) string {
 }
 
 func (p *MockProcessor) recordScenarioMetrics(
+	ctx context.Context,
+	req *icap.Request,
 	scenario string,
 	response *storage.ResponseTemplate,
 	start time.Time,
 ) {
-	if p.metrics == nil || response == nil {
+	if p.metrics == nil || req == nil || response == nil {
 		return
 	}
-	p.metrics.RecordScenarioRequestForServerWithBlock(
+	p.metrics.RecordScenarioResponseDurationForServer(
 		p.server,
+		req.Method,
+		requestinfo.ContentTypeLabel(ctx, req),
+		responseOutcome(response),
 		scenario,
 		scenarioResponseLabel(response),
-		responseBlocks(response),
 		time.Since(start),
 	)
+}
+
+func responseOutcome(response *storage.ResponseTemplate) string {
+	if response == nil || response.Error != "" || isBlockStatus(responseStatusCode(response)) {
+		return metrics.OutcomeError
+	}
+	if responseBlocks(response) {
+		return metrics.OutcomeBlocked
+	}
+	return metrics.OutcomeAllowed
+}
+
+func processorContextErrorType(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return metrics.RequestErrorTypeDeadlineExceeded
+	}
+	return metrics.RequestErrorTypeContextCanceled
 }
 
 func scenarioResponseLabel(response *storage.ResponseTemplate) string {

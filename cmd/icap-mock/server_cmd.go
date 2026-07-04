@@ -14,44 +14,43 @@ import (
 
 // ServerCommand handles the server subcommand.
 type ServerCommand struct {
-	fs                  *flag.FlagSet
-	writeTimeout        string
-	shutdownTimeout     string
-	readyPath           string
-	healthPath          string
-	host                string
-	storageDir          string
-	readTimeout         string
-	metricsHost         string
-	mockTimeout         string
-	configFile          string
-	scenariosDir        string
-	tlsCert             string
-	tlsKey              string
-	logLevel            string
-	logFormat           string
-	logOutput           string
-	metricsPath         string
-	metricsEndpointMode string
-	maxBodySize         int64
-	logMaxBackups       int
-	metricsPort         int
-	logMaxSize          int
-	healthPort          int
-	maxConns            int
-	storageRotate       int
-	logMaxAge           int
-	port                int
-	storageMaxSize      int64
-	storageEnabled      bool
-	streaming           bool
-	debugFlag           bool
-	healthEnabled       bool
-	tlsEnable           bool
-	versionFlag         bool
-	metricsEnabled      bool
-	validateFlag        bool
-	pprofEnabled        bool
+	fs              *flag.FlagSet
+	writeTimeout    string
+	shutdownTimeout string
+	readyPath       string
+	healthPath      string
+	host            string
+	storageDir      string
+	readTimeout     string
+	metricsHost     string
+	mockTimeout     string
+	configFile      string
+	scenariosDir    string
+	tlsCert         string
+	tlsKey          string
+	logLevel        string
+	logFormat       string
+	logOutput       string
+	metricsPath     string
+	maxBodySize     int64
+	logMaxBackups   int
+	metricsPort     int
+	logMaxSize      int
+	healthPort      int
+	maxConns        int
+	storageRotate   int
+	logMaxAge       int
+	port            int
+	storageMaxSize  int64
+	storageEnabled  bool
+	streaming       bool
+	debugFlag       bool
+	healthEnabled   bool
+	tlsEnable       bool
+	versionFlag     bool
+	metricsEnabled  bool
+	validateFlag    bool
+	pprofEnabled    bool
 }
 
 // NewServerCommand creates a new server command.
@@ -98,7 +97,6 @@ func NewServerCommand() *ServerCommand {
 	cmd.fs.StringVar(&cmd.metricsHost, "metrics.host", "", "Metrics server host (from config)")
 	cmd.fs.IntVar(&cmd.metricsPort, "metrics.port", 0, "Metrics server port (from config)")
 	cmd.fs.StringVar(&cmd.metricsPath, "metrics.path", "", "Metrics endpoint path (from config)")
-	cmd.fs.StringVar(&cmd.metricsEndpointMode, "metrics.endpoint-label-mode", "", "Endpoint label mode for incoming metrics: default, path")
 
 	// Register mock flags
 	cmd.fs.StringVar(&cmd.scenariosDir, "mock.scenarios-dir", "", "Directory containing scenario files (from config)")
@@ -141,7 +139,6 @@ func NewServerCommand() *ServerCommand {
 	cmd.fs.StringVar(&cmd.metricsHost, "metrics-host", "", "Alias for --metrics.host")
 	cmd.fs.IntVar(&cmd.metricsPort, "metrics-port", 0, "Alias for --metrics.port")
 	cmd.fs.StringVar(&cmd.metricsPath, "metrics-path", "", "Alias for --metrics.path")
-	cmd.fs.StringVar(&cmd.metricsEndpointMode, "metrics-endpoint-label-mode", "", "Alias for --metrics.endpoint-label-mode")
 	cmd.fs.StringVar(&cmd.scenariosDir, "mock-scenarios-dir", "", "Alias for --mock.scenarios-dir")
 	cmd.fs.StringVar(&cmd.mockTimeout, "mock-timeout", "", "Alias for --mock.timeout")
 	cmd.fs.BoolVar(&cmd.storageEnabled, "storage-enabled", false, "Alias for --storage.enabled")

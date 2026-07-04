@@ -89,7 +89,7 @@ func (c *AssertCommand) Run(ctx context.Context) error { //nolint:gocyclo // ass
 	// Check error rate
 	if c.maxErrorRate >= 0 {
 		total := sumMetricValues(metrics, "icap_requests_total")
-		errors := sumMetricValuesFiltered(metrics, "icap_requests_total", "status", "5")
+		errors := sumMetricValuesFiltered(metrics, "icap_requests_total", "outcome", "error")
 		if total > 0 {
 			rate := errors / total
 			if rate > c.maxErrorRate {
@@ -104,7 +104,7 @@ func (c *AssertCommand) Run(ctx context.Context) error { //nolint:gocyclo // ass
 
 	// Check scenario was hit
 	if c.scenarioHit != "" {
-		hits := sumMetricValuesFiltered(metrics, "icap_scenario_matches_total", "scenario", c.scenarioHit)
+		hits := sumMetricValuesFiltered(metrics, "icap_requests_total", "scenario", c.scenarioHit)
 		if hits == 0 {
 			failures = append(failures, fmt.Sprintf("scenario-hit: scenario %q was never matched", c.scenarioHit))
 		} else {
@@ -114,7 +114,7 @@ func (c *AssertCommand) Run(ctx context.Context) error { //nolint:gocyclo // ass
 
 	// Check P95 latency
 	if c.maxP95Ms > 0 {
-		p95 := getQuantileValue(metrics, "icap_request_duration_seconds", "0.95")
+		p95 := getQuantileValue(metrics, "icap_scenario_response_duration_seconds", "0.95")
 		if p95 >= 0 {
 			p95Ms := p95 * 1000
 			if p95Ms > c.maxP95Ms {

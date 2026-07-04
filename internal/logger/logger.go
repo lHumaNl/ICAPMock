@@ -23,6 +23,8 @@ import (
 // defaultLogger is the global default logger instance, stored atomically for thread safety.
 var defaultLogger atomic.Value // stores *Logger
 
+const millisecondTimestampFormat = "2006-01-02T15:04:05.000Z07:00"
+
 // Logger wraps slog.Logger with additional functionality for ICAP logging.
 // It provides structured logging with support for JSON and text formats,
 // configurable log levels, and specialized helpers for ICAP request logging.
@@ -107,7 +109,8 @@ func newLoggerWithWriter(cfg config.LoggingConfig, w io.Writer, closer io.Closer
 	levelVar.Set(parseLevel(cfg.Level))
 
 	opts := &slog.HandlerOptions{
-		Level: levelVar,
+		Level:       levelVar,
+		ReplaceAttr: formatTimeAttr,
 	}
 
 	var handler slog.Handler
@@ -127,6 +130,14 @@ func newLoggerWithWriter(cfg config.LoggingConfig, w io.Writer, closer io.Closer
 		closer:   closer,
 		levelVar: levelVar,
 	}, nil
+}
+
+func formatTimeAttr(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key != slog.TimeKey || attr.Value.Kind() != slog.KindTime {
+		return attr
+	}
+	timestamp := attr.Value.Time().Truncate(time.Millisecond)
+	return slog.String(slog.TimeKey, timestamp.Format(millisecondTimestampFormat))
 }
 
 // parseLevel converts a string log level to slog.Level.

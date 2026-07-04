@@ -20,14 +20,15 @@ var (
 // default Prometheus registry. This is suitable for simple use cases where
 // all metrics are registered with the default registry.
 //
-// The handler serves metrics in the Prometheus text exposition format.
+// The handler supports Prometheus text, OpenMetrics text, and Prometheus
+// protobuf content negotiation.
 //
 // Example:
 //
 //	http.Handle("/metrics", metrics.Handler())
 //	go http.ListenAndServe(":9090", nil)
 func Handler() http.Handler {
-	return promhttp.Handler()
+	return promhttp.HandlerFor(prometheus.DefaultGatherer, defaultHandlerOpts())
 }
 
 // HandlerWithRegistry returns an HTTP handler that serves Prometheus metrics
@@ -45,9 +46,9 @@ func Handler() http.Handler {
 //	go http.ListenAndServe(":9090", nil)
 func HandlerWithRegistry(reg prometheus.Gatherer) http.Handler {
 	if reg == nil {
-		return promhttp.Handler()
+		return Handler()
 	}
-	return promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(reg, defaultHandlerOpts())
 }
 
 // HandlerFor returns an HTTP handler that serves Prometheus metrics from the
@@ -66,7 +67,11 @@ func HandlerWithRegistry(reg prometheus.Gatherer) http.Handler {
 //	http.Handle("/metrics", metrics.HandlerFor(reg, opts))
 func HandlerFor(reg prometheus.Gatherer, opts promhttp.HandlerOpts) http.Handler {
 	if reg == nil {
-		return promhttp.Handler()
+		return promhttp.HandlerFor(prometheus.DefaultGatherer, opts)
 	}
 	return promhttp.HandlerFor(reg, opts)
+}
+
+func defaultHandlerOpts() promhttp.HandlerOpts {
+	return promhttp.HandlerOpts{EnableOpenMetrics: true}
 }

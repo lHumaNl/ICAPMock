@@ -91,7 +91,6 @@ health:
 metrics:
   enabled: true
   port: 9090
-  endpoint_label_mode: default  # safe default; use path to label normalized paths
 
 logging:
   level: "info"
@@ -123,7 +122,6 @@ health:
 metrics:
   enabled: true
   port: 9090
-  endpoint_label_mode: default
 ```
 
 See `configs/example.yaml` for a full annotated configuration reference.
@@ -256,7 +254,7 @@ Mechanics:
 - **`use: <name>`** references a template at scenario, branch, or weighted-variant level.
 - **`defaults.use:`** is the file-wide fallback applied when no scenario matched.
 - **`set:` / `body:`** set the ICAP envelope headers and body. **`http_set:` / `http_body:` / `http_body_file:`** set the encapsulated HTTP response (what the origin client actually receives). `Content-Length` on the wrapped response is recomputed automatically from the body size unless you declare it explicitly in `http_set:` (use `"auto"` to force recompute).
-- **`block:`** optionally overrides the scenario metrics block label. If omitted, block is inferred from the selected concrete response: ICAP or wrapped HTTP 4xx/5xx status, `error:`, partial stream endings (`stream.end.mode: fin` / `term`, legacy `stream.finish.mode: fin`), or weighted FIN with `fin_percent > 0`.
+- **`block:`** optionally overrides whether scenario metrics use `outcome="blocked"`. If omitted, the outcome is inferred from the selected concrete response: ICAP errors become `outcome="error"`; wrapped HTTP 4xx/5xx status, partial stream endings (`stream.end.mode: fin` / `term`, legacy `stream.finish.mode: fin`), or weighted FIN with `fin_percent > 0` become `outcome="blocked"`.
 - **`branches:`** holds several `when` / `when_http` → response pairs inside one scenario; first match wins. If none match, the scenario is skipped and the registry moves to the next scenario.
 - **`endpoint:`** accepts a scalar or a list; each entry may include `{name}` captures that become regex groups in the path. Captured values are surfaced as `${name}` in `body`, `set`, and `http_headers`; use `$${` for a literal.
 - **`method:`** accepts a scalar or a list, allowing one scenario to serve REQMOD and RESPMOD on the same port without duplication.
@@ -347,18 +345,15 @@ Prometheus metrics are served at `http://localhost:9090/metrics` by default.
 
 Available metrics include:
 
-- `icap_requests_total{server,method}` — legacy ICAP request count for REQMOD/RESPMOD handlers
-- `icap_incoming_requests_total{server,method,endpoint,extension,result,icap_status,blocked}` — handled ICAP requests with bounded endpoint labels
-- `icap_request_duration_seconds{server,method}` — request latency histogram
-- `icap_response_size_bytes{server,method,body}` — response body size histogram, with `body="icap"` or `body="http"`
+- `icap_requests_total{content_type,method,outcome,server,response,scenario}` — canonical ICAP request count; `content_type` is normalized from encapsulated HTTP headers and truncated to 120 characters, `outcome` is `allowed`, `blocked`, or `error`, and matched requests include scenario/response labels
+- `icap_request_errors_total{server,method,stage,error_type,scenario,response}` — bounded request error count for context cancellation, body receive, routing, scenario match, processor response, and response-build failures; raw error text is logged but never used as a metric label
 - `icap_active_connections{server}` — current open connections per configured server
-- `icap_scenario_requests_total{server,scenario,response,block}` — scenario hits; unmatched default pass-through responses use `scenario="fallback"`
-- `icap_scenario_response_duration_seconds{server,scenario,response,block}` — scenario response latency histogram
+- `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` — scenario response latency classic histogram
 - `icap_scenarios_loaded{server}` — currently loaded scenario count
 - `icap_api_requests_total{server,route,method,status_code}` — management API calls with bounded route labels
 - `icap_api_errors_total{server,route,method,status_code,error_type}` — failed management API calls
 
-A pre-built **Grafana dashboard** is available in `monitoring/grafana/dashboards/`. Start the full monitoring stack with:
+A pre-built **Grafana dashboard** is available in `monitoring/grafana/dashboards/`. It includes request error rate/table panels and Go/process runtime utilization panels for GC, CPU, heap/RSS memory, goroutines, Go threads, file descriptors, network receive/transmit, and uptime. Start the full monitoring stack with:
 
 ```bash
 docker-compose --profile monitoring up -d
@@ -366,6 +361,31 @@ docker-compose --profile monitoring up -d
 
 Grafana will be available at `http://localhost:3000` (default credentials: `admin` / `admin`).
 Override these credentials via environment variables or a secret before any shared or exposed deployment.
+
+`icap_scenario_response_duration_seconds` uses classic Prometheus buckets. The finite bucket
+layout is `0.1, 0.2, ..., 1.0`, then `1.25, 1.5, 1.75, 2.0`, then `2.5, 3.0, ..., 5.0`,
+then `6, 7, 8, 9, 10`, then `15, 20, ..., 60`, then `70, 80, ..., 120` seconds,
+plus the implicit `+Inf` bucket.
+
+Scrape it with standard Prometheus-compatible text or OpenMetrics settings:
+
+```yaml
+scrape_configs:
+  - job_name: icap-mock
+    static_configs:
+      - targets: ["icap-mock:9090"]
+```
+
+Query scenario latency with `_bucket` and `le`, for example:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, content_type, method, outcome, server, response, scenario) (
+    rate(icap_scenario_response_duration_seconds_bucket[5m])
+  )
+)
+```
 
 ---
 

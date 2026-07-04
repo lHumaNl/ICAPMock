@@ -30,7 +30,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -110,10 +109,9 @@ func printMetricsConfig(w io.Writer, cfg *config.Config) {
 	fmt.Fprintf(w, "Metrics Configuration:\n")             //nolint:errcheck
 	fmt.Fprintf(w, "  enabled: %v\n", cfg.Metrics.Enabled) //nolint:errcheck
 	if cfg.Metrics.Enabled {
-		fmt.Fprintf(w, "  host: %s\n", cfg.Metrics.Host)                             //nolint:errcheck
-		fmt.Fprintf(w, "  port: %d\n", cfg.Metrics.Port)                             //nolint:errcheck
-		fmt.Fprintf(w, "  path: %s\n", cfg.Metrics.Path)                             //nolint:errcheck
-		fmt.Fprintf(w, "  endpoint_label_mode: %s\n", cfg.Metrics.EndpointLabelMode) //nolint:errcheck
+		fmt.Fprintf(w, "  host: %s\n", cfg.Metrics.Host) //nolint:errcheck
+		fmt.Fprintf(w, "  port: %d\n", cfg.Metrics.Port) //nolint:errcheck
+		fmt.Fprintf(w, "  path: %s\n", cfg.Metrics.Path) //nolint:errcheck
 	}
 	fmt.Fprintln(w) //nolint:errcheck
 }
@@ -320,6 +318,7 @@ func startAllServers(
 
 		rtr := router.NewRouter()
 		rtr.SetLogger(log.Logger)
+		rtr.SetMetricsForServer(collector, entry.name)
 		if err := registerHandlers(rtr, proc, collector, storageMiddleware, log, registry, entry); err != nil {
 			return nil, nil, fmt.Errorf("registering handlers for %s: %w", entry.name, err)
 		}
@@ -333,7 +332,6 @@ func startAllServers(
 		srv.SetRouter(rtr)
 		srv.SetMetrics(collector)
 		srv.SetMetricsServerName(entry.name)
-		srv.SetMetricsEndpointLabelMode(cfg.Metrics.EndpointLabelMode)
 
 		log.Info("starting ICAP server",
 			"name", entry.name,
@@ -937,7 +935,7 @@ func startMetricsServer(ctx context.Context, cfg *config.Config, log *logger.Log
 }
 
 func newMetricsHTTPHandler(cfg *config.Config, reg prometheus.Gatherer, collector *metrics.Collector) http.Handler {
-	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{EnableOpenMetrics: true})
+	metricsHandler := metrics.HandlerWithRegistry(reg)
 	mux := http.NewServeMux()
 	mux.HandleFunc(cfg.Metrics.Path, func(w http.ResponseWriter, r *http.Request) {
 		collector.SetGoroutines(runtime.NumGoroutine())

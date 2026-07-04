@@ -22,9 +22,6 @@ type MetricsCollector interface {
 	// with the given status ("success" or "failure").
 	RecordConfigReload(status string)
 
-	// RecordConfigReloadDuration records the duration of a configuration reload.
-	RecordConfigReloadDuration(duration time.Duration)
-
 	// SetConfigLastReloadStatus sets the gauge indicating the status of the last
 	// configuration reload (1 for success, 0 for failure).
 	SetConfigLastReloadStatus(success bool)
@@ -63,7 +60,6 @@ type LoadOptions struct {
 // 2. Configuration file values override defaults
 // 3. Environment variables override file values.
 func (l *Loader) Load(opts LoadOptions) (*Config, error) {
-	startTime := time.Now()
 	cfg := &Config{}
 	cfg.SetDefaults()
 
@@ -71,7 +67,7 @@ func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 	if opts.ConfigPath != "" {
 		fileCfg, err := l.LoadFromFile(opts.ConfigPath)
 		if err != nil {
-			l.recordMetrics(false, time.Since(startTime))
+			l.recordMetrics(false)
 			return nil, fmt.Errorf("failed to load config file: %w", err)
 		}
 		l.mergeConfigs(cfg, fileCfg)
@@ -79,7 +75,7 @@ func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 
 	// Load from environment (highest priority)
 	if err := l.LoadFromEnv(cfg); err != nil {
-		l.recordMetrics(false, time.Since(startTime))
+		l.recordMetrics(false)
 		return nil, fmt.Errorf("failed to load from environment: %w", err)
 	}
 	normalizeLoadedConfig(cfg)
@@ -101,12 +97,12 @@ func (l *Loader) Load(opts LoadOptions) (*Config, error) {
 		applyServerDefaults(&cfg.Defaults)
 	}
 
-	l.recordMetrics(true, time.Since(startTime))
+	l.recordMetrics(true)
 	return cfg, nil
 }
 
 // recordMetrics records configuration reload metrics if a collector is configured.
-func (l *Loader) recordMetrics(success bool, duration time.Duration) {
+func (l *Loader) recordMetrics(success bool) {
 	if l.metrics == nil {
 		return
 	}
@@ -117,7 +113,6 @@ func (l *Loader) recordMetrics(success bool, duration time.Duration) {
 	}
 
 	l.metrics.RecordConfigReload(status)
-	l.metrics.RecordConfigReloadDuration(duration)
 	l.metrics.SetConfigLastReloadStatus(success)
 }
 
@@ -306,7 +301,6 @@ func (l *Loader) loadMetricsEnv(cfg *Config) {
 	l.envStr("METRICS_HOST", &cfg.Metrics.Host)
 	l.envInt("METRICS_PORT", &cfg.Metrics.Port)
 	l.envStr("METRICS_PATH", &cfg.Metrics.Path)
-	l.envStr("METRICS_ENDPOINT_LABEL_MODE", &cfg.Metrics.EndpointLabelMode)
 }
 
 func (l *Loader) loadMockEnv(cfg *Config) {
@@ -457,7 +451,6 @@ func mergeMetricsConfig(dst, src *Config) {
 	mergeStr(&dst.Metrics.Host, src.Metrics.Host)
 	mergeInt(&dst.Metrics.Port, src.Metrics.Port)
 	mergeStr(&dst.Metrics.Path, src.Metrics.Path)
-	mergeStr(&dst.Metrics.EndpointLabelMode, src.Metrics.EndpointLabelMode)
 }
 
 func mergeMockConfig(dst, src *Config) {

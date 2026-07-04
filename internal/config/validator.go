@@ -9,11 +9,6 @@ import (
 	"time"
 )
 
-const (
-	metricsEndpointLabelModeDefault = "default"
-	metricsEndpointLabelModePath    = "path"
-)
-
 // ValidationError represents a configuration validation error.
 type ValidationError struct {
 	Value   interface{}
@@ -248,20 +243,9 @@ func (v *Validator) validateMetrics(cfg *MetricsConfig) []ValidationError {
 				Value:   cfg.Path,
 			})
 		}
-		if !validMetricsEndpointLabelMode(cfg.EndpointLabelMode) {
-			errors = append(errors, ValidationError{
-				Field:   "metrics.endpoint_label_mode",
-				Message: "endpoint label mode must be one of: default, path",
-				Value:   cfg.EndpointLabelMode,
-			})
-		}
 	}
 
 	return errors
-}
-
-func validMetricsEndpointLabelMode(mode string) bool {
-	return mode == metricsEndpointLabelModeDefault || mode == metricsEndpointLabelModePath
 }
 
 // validateMock validates mock configuration.

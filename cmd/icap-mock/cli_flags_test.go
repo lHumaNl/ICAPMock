@@ -146,7 +146,6 @@ func TestServerCommand_MetricsFlags(t *testing.T) {
 		"-metrics.host", "127.0.0.1",
 		"-metrics.port", "9091",
 		"-metrics.path", "/custom-metrics",
-		"-metrics.endpoint-label-mode", "path",
 	})
 	if err != nil {
 		t.Fatalf("Failed to parse flags: %v", err)
@@ -163,9 +162,6 @@ func TestServerCommand_MetricsFlags(t *testing.T) {
 	if cmd.metricsPath != "/custom-metrics" {
 		t.Errorf("metricsPath = %q, want '/custom-metrics'", cmd.metricsPath)
 	}
-	if cmd.metricsEndpointMode != "path" {
-		t.Errorf("metricsEndpointMode = %q, want 'path'", cmd.metricsEndpointMode)
-	}
 }
 
 func TestServerCommand_RemovedFlagsRejected(t *testing.T) {
@@ -177,6 +173,8 @@ func TestServerCommand_RemovedFlagsRejected(t *testing.T) {
 		{name: "mock default mode", args: []string{"--mock.default-mode", "mock"}},
 		{name: "trust client ip header", args: []string{"--server.trust-client-ip-header", "true"}},
 		{name: "trusted proxies", args: []string{"--server.trusted-proxies", "127.0.0.1"}},
+		{name: "metrics endpoint label mode", args: []string{"--metrics.endpoint-label-mode", "path"}},
+		{name: "metrics endpoint label mode alias", args: []string{"--metrics-endpoint-label-mode", "path"}},
 	}
 
 	for _, tc := range cases {

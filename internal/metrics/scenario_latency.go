@@ -13,16 +13,21 @@ const (
 	unknownMetricLabel          = "unknown"
 	defaultServerMetricLabel    = "default"
 	managementServerMetricLabel = "management"
-	fallbackScenarioMetricLabel = "fallback"
+	// NoScenarioMetricLabel labels requests that were not produced by a scenario match.
+	NoScenarioMetricLabel = "none"
+	// FallbackScenarioMetricLabel labels default pass-through responses.
+	FallbackScenarioMetricLabel = "fallback"
 	overflowMetricLabel         = "__overflow__"
 	userMetricLabelEscapePrefix = "__user_label__"
 )
 
 type scenarioMetricKey struct {
-	server   string
-	scenario string
-	response string
-	block    string
+	contentType string
+	method      string
+	outcome     string
+	server      string
+	response    string
+	scenario    string
 }
 
 type scenarioLabelLimiter struct {
@@ -65,7 +70,27 @@ func (l *scenarioLabelLimiter) shouldUseOverflowLocked(key scenarioMetricKey) bo
 }
 
 func overflowScenarioMetricKey() scenarioMetricKey {
-	return scenarioMetricKey{overflowMetricLabel, overflowMetricLabel, overflowMetricLabel, overflowMetricLabel}
+	return scenarioMetricKey{
+		overflowMetricLabel,
+		overflowMetricLabel,
+		overflowMetricLabel,
+		overflowMetricLabel,
+		overflowMetricLabel,
+		overflowMetricLabel,
+	}
+}
+
+func (c *Collector) admitScenarioLabels(
+	server, method, contentTypeLabel, outcome, scenario, response string,
+) scenarioMetricKey {
+	return c.scenarioLabels.admit(scenarioMetricKey{
+		contentType: c.contentTypeLabelValue(contentTypeLabel),
+		method:      normalizedMetricLabel(method),
+		outcome:     normalizeOutcomeLabel(outcome),
+		server:      normalizedMetricLabel(server),
+		response:    normalizedMetricLabel(response),
+		scenario:    normalizedMetricLabel(scenario),
+	})
 }
 
 func normalizedMetricLabel(value string) string {
