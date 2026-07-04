@@ -13,7 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultHost = "0.0.0.0"
+const (
+	defaultHost       = "0.0.0.0"
+	defaultServerName = "default"
+)
 
 // DefaultBodyPatternLimitBytes preserves the legacy 10 MiB body_pattern read cap.
 const DefaultBodyPatternLimitBytes int64 = 10 * 1024 * 1024
@@ -229,7 +232,7 @@ type Config struct {
 func (c *Config) SetDefaults() {
 	// Server defaults
 	c.Server.Host = defaultHost //nolint:goconst
-	c.Server.Name = "default"
+	c.Server.Name = defaultServerName
 	c.Server.Port = 1344
 	c.Server.ReadTimeout = 30 * time.Second
 	c.Server.WriteTimeout = 30 * time.Second
@@ -260,7 +263,7 @@ func (c *Config) SetDefaults() {
 	c.Metrics.Host = defaultHost
 	c.Metrics.Port = 9090
 	c.Metrics.Path = "/metrics"
-	c.Metrics.EndpointLabelMode = "default"
+	c.Metrics.EndpointLabelMode = metricsEndpointLabelModeDefault
 
 	// Mock defaults
 	c.Mock.DefaultTimeout = 5 * time.Second
