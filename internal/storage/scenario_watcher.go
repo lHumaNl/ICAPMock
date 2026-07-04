@@ -36,6 +36,7 @@ type ScenarioWatcher struct {
 	registry    ScenarioRegistry
 	ctx         context.Context
 	logger      *slog.Logger
+	debounceSeq map[string]uint64
 	debounceTim map[string]*time.Timer
 	watcher     *fsnotify.Watcher
 	cancel      context.CancelFunc
@@ -106,6 +107,7 @@ func NewScenarioWatcher(registry ScenarioRegistry, filePath string, config HotRe
 		filePath:    absPath,
 		watchedDir:  watchedDir,
 		logger:      logger,
+		debounceSeq: make(map[string]uint64),
 		debounceTim: make(map[string]*time.Timer),
 		ctx:         ctx,
 		cancel:      cancel,
@@ -161,6 +163,7 @@ func (sw *ScenarioWatcher) Stop() error {
 	for path, timer := range sw.debounceTim {
 		timer.Stop()
 		delete(sw.debounceTim, path)
+		delete(sw.debounceSeq, path)
 	}
 	sw.debounceMu.Unlock()
 
@@ -240,6 +243,9 @@ func (sw *ScenarioWatcher) scheduleReload(path string) {
 	sw.debounceMu.Lock()
 	defer sw.debounceMu.Unlock()
 
+	seq := sw.debounceSeq[path] + 1
+	sw.debounceSeq[path] = seq
+
 	// Cancel existing timer if any
 	if timer, exists := sw.debounceTim[path]; exists {
 		timer.Stop()
@@ -248,7 +254,12 @@ func (sw *ScenarioWatcher) scheduleReload(path string) {
 	// Schedule new reload
 	sw.debounceTim[path] = time.AfterFunc(sw.config.Debounce, func() {
 		sw.debounceMu.Lock()
+		if sw.debounceSeq[path] != seq {
+			sw.debounceMu.Unlock()
+			return
+		}
 		delete(sw.debounceTim, path)
+		delete(sw.debounceSeq, path)
 		sw.debounceMu.Unlock()
 
 		sw.reload(path)
