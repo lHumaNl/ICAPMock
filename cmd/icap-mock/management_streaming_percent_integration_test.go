@@ -65,7 +65,7 @@ func TestRealIntegration_RESPMODResponseHTTPBodyPercentTermWaitsForFullUpload(t 
 	assertNoResponseAvailable(t, conn)
 
 	writeConnString(t, conn, body[40:]+"\r\n0\r\n\r\n")
-	resp := readUntilToken(t, conn, "0\r\n\r\n")
+	resp := readUntilTokensInOrder(t, conn, "28\r\n"+body[:40]+"\r\n", "0\r\n\r\n")
 	assertPercentTermResponse(t, resp, body)
 }
 

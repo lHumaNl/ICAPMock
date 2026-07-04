@@ -530,6 +530,15 @@ func readUntilToken(t *testing.T, conn net.Conn, token string) string {
 	return got
 }
 
+func readUntilTokensInOrder(t *testing.T, conn net.Conn, tokens ...string) string {
+	t.Helper()
+	got, err := readConnUntilTokensInOrder(conn, integrationOperationTimeout, tokens...)
+	if err != nil {
+		t.Fatalf("read until tokens %q: %v\npartial response=%q", tokens, err, got)
+	}
+	return got
+}
+
 func assertNoResponseAvailable(t *testing.T, conn net.Conn) {
 	t.Helper()
 	assertNoResponseAvailableWithin(t, conn, noResponseProbeTimeout)
@@ -579,6 +588,30 @@ func readConnUntilToken(conn net.Conn, token string, timeout time.Duration) (str
 		buf.Write(tmp[:n])
 		if err != nil {
 			return buf.String(), err
+		}
+	}
+	return buf.String(), nil
+}
+
+func readConnUntilTokensInOrder(conn net.Conn, timeout time.Duration, tokens ...string) (string, error) {
+	var buf bytes.Buffer
+	tmp := make([]byte, 256)
+	deadline := time.Now().Add(timeout)
+	searchFrom := 0
+	for _, token := range tokens {
+		for {
+			if idx := strings.Index(buf.String()[searchFrom:], token); idx >= 0 {
+				searchFrom += idx + len(token)
+				break
+			}
+			if err := conn.SetReadDeadline(deadline); err != nil {
+				return buf.String(), err
+			}
+			n, err := conn.Read(tmp)
+			buf.Write(tmp[:n])
+			if err != nil {
+				return buf.String(), err
+			}
 		}
 	}
 	return buf.String(), nil
