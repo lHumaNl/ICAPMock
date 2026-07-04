@@ -174,63 +174,6 @@ func TestServerCommand_ApplyOverrides(t *testing.T) {
 	}
 }
 
-func TestNewReplayCommand(t *testing.T) {
-	cmd := NewReplayCommand()
-	if cmd == nil {
-		t.Fatal("NewReplayCommand() returned nil")
-	}
-	if cmd.Name() != "replay" {
-		t.Errorf("Expected name 'replay', got '%s'", cmd.Name())
-	}
-}
-
-func TestReplayCommand_Name(t *testing.T) {
-	cmd := NewReplayCommand()
-	if cmd.Name() != "replay" {
-		t.Errorf("Expected name 'replay', got '%s'", cmd.Name())
-	}
-}
-
-func TestReplayCommand_Parse(t *testing.T) {
-	cmd := NewReplayCommand()
-
-	args := []string{"--dir", "/tmp/test"}
-	err := cmd.Parse(args)
-	if err != nil {
-		t.Errorf("Parse() failed: %v", err)
-	}
-
-	// Verify flag was parsed
-	if cmd.dir != "/tmp/test" {
-		t.Errorf("Expected dir '/tmp/test', got '%s'", cmd.dir)
-	}
-}
-
-func TestReplayCommand_Run_MissingDir(t *testing.T) {
-	cmd := NewReplayCommand()
-	cmd.dir = "" // Missing required flag
-
-	ctx := context.Background()
-	err := cmd.Run(ctx)
-	if err == nil {
-		t.Error("Expected error for missing dir, got nil")
-	}
-	if !strings.Contains(err.Error(), "--dir is required") {
-		t.Errorf("Expected error about --dir, got: %v", err)
-	}
-}
-
-func TestReplayCommand_Run_NonExistentDir(t *testing.T) {
-	cmd := NewReplayCommand()
-	cmd.dir = "/nonexistent/directory/12345" // Non-existent directory
-
-	ctx := context.Background()
-	err := cmd.Run(ctx)
-	if err == nil {
-		t.Error("Expected error for non-existent directory, got nil")
-	}
-}
-
 // TestCommandRegistry_PrintUsage is skipped because capturing stderr in tests
 // causes the test to hang on Windows. The PrintUsage functionality is simple
 // and can be verified by manual testing: icap-mock --help.
@@ -274,10 +217,8 @@ func TestIntegration_BackwardCompatibility(t *testing.T) {
 
 	registry := NewCommandRegistry()
 	serverCmd := &mockCommand{name: "server", runCalled: false}
-	replayCmd := &mockCommand{name: "replay", runCalled: false}
 
 	registry.Register(serverCmd)
-	registry.Register(replayCmd)
 	registry.SetDefault("server")
 
 	// Simulate no subcommand (empty args)
@@ -342,12 +283,6 @@ func TestCommandDispatch(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "Replay command",
-			args:    []string{"replay"},
-			wantCmd: "replay",
-			wantErr: false,
-		},
-		{
 			name:     "Server with help",
 			args:     []string{"server", "--help"},
 			wantCmd:  "server",
@@ -361,10 +296,8 @@ func TestCommandDispatch(t *testing.T) {
 			registry := NewCommandRegistry()
 
 			serverCmd := &mockCommand{name: "server"}
-			replayCmd := &mockCommand{name: "replay"}
 
 			registry.Register(serverCmd)
-			registry.Register(replayCmd)
 
 			if tt.wantHelp {
 				// Help case - just check command is found
@@ -429,57 +362,17 @@ func TestServerCommand_Usage(t *testing.T) {
 	}
 }
 
-// TestReplayCommand_Usage is skipped because capturing stderr in tests
-// causes the test to hang on Windows. The Usage functionality is simple
-// and can be verified by manual testing: icap-mock replay --help.
-func TestReplayCommand_Usage(t *testing.T) {
-	t.Skip("Skipping stderr capture test due to Windows pipe hanging issue")
-
-	cmd := NewReplayCommand()
-
-	// Capture output
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	cmd.Usage()
-
-	w.Close()
-	os.Stderr = oldStderr
-
-	// Read captured output
-	var buf strings.Builder
-	_, _ = io.Copy(&buf, r)
-	output := buf.String()
-
-	// Check that output contains expected elements
-	if !strings.Contains(output, "icap-mock replay") {
-		t.Error("Usage() output missing 'icap-mock replay'")
-	}
-	if !strings.Contains(output, "--dir") {
-		t.Error("Usage() output missing '--dir'")
-	}
-}
-
 func BenchmarkServerCommandCreation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = NewServerCommand()
 	}
 }
 
-func BenchmarkReplayCommandCreation(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_ = NewReplayCommand()
-	}
-}
-
 func BenchmarkCommandRegistryGet(b *testing.B) {
 	registry := NewCommandRegistry()
 	serverCmd := NewServerCommand()
-	replayCmd := NewReplayCommand()
 
 	registry.Register(serverCmd)
-	registry.Register(replayCmd)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

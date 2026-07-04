@@ -4,7 +4,6 @@ package testing
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -393,8 +392,8 @@ func TestExampleHighLoad(t *testing.T) {
 	assert.Less(t, errCount, total/10, "error rate too high")
 }
 
-// TestExampleRateLimit demonstrates rate limiting testing.
-func TestExampleRateLimit(t *testing.T) {
+// TestExampleConnectionPressure demonstrates concurrent connection testing.
+func TestExampleConnectionPressure(t *testing.T) {
 	cfg := &config.ServerConfig{
 		Host:           "127.0.0.1",
 		Port:           0,
@@ -418,25 +417,7 @@ func TestExampleRateLimit(t *testing.T) {
 	})
 
 	errCount, _, _, _ := GetConcurrentStats(results)
-	t.Logf("Rate limit test: %d errors out of %d requests", errCount, len(results))
-}
-
-// TestExampleCircuitBreaker demonstrates circuit breaker testing.
-func TestExampleCircuitBreaker(t *testing.T) {
-	mockMetrics := NewMockMetricsCollector()
-	testErr := errors.New("test error")
-
-	results := RunConcurrentWithResults(t, 100, 10, func(_, iteration int) error {
-		if iteration%10 == 0 {
-			mockMetrics.RecordError("REQMOD", testErr)
-			return testErr
-		}
-		mockMetrics.RecordRequest("REQMOD")
-		return nil
-	})
-
-	errCount, _, _, _ := GetConcurrentStats(results)
-	mockMetrics.AssertErrorCount(t, int64(errCount))
+	t.Logf("Connection pressure test: %d errors out of %d requests", errCount, len(results))
 }
 
 // TestExampleAssertion demonstrates assertion helpers.

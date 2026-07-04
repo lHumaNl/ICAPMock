@@ -15,11 +15,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/middleware"
-	"github.com/icap-mock/icap-mock/internal/ratelimit"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
@@ -42,34 +40,6 @@ func (b *syncBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
-
-// mockLimiter implements ratelimit.Limiter for testing.
-type mockLimiter struct {
-	allow bool
-}
-
-func (m *mockLimiter) Allow() bool {
-	return m.allow
-}
-
-func (m *mockLimiter) Wait(ctx context.Context) error {
-	if m.allow {
-		return nil
-	}
-	return ctx.Err()
-}
-
-func (m *mockLimiter) Reserve() ratelimit.Reservation {
-	return &mockReservation{ok: m.allow}
-}
-
-type mockReservation struct {
-	ok bool
-}
-
-func (r *mockReservation) OK() bool             { return r.ok }
-func (r *mockReservation) Delay() time.Duration { return 0 }
-func (r *mockReservation) Cancel()              {}
 
 // mockStorage implements storage.Storage for testing.
 type mockStorage struct {
@@ -152,73 +122,6 @@ func testStorageMiddleware(t *testing.T, store storage.Storage) (mw handler.Midd
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = sm.Shutdown(ctx)
-	}
-}
-
-// TestRateLimiterMiddleware_Allow tests that requests are allowed when rate limiter permits.
-func TestRateLimiterMiddleware_Allow(t *testing.T) {
-	t.Parallel()
-
-	limiter := &mockLimiter{allow: true}
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	mw := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := mw(baseHandler)
-
-	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
-
-	resp, err := wrappedHandler.Handle(context.Background(), req)
-	if err != nil {
-		t.Errorf("Handle() returned error: %v", err)
-	}
-
-	if resp.StatusCode != icap.StatusOK {
-		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, icap.StatusOK)
-	}
-}
-
-// TestRateLimiterMiddleware_Deny tests that requests are denied when rate limit is exceeded.
-func TestRateLimiterMiddleware_Deny(t *testing.T) {
-	t.Parallel()
-
-	limiter := &mockLimiter{allow: false}
-	called := false
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		called = true
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	mw := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := mw(baseHandler)
-
-	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
-
-	resp, err := wrappedHandler.Handle(context.Background(), req)
-	if err != nil {
-		t.Errorf("Handle() returned error: %v", err)
-	}
-
-	// Should return 429 Too Many Requests
-	if resp.StatusCode != 429 {
-		t.Errorf("StatusCode = %d, want 429", resp.StatusCode)
-	}
-
-	// Base handler should not be called
-	if called {
-		t.Error("Base handler should not be called when rate limited")
-	}
-
-	// Check rate limit headers
-	if val, ok := resp.GetHeader("X-RateLimit-Remaining"); !ok || val != "0" {
-		t.Errorf("X-RateLimit-Remaining = %q, want %q", val, "0")
 	}
 }
 
@@ -456,45 +359,6 @@ func TestChainMiddleware_Empty(t *testing.T) {
 	}
 	if resp.StatusCode != icap.StatusOK {
 		t.Errorf("StatusCode = %d, want %d", resp.StatusCode, icap.StatusOK)
-	}
-}
-
-// TestRateLimiterMiddleware_Concurrent tests thread safety of rate limiter middleware.
-func TestRateLimiterMiddleware_Concurrent(t *testing.T) {
-	t.Parallel()
-
-	limiter := &mockLimiter{allow: true}
-	var callCount int64
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		atomic.AddInt64(&callCount, 1)
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	mw := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := mw(baseHandler)
-
-	const numRequests = 100
-	var wg sync.WaitGroup
-	wg.Add(numRequests)
-
-	for i := 0; i < numRequests; i++ {
-		go func() {
-			defer wg.Done()
-			req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-			resp, err := wrappedHandler.Handle(context.Background(), req)
-			if err != nil {
-				t.Errorf("Handle() returned error: %v", err)
-			}
-			if resp.StatusCode != icap.StatusOK {
-				t.Errorf("StatusCode = %d, want %d", resp.StatusCode, icap.StatusOK)
-			}
-		}()
-	}
-
-	wg.Wait()
-
-	if atomic.LoadInt64(&callCount) != numRequests {
-		t.Errorf("callCount = %d, want %d", callCount, numRequests)
 	}
 }
 
@@ -1408,13 +1272,11 @@ func TestPanicRecoveryMiddleware_ChainedWithOtherMiddleware(t *testing.T) {
 		panic("chained panic")
 	}, "REQMOD")
 
-	// Chain: Rate limiter -> Panic Recovery -> Panic Handler
-	limiter := &mockLimiter{allow: true}
-	rateLimitMiddleware := middleware.RateLimiterMiddleware(limiter)
+	// Chain: Panic Recovery -> Panic Handler
 	panicMiddleware := middleware.PanicRecoveryMiddleware(logger)
 
-	// Apply in order: panic recovery wraps rate limiter wraps handler
-	wrapped := panicMiddleware(rateLimitMiddleware(panicHandler))
+	// Apply panic recovery around the handler.
+	wrapped := panicMiddleware(panicHandler)
 
 	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
 
@@ -1568,19 +1430,16 @@ func TestPanicRecoveryMiddleware_ThroughFullChain(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	// Build full middleware chain like in main.go
-	limiter := &mockLimiter{allow: true}
-	rateLimitMiddleware := middleware.RateLimiterMiddleware(limiter)
+	// Build middleware chain like in main.go
 	panicMiddleware := middleware.PanicRecoveryMiddleware(logger)
 	storageMw, storageCleanup := testStorageMiddleware(t, store)
 	defer storageCleanup()
 	storageMiddleware := storageMw
 
-	// Chain: Panic Recovery -> Rate Limiter -> Storage -> Handler
+	// Chain: Panic Recovery -> Storage -> Handler
 	// (Panic recovery should be outermost to catch all panics)
 	wrapped := middleware.ChainMiddleware(panicHandler,
 		panicMiddleware,
-		rateLimitMiddleware,
 		storageMiddleware,
 	)
 
@@ -1790,29 +1649,9 @@ func BenchmarkPanicRecoveryMiddleware_WithPanic(b *testing.B) {
 	}
 }
 
-// BenchmarkRateLimiterMiddleware_Allow benchmarks rate limiter when allowed.
-func BenchmarkRateLimiterMiddleware_Allow(b *testing.B) {
-	limiter := &mockLimiter{allow: true}
-
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	mw := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := mw(baseHandler)
-
-	req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		wrappedHandler.Handle(context.Background(), req)
-	}
-}
-
 // BenchmarkChainMiddleware benchmarks chained middleware performance.
 func BenchmarkChainMiddleware(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	limiter := &mockLimiter{allow: true}
 
 	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
 		return icap.NewResponse(icap.StatusOK), nil
@@ -1821,7 +1660,6 @@ func BenchmarkChainMiddleware(b *testing.B) {
 	// Chain 3 middlewares
 	wrapped := middleware.ChainMiddleware(baseHandler,
 		middleware.PanicRecoveryMiddleware(logger),
-		middleware.RateLimiterMiddleware(limiter),
 		middleware.PanicRecoveryMiddleware(logger), //nolint:gocritic // dupOption: intentional second layer for safety
 	)
 
@@ -1858,373 +1696,6 @@ func BenchmarkStorageMiddlewareWithPool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		wrappedHandler.Handle(context.Background(), req)
 	}
-}
-
-// ============================================================================
-// Circuit Breaker Tests (standalone tests removed — see internal/circuitbreaker)
-// ============================================================================
-
-// placeholder_removed marks that standalone CircuitBreaker unit tests were removed
-// because they tested the duplicate implementation. The canonical tests live in
-// internal/circuitbreaker/circuitbreaker_test.go.
-//
-// Integration tests with StorageMiddleware remain below.
-
-// failingMockStorage is a mock storage that always fails.
-type failingMockStorage struct {
-	*mockStorage
-	failCount int64
-}
-
-func (s *failingMockStorage) SaveRequest(_ context.Context, _ *storage.StoredRequest) error {
-	atomic.AddInt64(&s.failCount, 1)
-	return errors.New("simulated storage failure")
-}
-
-// TestStorageMiddlewareWithPool_CircuitBreakerOpens tests that circuit breaker opens on failures.
-func TestStorageMiddlewareWithPool_CircuitBreakerOpens(t *testing.T) {
-	t.Parallel()
-
-	var logBuf syncBuffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	// Create a storage that always fails
-	failingStore := &failingMockStorage{mockStorage: newMockStorage()}
-
-	cfg := middleware.StorageMiddlewareConfig{
-		Workers:   1,
-		QueueSize: 100,
-		CircuitBreaker: middleware.CircuitBreakerConfig{
-			Enabled:          true,
-			MaxFailures:      3,
-			ResetTimeout:     30 * time.Second,
-			SuccessThreshold: 2,
-		},
-	}
-
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	storageMiddleware := middleware.StorageMiddlewareWithPool(failingStore, logger, cfg)
-	defer storageMiddleware.Shutdown(context.Background())
-
-	wrappedHandler := storageMiddleware.Wrap(baseHandler)
-
-	// Send requests to trigger failures
-	for i := 0; i < 5; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		_, err := wrappedHandler.Handle(context.Background(), req)
-		if err != nil {
-			t.Errorf("Request %d returned error: %v", i, err)
-		}
-	}
-
-	// Wait for workers to process
-	time.Sleep(100 * time.Millisecond)
-
-	// Circuit should be open
-	cb := storageMiddleware.GetCircuitBreaker()
-	if cb == nil {
-		t.Fatal("CircuitBreaker should not be nil")
-	}
-	if cb.State() != circuitbreaker.StateOpen {
-		t.Errorf("CircuitBreaker state = %v, want %v", cb.State(), circuitbreaker.StateOpen)
-	}
-
-	// Check that circuit opened log was recorded
-	logOutput := logBuf.String()
-	if !bytes.Contains([]byte(logOutput), []byte("circuit breaker opened")) {
-		t.Errorf("Expected 'circuit breaker opened' in logs, got: %s", logOutput)
-	}
-}
-
-// TestStorageMiddlewareWithPool_CircuitBreakerSkipsStorage tests that open circuit skips storage.
-func TestStorageMiddlewareWithPool_CircuitBreakerSkipsStorage(t *testing.T) {
-	t.Parallel()
-
-	var logBuf syncBuffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	// Create a storage that always fails
-	failingStore := &failingMockStorage{mockStorage: newMockStorage()}
-
-	cfg := middleware.StorageMiddlewareConfig{
-		Workers:   1,
-		QueueSize: 100,
-		CircuitBreaker: middleware.CircuitBreakerConfig{
-			Enabled:          true,
-			MaxFailures:      2,
-			ResetTimeout:     30 * time.Second,
-			SuccessThreshold: 2,
-		},
-	}
-
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	storageMiddleware := middleware.StorageMiddlewareWithPool(failingStore, logger, cfg)
-	defer storageMiddleware.Shutdown(context.Background())
-
-	wrappedHandler := storageMiddleware.Wrap(baseHandler)
-
-	// Send requests to trigger failures and open circuit
-	for i := 0; i < 5; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		_, err := wrappedHandler.Handle(context.Background(), req)
-		if err != nil {
-			t.Errorf("Request %d returned error: %v", i, err)
-		}
-	}
-
-	// Wait for workers to process
-	time.Sleep(100 * time.Millisecond)
-
-	// Reset fail count
-	initialFailCount := atomic.LoadInt64(&failingStore.failCount)
-
-	// Send more requests - should be skipped due to open circuit
-	for i := 0; i < 5; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		_, err := wrappedHandler.Handle(context.Background(), req)
-		if err != nil {
-			t.Errorf("Request %d returned error: %v", i, err)
-		}
-	}
-
-	// Wait a bit for any potential async processing
-	time.Sleep(50 * time.Millisecond)
-
-	// Storage should not have been called again (circuit is open)
-	finalFailCount := atomic.LoadInt64(&failingStore.failCount)
-	if finalFailCount > initialFailCount+1 { // Allow 1 for race conditions
-		t.Errorf("Storage was called %d times after circuit opened, expected no more calls", finalFailCount-initialFailCount)
-	}
-
-	// Check that circuit breaker opened (logged by circuitbreaker package)
-	logOutput := logBuf.String()
-	if !bytes.Contains([]byte(logOutput), []byte("circuit breaker opened due to failure threshold")) &&
-		!bytes.Contains([]byte(logOutput), []byte("circuit breaker state transition")) {
-		t.Errorf("Expected circuit breaker open log in output, got: %s", logOutput)
-	}
-}
-
-// TestStorageMiddlewareWithPool_CircuitBreakerRecovery tests circuit breaker recovery.
-func TestStorageMiddlewareWithPool_CircuitBreakerRecovery(t *testing.T) {
-	t.Parallel()
-
-	var logBuf syncBuffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	// Create a storage that can be toggled between failing and working
-	toggleStore := &toggleableMockStorage{
-		mockStorage: newMockStorage(),
-		shouldFail:  true,
-	}
-
-	cfg := middleware.StorageMiddlewareConfig{
-		Workers:   1,
-		QueueSize: 100,
-		CircuitBreaker: middleware.CircuitBreakerConfig{
-			Enabled:          true,
-			MaxFailures:      2,
-			ResetTimeout:     200 * time.Millisecond,
-			SuccessThreshold: 2,
-		},
-	}
-
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	storageMiddleware := middleware.StorageMiddlewareWithPool(toggleStore, logger, cfg)
-	defer storageMiddleware.Shutdown(context.Background())
-
-	wrappedHandler := storageMiddleware.Wrap(baseHandler)
-	cb := storageMiddleware.GetCircuitBreaker()
-
-	// Send requests to trigger failures and open circuit
-	for i := 0; i < 5; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		wrappedHandler.Handle(context.Background(), req)
-	}
-
-	// Wait for workers to process
-	time.Sleep(100 * time.Millisecond)
-
-	if cb.State() != circuitbreaker.StateOpen {
-		t.Fatalf("CircuitBreaker state = %v, want %v", cb.State(), circuitbreaker.StateOpen)
-	}
-
-	// Fix the storage
-	toggleStore.mu.Lock()
-	toggleStore.shouldFail = false
-	toggleStore.mu.Unlock()
-
-	// Wait for reset timeout
-	time.Sleep(250 * time.Millisecond)
-
-	// Send requests to test recovery (half-open -> closed)
-	for i := 0; i < 5; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		wrappedHandler.Handle(context.Background(), req)
-		time.Sleep(50 * time.Millisecond) // Give time for processing
-	}
-
-	// Circuit should be closed now
-	if cb.State() != circuitbreaker.StateClosed {
-		t.Errorf("CircuitBreaker state = %v, want %v", cb.State(), circuitbreaker.StateClosed)
-	}
-}
-
-// toggleableMockStorage is a mock storage that can be toggled between failing and working.
-type toggleableMockStorage struct {
-	*mockStorage
-	mu         sync.Mutex
-	shouldFail bool
-}
-
-func (s *toggleableMockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
-	s.mu.Lock()
-	shouldFail := s.shouldFail
-	s.mu.Unlock()
-
-	if shouldFail {
-		return errors.New("simulated storage failure")
-	}
-	return s.mockStorage.SaveRequest(ctx, req)
-}
-
-// TestStorageMiddlewareWithPool_CircuitBreakerDisabled tests disabled circuit breaker.
-func TestStorageMiddlewareWithPool_CircuitBreakerDisabled(t *testing.T) {
-	t.Parallel()
-
-	var logBuf syncBuffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	// Create a storage that always fails
-	failingStore := &failingMockStorage{mockStorage: newMockStorage()}
-
-	cfg := middleware.StorageMiddlewareConfig{
-		Workers:   1,
-		QueueSize: 100,
-		CircuitBreaker: middleware.CircuitBreakerConfig{
-			Enabled: false, // Disabled
-		},
-	}
-
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	storageMiddleware := middleware.StorageMiddlewareWithPool(failingStore, logger, cfg)
-	defer storageMiddleware.Shutdown(context.Background())
-
-	// Circuit breaker should be nil when disabled
-	if storageMiddleware.GetCircuitBreaker() != nil {
-		t.Error("CircuitBreaker should be nil when disabled")
-	}
-
-	wrappedHandler := storageMiddleware.Wrap(baseHandler)
-
-	// Send requests - should still be attempted even though storage fails
-	for i := 0; i < 5; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		_, err := wrappedHandler.Handle(context.Background(), req)
-		if err != nil {
-			t.Errorf("Request %d returned error: %v", i, err)
-		}
-	}
-
-	// Wait for workers to process
-	time.Sleep(100 * time.Millisecond)
-
-	// All requests should have attempted storage (no circuit breaker protection)
-	failCount := atomic.LoadInt64(&failingStore.failCount)
-	if failCount < 5 {
-		t.Errorf("Storage fail count = %d, expected at least 5", failCount)
-	}
-}
-
-// TestStorageMiddlewareConfig_DefaultsWithCircuitBreaker tests default config includes circuit breaker.
-func TestStorageMiddlewareConfig_DefaultsWithCircuitBreaker(t *testing.T) {
-	t.Parallel()
-
-	cfg := middleware.DefaultStorageMiddlewareConfig()
-
-	if !cfg.CircuitBreaker.Enabled {
-		t.Error("CircuitBreaker.Enabled should be true by default")
-	}
-	if cfg.CircuitBreaker.MaxFailures != 5 {
-		t.Errorf("CircuitBreaker.MaxFailures = %d, want 5", cfg.CircuitBreaker.MaxFailures)
-	}
-	if cfg.CircuitBreaker.ResetTimeout != 30*time.Second {
-		t.Errorf("CircuitBreaker.ResetTimeout = %v, want %v", cfg.CircuitBreaker.ResetTimeout, 30*time.Second)
-	}
-	if cfg.CircuitBreaker.SuccessThreshold != 3 {
-		t.Errorf("CircuitBreaker.SuccessThreshold = %d, want 3", cfg.CircuitBreaker.SuccessThreshold)
-	}
-}
-
-// TestStorageMiddlewareWithPool_CircuitBreakerWithSuccesses tests successful operations reset failures.
-func TestStorageMiddlewareWithPool_CircuitBreakerWithSuccesses(t *testing.T) {
-	t.Parallel()
-
-	var logBuf syncBuffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	// Create a storage that alternates between success and failure
-	alternatingStore := &alternatingMockStorage{mockStorage: newMockStorage()}
-
-	cfg := middleware.StorageMiddlewareConfig{
-		Workers:   1,
-		QueueSize: 100,
-		CircuitBreaker: middleware.CircuitBreakerConfig{
-			Enabled:          true,
-			MaxFailures:      15, // High threshold: rolling window counts all failures, not consecutive
-			ResetTimeout:     30 * time.Second,
-			SuccessThreshold: 2,
-		},
-	}
-
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	storageMiddleware := middleware.StorageMiddlewareWithPool(alternatingStore, logger, cfg)
-	defer storageMiddleware.Shutdown(context.Background())
-
-	wrappedHandler := storageMiddleware.Wrap(baseHandler)
-	cb := storageMiddleware.GetCircuitBreaker()
-
-	// Send many requests - successes should reset failure count
-	for i := 0; i < 20; i++ {
-		req, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-		wrappedHandler.Handle(context.Background(), req)
-	}
-
-	// Wait for workers to process
-	time.Sleep(200 * time.Millisecond)
-
-	// Circuit should still be closed because successes reset the failure counter
-	if cb.State() != circuitbreaker.StateClosed {
-		t.Errorf("CircuitBreaker state = %v, want %v (successes should reset failures)", cb.State(), circuitbreaker.StateClosed)
-	}
-}
-
-// alternatingMockStorage alternates between success and failure.
-type alternatingMockStorage struct {
-	*mockStorage
-	callCount int64
-}
-
-func (s *alternatingMockStorage) SaveRequest(ctx context.Context, req *storage.StoredRequest) error {
-	count := atomic.AddInt64(&s.callCount, 1)
-	if count%2 == 0 {
-		return errors.New("alternating failure")
-	}
-	return s.mockStorage.SaveRequest(ctx, req)
 }
 
 // TestStorageMiddlewareWithPool_BackpressureMetrics tests that backpressure

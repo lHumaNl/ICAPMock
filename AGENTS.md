@@ -8,11 +8,11 @@
 
 ## Runtime map
 - `cmd/icap-mock/main.go` registers CLI subcommands and defaults to `server` when no subcommand is given.
-- `cmd/icap-mock/cli_executor.go` is the main wiring point for config, logging, metrics, rate limiting, storage, scenario registries, processors, routers, and ICAP servers.
+- `cmd/icap-mock/cli_executor.go` is the main wiring point for config, logging, metrics, storage, scenario registries, processors, routers, and ICAP servers.
 - `internal/server` owns listeners and connection handling.
 - `internal/router` routes ICAP URI paths, including pattern routes.
 - `internal/processor` matches scenarios and builds responses.
-- `internal/storage` loads scenarios and stores/replays captured requests.
+- `internal/storage` loads scenarios and stores captured requests.
 
 ## Commands agents should prefer
 - Build: `make build`

@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,17 +42,8 @@ metrics:
   endpoint_label_mode: "path"
 
 mock:
-  default_mode: "mock"
   scenarios_dir: "./custom-scenarios"
   default_timeout: 10s
-
-chaos:
-  enabled: true
-  error_rate: 0.15
-  timeout_rate: 0.05
-  min_latency_ms: 50
-  max_latency_ms: 200
-  connection_drop_rate: 0.01
 
 storage:
   enabled: true
@@ -59,22 +51,11 @@ storage:
   max_file_size: 209715200
   rotate_after: 5000
 
-rate_limit:
-  enabled: true
-  requests_per_second: 5000
-  burst: 7500
-  algorithm: "sliding_window"
-
 health:
   enabled: true
   port: 8081
   health_path: "/healthz"
   ready_path: "/readyz"
-
-replay:
-  enabled: true
-  requests_dir: "./data/replay"
-  speed: 1.5
 `
 
 	// Create temp file
@@ -146,30 +127,11 @@ replay:
 	}
 
 	// Verify mock config
-	if cfg.Mock.DefaultMode != "mock" {
-		t.Errorf("Mock.DefaultMode = %s, want mock", cfg.Mock.DefaultMode)
-	}
 	if cfg.Mock.ScenariosDir != "./custom-scenarios" {
 		t.Errorf("Mock.ScenariosDir = %s, want ./custom-scenarios", cfg.Mock.ScenariosDir)
 	}
 	if cfg.Mock.DefaultTimeout != 10*time.Second {
 		t.Errorf("Mock.DefaultTimeout = %v, want 10s", cfg.Mock.DefaultTimeout)
-	}
-
-	// Verify chaos config
-	if !cfg.Chaos.Enabled {
-		t.Error("Chaos.Enabled should be true")
-	}
-	if cfg.Chaos.ErrorRate != 0.15 {
-		t.Errorf("Chaos.ErrorRate = %f, want 0.15", cfg.Chaos.ErrorRate)
-	}
-
-	// Verify rate limit config
-	if !cfg.RateLimit.Enabled {
-		t.Error("RateLimit.Enabled should be true")
-	}
-	if cfg.RateLimit.Algorithm != "sliding_window" {
-		t.Errorf("RateLimit.Algorithm = %s, want sliding_window", cfg.RateLimit.Algorithm)
 	}
 
 	// Verify health config
@@ -178,14 +140,6 @@ replay:
 	}
 	if cfg.Health.HealthPath != "/healthz" {
 		t.Errorf("Health.HealthPath = %s, want /healthz", cfg.Health.HealthPath)
-	}
-
-	// Verify replay config
-	if !cfg.Replay.Enabled {
-		t.Error("Replay.Enabled should be true")
-	}
-	if cfg.Replay.Speed != 1.5 {
-		t.Errorf("Replay.Speed = %f, want 1.5", cfg.Replay.Speed)
 	}
 
 	// Verify storage config
@@ -232,17 +186,8 @@ func TestLoader_LoadJSON(t *testing.T) {
 			"path": "/metrics"
 		},
 		"mock": {
-			"default_mode": "echo",
 			"scenarios_dir": "./scenarios",
 			"default_timeout": "3s"
-		},
-		"chaos": {
-			"enabled": false,
-			"error_rate": 0,
-			"timeout_rate": 0,
-			"min_latency_ms": 0,
-			"max_latency_ms": 0,
-			"connection_drop_rate": 0
 		},
 		"storage": {
 			"enabled": false,
@@ -250,22 +195,11 @@ func TestLoader_LoadJSON(t *testing.T) {
 			"max_file_size": 0,
 			"rotate_after": 0
 		},
-		"rate_limit": {
-			"enabled": false,
-			"requests_per_second": 0,
-			"burst": 0,
-			"algorithm": "token_bucket"
-		},
 		"health": {
 			"enabled": false,
 			"port": 8082,
 			"health_path": "/health",
 			"ready_path": "/ready"
-		},
-		"replay": {
-			"enabled": false,
-			"requests_dir": "",
-			"speed": 1
 		}
 	}`
 
@@ -351,8 +285,6 @@ func TestLoader_LoadFromEnv(t *testing.T) {
 		"ICAP_METRICS_ENABLED":             "false",
 		"ICAP_METRICS_ENDPOINT_LABEL_MODE": "path",
 		"ICAP_HEALTH_PORT":                 "9999",
-		"ICAP_RATE_LIMIT_ENABLED":          "true",
-		"ICAP_RATE_LIMIT_RPS":              "2000",
 	}
 
 	// Set env vars
@@ -391,12 +323,6 @@ func TestLoader_LoadFromEnv(t *testing.T) {
 	}
 	if cfg.Health.Port != 9999 {
 		t.Errorf("Health.Port = %d, want 9999", cfg.Health.Port)
-	}
-	if !cfg.RateLimit.Enabled {
-		t.Error("RateLimit.Enabled should be true from env")
-	}
-	if cfg.RateLimit.RequestsPerSecond != 2000 {
-		t.Errorf("RateLimit.RequestsPerSecond = %f, want 2000", cfg.RateLimit.RequestsPerSecond)
 	}
 }
 
@@ -622,6 +548,38 @@ func assertShardingConfig(t *testing.T, got ShardingConfig) {
 	}
 }
 
+func TestShardingConfigUnmarshalJSONTracksBoolValues(t *testing.T) {
+	cases := []struct {
+		name            string
+		data            string
+		wantEnabled     bool
+		wantEnableCache bool
+	}{
+		{name: "enabled true cache true", data: `{"enabled":true,"enable_cache":true}`, wantEnabled: true, wantEnableCache: true},
+		{name: "enabled false cache false", data: `{"enabled":false,"enable_cache":false}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got ShardingConfig
+			if err := json.Unmarshal([]byte(tc.data), &got); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			assertShardingJSONBooleans(t, got, tc.wantEnabled, tc.wantEnableCache)
+		})
+	}
+}
+
+func assertShardingJSONBooleans(t *testing.T, got ShardingConfig, wantEnabled, wantEnableCache bool) {
+	t.Helper()
+	if got.Enabled != wantEnabled || got.EnableCache != wantEnableCache {
+		t.Fatalf("sharding booleans = %v/%v, want %v/%v", got.Enabled, got.EnableCache, wantEnabled, wantEnableCache)
+	}
+	if !got.enabledSet || !got.cacheSet {
+		t.Fatalf("sharding presence = %v/%v, want both true", got.enabledSet, got.cacheSet)
+	}
+}
+
 // TestLoader_LoadProductionConfig tests loading a production-like configuration.
 func TestLoader_LoadProductionConfig(t *testing.T) {
 	content := `
@@ -635,8 +593,6 @@ server:
     key_file: "/etc/ssl/key.pem"
 storage:
   queue_size: 10000
-  circuit_breaker:
-    enabled: true
 `
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "production.yaml")
@@ -658,9 +614,6 @@ storage:
 	}
 	if cfg.Server.MaxConnections != 15000 {
 		t.Errorf("Server.MaxConnections = %d, want 15000", cfg.Server.MaxConnections)
-	}
-	if !cfg.Storage.CircuitBreaker.Enabled {
-		t.Error("Storage.CircuitBreaker.Enabled should be true")
 	}
 }
 

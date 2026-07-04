@@ -110,7 +110,7 @@ func (c *chainHandler) Method() string {
 //
 // Example:
 //
-//	chain := handler.Chain(authHandler, rateLimitHandler, mainHandler)
+//	chain := handler.Chain(authHandler, validationHandler, mainHandler)
 func Chain(handlers ...Handler) Handler {
 	method := ""
 	if len(handlers) > 0 {

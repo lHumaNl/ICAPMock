@@ -18,8 +18,6 @@ func main() {
 
 	// Register commands
 	registry.Register(NewServerCommand())
-	replayCmd := NewReplayCommand()
-	registry.Register(replayCmd)
 	registry.Register(NewValidateCommand())
 	registry.Register(NewMatchTestCommand())
 	registry.Register(NewAssertCommand())

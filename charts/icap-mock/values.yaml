@@ -46,6 +46,8 @@ icap:
   writeTimeout: 30s
   # -- Maximum simultaneous connections
   maxConnections: 15000
+  # -- Enable streaming mode
+  streaming: true
 
   # Multi-server settings (used when mode == "multi")
   # Each entry becomes a named server in the config.
@@ -94,13 +96,6 @@ storage:
   enabled: false
   # -- Path inside the container for stored requests
   path: /app/data/requests
-
-# =============================================================================
-# Rate limiting
-# =============================================================================
-rateLimit:
-  # -- Enable rate limiting
-  enabled: false
 
 # =============================================================================
 # TLS (optional)

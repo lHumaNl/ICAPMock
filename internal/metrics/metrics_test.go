@@ -194,6 +194,40 @@ func TestNewCollector_NilRegistry(t *testing.T) {
 	}
 }
 
+func TestNewCollector_RemovedFeatureMetricsAreAbsent(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	_, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	removedMetrics := []string{
+		"icap_rate_limit_exceeded_total",
+		"icap_rate_limit_wait_seconds",
+		"icap_per_client_rate_limit_exceeded_total",
+		"icap_per_client_rate_limit_wait_seconds",
+		"icap_per_client_rate_limit_active_clients",
+		"icap_per_client_rate_limit_evictions_total",
+		"icap_replay_requests_total",
+		"icap_replay_requests_failed_total",
+		"icap_replay_duration_seconds",
+		"icap_replay_behind_original_seconds",
+		"icap_chaos_injected_total",
+		"icap_script_pool_rejected_total",
+		"icap_script_pool_queue_length",
+		"icap_script_pool_workers",
+		"icap_circuit_breaker_state",
+		"icap_circuit_breaker_transitions_total",
+		"icap_circuit_breaker_failures_total",
+		"icap_preview_requests_rejected_total",
+	}
+	for _, name := range removedMetrics {
+		t.Run(name, func(t *testing.T) {
+			assertNoMetric(t, reg, name)
+		})
+	}
+}
+
 // TestCollector_RecordRequest tests request counter recording.
 func TestCollector_RecordRequest(t *testing.T) {
 	reg := prometheus.NewRegistry()
@@ -749,167 +783,6 @@ func recordScenarioRequestsWorker(
 	}
 }
 
-// TestCollector_RecordChaosInjected tests chaos injection counter recording.
-func TestCollector_RecordChaosInjected(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordChaosInjected("latency")
-	collector.RecordChaosInjected("latency")
-	collector.RecordChaosInjected("error")
-
-	countLatency := testutil.ToFloat64(collector.chaosInjected.WithLabelValues("latency"))
-	countError := testutil.ToFloat64(collector.chaosInjected.WithLabelValues("error"))
-
-	if countLatency != 2 {
-		t.Errorf("latency chaos count = %v, want 2", countLatency)
-	}
-	if countError != 1 {
-		t.Errorf("error chaos count = %v, want 1", countError)
-	}
-}
-
-// TestCollector_RecordRateLimitExceeded tests rate limit counter recording.
-func TestCollector_RecordRateLimitExceeded(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordRateLimitExceeded("client_a")
-	collector.RecordRateLimitExceeded("client_a")
-	collector.RecordRateLimitExceeded("client_b")
-
-	count := testutil.ToFloat64(collector.rateLimitExceeded.WithLabelValues("default"))
-	if count != 3 {
-		t.Errorf("rate limit count = %v, want 3", count)
-	}
-}
-
-// TestCollector_RecordRateLimitWaitTime tests rate limit wait time histogram recording.
-func TestCollector_RecordRateLimitWaitTime(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordRateLimitWaitTime("client_a", 50*time.Millisecond)
-	collector.RecordRateLimitWaitTime("client_a", 100*time.Millisecond)
-
-	countA := getHistogramCount(reg, "icap_rate_limit_wait_seconds", "default")
-	if countA != 2 {
-		t.Errorf("client_a wait time count = %v, want 2", countA)
-	}
-}
-
-func TestCollector_RecordRateLimitForServer(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordRateLimitExceededForServer("edge-a")
-	collector.RecordRateLimitWaitTimeForServer("edge-a", 50*time.Millisecond)
-	collector.RecordPerClientRateLimitExceededForServer("edge-a")
-	collector.RecordPerClientRateLimitWaitTimeForServer("edge-a", 50*time.Millisecond)
-	collector.SetPerClientRateLimitActiveForServer("edge-a", 2)
-	collector.IncPerClientRateLimitEvictionsForServer("edge-a")
-
-	if got := metricValue(t, reg, "icap_rate_limit_exceeded_total", map[string]string{"server": "edge-a"}); got != 1 {
-		t.Errorf("rate limit exceeded = %v, want 1", got)
-	}
-	if got := metricValue(t, reg, "icap_per_client_rate_limit_exceeded_total", map[string]string{"server": "edge-a"}); got != 1 {
-		t.Errorf("per-client exceeded = %v, want 1", got)
-	}
-	if got := metricValue(t, reg, "icap_per_client_rate_limit_active_clients", map[string]string{"server": "edge-a"}); got != 2 {
-		t.Errorf("per-client active clients = %v, want 2", got)
-	}
-	if got := metricValue(t, reg, "icap_per_client_rate_limit_evictions_total", map[string]string{"server": "edge-a"}); got != 1 {
-		t.Errorf("per-client evictions = %v, want 1", got)
-	}
-	assertHistogramCount(t, reg, "icap_rate_limit_wait_seconds", map[string]string{"server": "edge-a"}, 1)
-	assertHistogramCount(t, reg, "icap_per_client_rate_limit_wait_seconds", map[string]string{"server": "edge-a"}, 1)
-}
-
-// TestCollector_RecordReplayRequest tests replay request counter recording.
-func TestCollector_RecordReplayRequest(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordReplayRequest()
-	collector.RecordReplayRequest()
-	collector.RecordReplayRequest()
-
-	count := testutil.ToFloat64(collector.replayRequestsTotal)
-	if count != 3 {
-		t.Errorf("replay requests count = %v, want 3", count)
-	}
-}
-
-// TestCollector_RecordReplayFailure tests replay failure counter recording.
-func TestCollector_RecordReplayFailure(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordReplayFailure()
-	collector.RecordReplayFailure()
-
-	count := testutil.ToFloat64(collector.replayRequestsFailed)
-	if count != 2 {
-		t.Errorf("replay failures count = %v, want 2", count)
-	}
-}
-
-// TestCollector_RecordReplayDuration tests replay duration histogram recording.
-func TestCollector_RecordReplayDuration(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.RecordReplayDuration(150 * time.Millisecond)
-	collector.RecordReplayDuration(250 * time.Millisecond)
-
-	count := getHistogramCount(reg, "icap_replay_duration_seconds")
-	if count != 2 {
-		t.Errorf("replay duration count = %v, want 2", count)
-	}
-}
-
-// TestCollector_SetReplayBehindOriginal tests replay behind gauge setting.
-func TestCollector_SetReplayBehindOriginal(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	collector.SetReplayBehindOriginal(5.2)
-	count := testutil.ToFloat64(collector.replayBehindOriginal)
-	if count != 5.2 {
-		t.Errorf("replay behind original = %v, want 5.2", count)
-	}
-
-	collector.SetReplayBehindOriginal(0)
-	count = testutil.ToFloat64(collector.replayBehindOriginal)
-	if count != 0 {
-		t.Errorf("replay behind original = %v, want 0", count)
-	}
-}
-
 // TestCollector_StreamingActive tests streaming active gauge.
 func TestCollector_StreamingActive(t *testing.T) {
 	reg := prometheus.NewRegistry()
@@ -1092,13 +965,6 @@ func TestCollector_MetricNames(t *testing.T) {
 	collector.SetGoroutines(1)
 	collector.RecordScenarioMatched("test")
 	collector.RecordScenarioRequest("test", "204", time.Millisecond)
-	collector.RecordChaosInjected("test")
-	collector.RecordRateLimitExceeded("test")
-	collector.RecordRateLimitWaitTime("test", time.Millisecond)
-	collector.RecordReplayRequest()
-	collector.RecordReplayFailure()
-	collector.RecordReplayDuration(time.Millisecond)
-	collector.SetReplayBehindOriginal(0)
 	collector.IncStreamingActive()
 	collector.RecordStreamingBytes("in", 1)
 	collector.RecordConfigReload("success")
@@ -1124,13 +990,6 @@ func TestCollector_MetricNames(t *testing.T) {
 		"icap_scenarios_matched_total",
 		"icap_scenario_requests_total",
 		"icap_scenario_response_duration_seconds",
-		"icap_chaos_injected_total",
-		"icap_rate_limit_exceeded_total",
-		"icap_rate_limit_wait_seconds",
-		"icap_replay_requests_total",
-		"icap_replay_requests_failed_total",
-		"icap_replay_duration_seconds",
-		"icap_replay_behind_original_seconds",
 		"icap_streaming_active",
 		"icap_streaming_bytes_total",
 		"icap_config_reload_total",
@@ -1183,216 +1042,5 @@ func TestCollector_ConcurrentAccess(t *testing.T) {
 	count := testutil.ToFloat64(collector.requestsTotal.WithLabelValues("default", "REQMOD"))
 	if count != 1000 {
 		t.Errorf("concurrent request count = %v, want 1000", count)
-	}
-}
-
-// TestCollector_SetCircuitBreakerState tests circuit breaker state gauge.
-func TestCollector_SetCircuitBreakerState(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	// Test closed state
-	collector.SetCircuitBreakerState("storage", "closed")
-	value := testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("storage"))
-	if value != 0 {
-		t.Errorf("closed state = %v, want 0", value)
-	}
-
-	// Test half-open state
-	collector.SetCircuitBreakerState("storage", "half-open")
-	value = testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("storage"))
-	if value != 0.5 {
-		t.Errorf("half-open state = %v, want 0.5", value)
-	}
-
-	// Test open state
-	collector.SetCircuitBreakerState("storage", "open")
-	value = testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("storage"))
-	if value != 1 {
-		t.Errorf("open state = %v, want 1", value)
-	}
-}
-
-// TestCollector_SetCircuitBreakerState_MultipleComponents tests that state gauge works for multiple components.
-func TestCollector_SetCircuitBreakerState_MultipleComponents(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	// Set different states for different components
-	collector.SetCircuitBreakerState("storage", "closed")
-	collector.SetCircuitBreakerState("processor", "open")
-	collector.SetCircuitBreakerState("cache", "half-open")
-
-	// Verify each component has its own state
-	storageState := testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("storage"))
-	processorState := testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("processor"))
-	cacheState := testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("cache"))
-
-	if storageState != 0 {
-		t.Errorf("storage state = %v, want 0", storageState)
-	}
-	if processorState != 1 {
-		t.Errorf("processor state = %v, want 1", processorState)
-	}
-	if cacheState != 0.5 {
-		t.Errorf("cache state = %v, want 0.5", cacheState)
-	}
-}
-
-// TestCollector_RecordCircuitBreakerTransition tests circuit breaker transition counter.
-func TestCollector_RecordCircuitBreakerTransition(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	// Record transitions
-	collector.RecordCircuitBreakerTransition("storage", "closed", "open")
-	collector.RecordCircuitBreakerTransition("storage", "closed", "open")
-	collector.RecordCircuitBreakerTransition("storage", "open", "half-open")
-	collector.RecordCircuitBreakerTransition("storage", "half-open", "closed")
-	collector.RecordCircuitBreakerTransition("processor", "closed", "open")
-
-	// Verify transitions are recorded correctly
-	closedToOpen := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "closed", "open"))
-	openToHalfOpen := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "open", "half-open"))
-	halfOpenToClosed := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "half-open", "closed"))
-	processorTransitions := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("processor", "closed", "open"))
-
-	if closedToOpen != 2 {
-		t.Errorf("closed→open transitions = %v, want 2", closedToOpen)
-	}
-	if openToHalfOpen != 1 {
-		t.Errorf("open→half-open transitions = %v, want 1", openToHalfOpen)
-	}
-	if halfOpenToClosed != 1 {
-		t.Errorf("half-open→closed transitions = %v, want 1", halfOpenToClosed)
-	}
-	if processorTransitions != 1 {
-		t.Errorf("processor closed→open transitions = %v, want 1", processorTransitions)
-	}
-}
-
-// TestCollector_RecordCircuitBreakerFailure tests circuit breaker failure counter.
-func TestCollector_RecordCircuitBreakerFailure(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	// Record failures
-	collector.RecordCircuitBreakerFailure("storage")
-	collector.RecordCircuitBreakerFailure("storage")
-	collector.RecordCircuitBreakerFailure("storage")
-	collector.RecordCircuitBreakerFailure("processor")
-
-	// Verify failures are recorded correctly
-	storageFailures := testutil.ToFloat64(collector.circuitBreakerFailures.WithLabelValues("storage"))
-	processorFailures := testutil.ToFloat64(collector.circuitBreakerFailures.WithLabelValues("processor"))
-
-	if storageFailures != 3 {
-		t.Errorf("storage failures = %v, want 3", storageFailures)
-	}
-	if processorFailures != 1 {
-		t.Errorf("processor failures = %v, want 1", processorFailures)
-	}
-}
-
-// TestCollector_CircuitBreakerMetrics_ConcurrentAccess tests that circuit breaker metrics are safe for concurrent use.
-func TestCollector_CircuitBreakerMetrics_ConcurrentAccess(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	done := make(chan bool)
-
-	// Concurrent state changes, transitions, and failures
-	for i := 0; i < 10; i++ {
-		go func() {
-			for j := 0; j < 100; j++ {
-				collector.SetCircuitBreakerState("storage", "closed")
-				collector.SetCircuitBreakerState("storage", "open")
-				collector.RecordCircuitBreakerTransition("storage", "closed", "open")
-				collector.RecordCircuitBreakerTransition("storage", "open", "half-open")
-				collector.RecordCircuitBreakerFailure("storage")
-			}
-			done <- true
-		}()
-	}
-
-	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
-		<-done
-	}
-
-	// If we get here without race condition, test passes
-	failures := testutil.ToFloat64(collector.circuitBreakerFailures.WithLabelValues("storage"))
-	if failures != 1000 {
-		t.Errorf("concurrent failures = %v, want 1000", failures)
-	}
-
-	transitions := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "closed", "open"))
-	if transitions != 1000 {
-		t.Errorf("concurrent transitions = %v, want 1000", transitions)
-	}
-}
-
-// TestCollector_CircuitBreakerMetrics_InitialState tests that initial state is set to closed (0).
-func TestCollector_CircuitBreakerMetrics_InitialState(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	// Set initial state
-	collector.SetCircuitBreakerState("storage", "closed")
-
-	value := testutil.ToFloat64(collector.circuitBreakerState.WithLabelValues("storage"))
-	if value != 0 {
-		t.Errorf("initial state = %v, want 0 (closed)", value)
-	}
-}
-
-// TestCollector_CircuitBreakerMetrics_AllTransitions tests all possible state transitions.
-func TestCollector_CircuitBreakerMetrics_AllTransitions(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	collector, err := NewCollector(reg)
-	if err != nil {
-		t.Fatalf("NewCollector() error = %v", err)
-	}
-
-	// Test all possible transitions
-	collector.RecordCircuitBreakerTransition("storage", "closed", "open")
-	collector.RecordCircuitBreakerTransition("storage", "open", "half-open")
-	collector.RecordCircuitBreakerTransition("storage", "half-open", "closed")
-	collector.RecordCircuitBreakerTransition("storage", "half-open", "open")
-
-	closedToOpen := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "closed", "open"))
-	openToHalfOpen := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "open", "half-open"))
-	halfOpenToClosed := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "half-open", "closed"))
-	halfOpenToOpen := testutil.ToFloat64(collector.circuitBreakerTransitions.WithLabelValues("storage", "half-open", "open"))
-
-	if closedToOpen != 1 {
-		t.Errorf("closed→open = %v, want 1", closedToOpen)
-	}
-	if openToHalfOpen != 1 {
-		t.Errorf("open→half-open = %v, want 1", openToHalfOpen)
-	}
-	if halfOpenToClosed != 1 {
-		t.Errorf("half-open→closed = %v, want 1", halfOpenToClosed)
-	}
-	if halfOpenToOpen != 1 {
-		t.Errorf("half-open→open = %v, want 1", halfOpenToOpen)
 	}
 }

@@ -424,22 +424,14 @@ func writeResponseFromICAP(writer BufferedWriter, resp *icap.Response) error {
 	return writer.Flush()
 }
 
-// extractClientIP extracts the canonical client IP address.
-// X-Client-IP is honored only when explicitly enabled and sent by a trusted proxy.
+// extractClientIP extracts the canonical client IP address from the peer socket.
 //
 // Parameters:
-//   - headers: The request headers
 //   - remoteAddr: The remote address string (e.g., "192.168.1.1:12345")
 //
 // Returns the extracted IP address.
-func extractClientIP(headers icap.Header, remoteAddr string, trustHeader bool, trustedProxies []string) string {
-	peerIP := extractPeerIP(remoteAddr)
-	if trustHeader && isTrustedProxy(peerIP, trustedProxies) {
-		if clientIP, ok := validClientIPHeader(headers); ok {
-			return clientIP
-		}
-	}
-	return peerIP
+func extractClientIP(remoteAddr string) string {
+	return extractPeerIP(remoteAddr)
 }
 
 func extractPeerIP(remoteAddr string) string {
@@ -448,40 +440,6 @@ func extractPeerIP(remoteAddr string) string {
 		return remoteAddr
 	}
 	return host
-}
-
-func validClientIPHeader(headers icap.Header) (string, bool) {
-	clientIP, ok := headers.Get("X-Client-IP")
-	if !ok {
-		return "", false
-	}
-	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
-	return clientIP, net.ParseIP(clientIP) != nil
-}
-
-func isTrustedProxy(peerIP string, trustedProxies []string) bool {
-	if len(trustedProxies) == 0 {
-		return true
-	}
-	ip := net.ParseIP(peerIP)
-	return ip != nil && proxyListContainsIP(ip, trustedProxies)
-}
-
-func proxyListContainsIP(ip net.IP, trustedProxies []string) bool {
-	for _, proxy := range trustedProxies {
-		if proxyMatchesIP(ip, strings.TrimSpace(proxy)) {
-			return true
-		}
-	}
-	return false
-}
-
-func proxyMatchesIP(ip net.IP, proxy string) bool {
-	if proxyIP := net.ParseIP(proxy); proxyIP != nil {
-		return proxyIP.Equal(ip)
-	}
-	_, network, err := net.ParseCIDR(proxy)
-	return err == nil && network.Contains(ip)
 }
 
 // isValidICAPMethod checks if the method is a valid ICAP method.

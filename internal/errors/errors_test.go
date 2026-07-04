@@ -181,7 +181,6 @@ func TestPredefinedErrors(t *testing.T) {
 		{icaperrors.ErrTimeout, "ErrTimeout", 1004, 504},
 		{icaperrors.ErrInternalServerError, "ErrInternalServerError", 1005, 500},
 		{icaperrors.ErrScenarioNotFound, "ErrScenarioNotFound", 1006, 404},
-		{icaperrors.ErrRateLimitExceeded, "ErrRateLimitExceeded", 1007, 503},
 		{icaperrors.ErrBodyTooLarge, "ErrBodyTooLarge", 1008, 413},
 		{icaperrors.ErrConnectionDropped, "ErrConnectionDropped", 1009, 502},
 	}

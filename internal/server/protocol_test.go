@@ -334,27 +334,7 @@ func TestParseICAPRequestRejectsOversizedPreviewHeader(t *testing.T) {
 }
 
 func TestExtractClientIPIgnoresSpoofedHeaderByDefault(t *testing.T) {
-	headers := icap.Header{}
-	headers.Set("X-Client-IP", "203.0.113.99")
-	got := extractClientIP(headers, "192.0.2.10:12345", false, nil)
-	if got != "192.0.2.10" {
-		t.Fatalf("extractClientIP() = %q, want peer IP", got)
-	}
-}
-
-func TestExtractClientIPHonorsTrustedProxyHeader(t *testing.T) {
-	headers := icap.Header{}
-	headers.Set("X-Client-IP", "203.0.113.99")
-	got := extractClientIP(headers, "10.0.0.5:12345", true, []string{"10.0.0.0/24"})
-	if got != "203.0.113.99" {
-		t.Fatalf("extractClientIP() = %q, want forwarded client IP", got)
-	}
-}
-
-func TestExtractClientIPRejectsUntrustedProxyHeader(t *testing.T) {
-	headers := icap.Header{}
-	headers.Set("X-Client-IP", "203.0.113.99")
-	got := extractClientIP(headers, "192.0.2.10:12345", true, []string{"10.0.0.0/24"})
+	got := extractClientIP("192.0.2.10:12345")
 	if got != "192.0.2.10" {
 		t.Fatalf("extractClientIP() = %q, want peer IP", got)
 	}

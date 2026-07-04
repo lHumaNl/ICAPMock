@@ -63,13 +63,6 @@ var (
 		ICAPStatus: 404,
 	}
 
-	// ErrRateLimitExceeded indicates the client has exceeded rate limits.
-	ErrRateLimitExceeded = &Error{
-		Code:       1007,
-		Message:    "rate limit exceeded",
-		ICAPStatus: 503,
-	}
-
 	// ErrBodyTooLarge indicates the request body exceeds size limits.
 	ErrBodyTooLarge = &Error{
 		Code:       1008,

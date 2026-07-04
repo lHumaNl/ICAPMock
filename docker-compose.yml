@@ -43,8 +43,6 @@ services:
       - ICAP_HEALTH_PORT=8080
       - ICAP_METRICS_PORT=9090
       - ICAP_METRICS_ENABLED=true
-      - ICAP_STORAGE_ENABLED=true
-      - ICAP_RATE_LIMIT_ENABLED=true
     
     # Restart policy
     restart: unless-stopped

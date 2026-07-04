@@ -73,17 +73,17 @@ func TestConfigDefaults_MaxBodySize_Megabytes(t *testing.T) {
 	}
 }
 
-func TestConfigDefaults_ClientIdentityHeadersNotTrusted(t *testing.T) {
+func TestConfigDefaults_OptionalStorageAndShardingDisabled(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
 	cfg.SetDefaults()
 
-	if cfg.Server.TrustClientIPHeader {
-		t.Fatal("Server.TrustClientIPHeader should be false by default")
+	if cfg.Storage.Enabled {
+		t.Fatal("Storage.Enabled should be false by default")
 	}
-	if cfg.Preview.TrustClientIDHeader {
-		t.Fatal("Preview.TrustClientIDHeader should be false by default")
+	if cfg.Sharding.Enabled {
+		t.Fatal("Sharding.Enabled should be false by default")
 	}
 }
 
@@ -174,16 +174,8 @@ func TestConfigDefaults_MaxConnections_HighTrafficVerify(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.SetDefaults()
 
-	// Verify MaxConnections >= RateLimit.Burst for traffic handling
-	if cfg.Server.MaxConnections < cfg.RateLimit.Burst {
-		t.Errorf("MaxConnections (%d) should be >= RateLimit.Burst (%d)",
-			cfg.Server.MaxConnections, cfg.RateLimit.Burst)
-	}
-
-	// Verify MaxConnections >= RateLimit.RequestsPerSecond
-	if float64(cfg.Server.MaxConnections) < cfg.RateLimit.RequestsPerSecond {
-		t.Errorf("MaxConnections (%d) should be >= RequestsPerSecond (%f)",
-			cfg.Server.MaxConnections, cfg.RateLimit.RequestsPerSecond)
+	if cfg.Server.MaxConnections < 10000 {
+		t.Errorf("MaxConnections (%d) should support high-traffic scenarios", cfg.Server.MaxConnections)
 	}
 }
 
@@ -260,11 +252,6 @@ func TestConfigDefaults_StorageQueueSize_10000(t *testing.T) {
 		t.Errorf("Storage.QueueSize should be > 1000 (old default), got %d", cfg.Storage.QueueSize)
 	}
 
-	// Verify QueueSize >= RateLimit.RequestsPerSecond for high-load scenarios
-	if cfg.Storage.QueueSize < int(cfg.RateLimit.RequestsPerSecond) {
-		t.Errorf("Storage.QueueSize (%d) should be >= RequestsPerSecond (%f)",
-			cfg.Storage.QueueSize, cfg.RateLimit.RequestsPerSecond)
-	}
 }
 
 // TestConfigDefaults_StorageQueueSize_LoadCapacity verifies queue can handle high load.
@@ -355,12 +342,4 @@ func TestConfigDefaults_StorageWorkers_LoadCapacity(t *testing.T) {
 			cfg.Storage.Workers, maxReasonable)
 	}
 
-	// Verify Workers can handle RateLimit.RequestsPerSecond (10k RPS)
-	// Each worker should be able to handle at least 625 RPS
-	expectedRPSPerWorker := cfg.RateLimit.RequestsPerSecond / float64(cfg.Storage.Workers)
-	minRPSPerWorker := 625.0
-	if expectedRPSPerWorker < minRPSPerWorker {
-		t.Errorf("Each worker should handle at least %.0f RPS, got %.0f (Workers=%d, RPS=%.0f)",
-			minRPSPerWorker, expectedRPSPerWorker, cfg.Storage.Workers, cfg.RateLimit.RequestsPerSecond)
-	}
 }

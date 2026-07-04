@@ -67,43 +67,15 @@ func TestConfigDefaults_PprofDisabled(t *testing.T) {
 	}
 }
 
-// TestConfigDefaults_RateLimitEnabled verifies rate limiting is enabled by default.
-// Production safety: prevents resource exhaustion from malicious traffic.
-func TestConfigDefaults_RateLimitEnabled(t *testing.T) {
+// TestConfigDefaults_StorageDisabled verifies storage is disabled by default.
+func TestConfigDefaults_StorageDisabled(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
 	cfg.SetDefaults()
 
-	if !cfg.RateLimit.Enabled {
-		t.Error("RateLimit.Enabled should be true by default for production safety")
-	}
-}
-
-// TestConfigDefaults_RateLimitBurst verifies burst capacity matches MaxConnections.
-// This ensures rate limiter can handle traffic spikes.
-func TestConfigDefaults_RateLimitBurst(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-
-	// Burst should be >= MaxConnections to handle traffic spikes
-	if cfg.RateLimit.Burst < cfg.Server.MaxConnections {
-		t.Errorf("RateLimit.Burst (%d) should be >= MaxConnections (%d)",
-			cfg.RateLimit.Burst, cfg.Server.MaxConnections)
-	}
-}
-
-// TestConfigDefaults_StorageEnabled verifies storage is enabled by default.
-func TestConfigDefaults_StorageEnabled(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-
-	if !cfg.Storage.Enabled {
-		t.Error("Storage.Enabled should be true by default")
+	if cfg.Storage.Enabled {
+		t.Error("Storage.Enabled should be false by default")
 	}
 }
 
@@ -142,30 +114,6 @@ func TestConfigDefaults_HealthEnabled(t *testing.T) {
 
 	if !cfg.Health.Enabled {
 		t.Error("Health.Enabled should be true by default")
-	}
-}
-
-// TestConfigDefaults_ChaosDisabled verifies chaos is disabled by default.
-func TestConfigDefaults_ChaosDisabled(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-
-	if cfg.Chaos.Enabled {
-		t.Error("Chaos.Enabled should be false by default")
-	}
-}
-
-// TestConfigDefaults_ReplayDisabled verifies replay is disabled by default.
-func TestConfigDefaults_ReplayDisabled(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-
-	if cfg.Replay.Enabled {
-		t.Error("Replay.Enabled should be false by default")
 	}
 }
 
@@ -241,35 +189,6 @@ func TestConfigDefaults_TLSDisabled(t *testing.T) {
 	}
 }
 
-// TestConfigDefaults_RateLimitAlgorithm verifies rate limit algorithm default.
-// WAVE-003: Changed from "token_bucket" to "sharded_token_bucket" for high-load scenarios (10k+ RPS).
-func TestConfigDefaults_RateLimitAlgorithm(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-
-	expectedAlgorithm := "sharded_token_bucket"
-	if cfg.RateLimit.Algorithm != expectedAlgorithm {
-		t.Errorf("RateLimit.Algorithm = %q, want %q",
-			cfg.RateLimit.Algorithm, expectedAlgorithm)
-	}
-}
-
-// TestConfigDefaults_RateLimitRPS verifies requests per second default.
-func TestConfigDefaults_RateLimitRPS(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-
-	expectedRPS := float64(10000)
-	if cfg.RateLimit.RequestsPerSecond != expectedRPS {
-		t.Errorf("RateLimit.RequestsPerSecond = %f, want %f",
-			cfg.RateLimit.RequestsPerSecond, expectedRPS)
-	}
-}
-
 // TestConfigDefaults_StorageWorkers verifies storage worker count.
 // PERFORMANCE: Changed from 4 to 16 for high-load scenarios (10k RPS).
 // This prevents worker bottlenecks under high traffic.
@@ -324,27 +243,5 @@ func TestConfigDefaults_LogFormat(t *testing.T) {
 	expectedFormat := "json"
 	if cfg.Logging.Format != expectedFormat {
 		t.Errorf("Logging.Format = %q, want %q", cfg.Logging.Format, expectedFormat)
-	}
-}
-
-// TestConfigDefaults_RateLimitAlgorithmCanBeChanged verifies that other algorithms can be selected.
-// Ensures users can override the default sharded_token_bucket to token_bucket or sliding_window.
-func TestConfigDefaults_RateLimitAlgorithmCanBeChanged(t *testing.T) {
-	t.Parallel()
-
-	validAlgorithms := []string{"token_bucket", "sliding_window", "sharded_token_bucket"}
-
-	for _, algorithm := range validAlgorithms {
-		t.Run(algorithm, func(t *testing.T) {
-			cfg := &config.Config{}
-			cfg.SetDefaults()
-
-			// Override the default algorithm
-			cfg.RateLimit.Algorithm = algorithm
-
-			if cfg.RateLimit.Algorithm != algorithm {
-				t.Errorf("RateLimit.Algorithm = %q, want %q", cfg.RateLimit.Algorithm, algorithm)
-			}
-		})
 	}
 }

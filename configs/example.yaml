@@ -58,19 +58,6 @@ server:
   # Type: bool | Default: true
   streaming: true
 
-  # Trust X-Client-IP only when the TCP peer is a trusted proxy listed below.
-  # Useful when ICAP traffic is terminated or forwarded by a local proxy/LB.
-  # Type: bool | Default: false
-  trust_client_ip_header: false
-
-  # Exact IPs or CIDRs allowed to supply X-Client-IP when trust_client_ip_header
-  # is enabled. Empty means "any proxy peer" once the header trust switch is on,
-  # so prefer an explicit allow-list in shared environments.
-  # Type: []string | Default: []
-  trusted_proxies:
-    - "127.0.0.1"
-    - "192.0.2.0/24"
-
   # Close idle connections (no reads/writes) after this duration.
   # Prevents slow-loris attacks and leaks of idle file descriptors.
   # Type: duration | Default: 60s
@@ -237,17 +224,9 @@ logging:
 
 
 # =============================================================================
-# MOCK — scenario engine and processing mode
+# MOCK — scenario engine
 # =============================================================================
 mock:
-  # Default processing mode when no specific handler matches.
-  # Values:
-  #   "mock"   — look up a matching scenario and return its response (normal use)
-  #   "echo"   — reflect the request back as-is (useful for debugging)
-  #   "script" — execute a JavaScript processor (requires plugin config)
-  # Type: string | Default: "mock"
-  default_mode: "mock"
-
   # Directory that contains scenario YAML files (v1 or v2 format).
   # Relative paths are resolved from the working directory of the process.
   # Type: string | Default: "" (no scenarios loaded)
@@ -300,10 +279,10 @@ mock:
 # STORAGE — recording incoming ICAP requests to disk
 # =============================================================================
 storage:
-  # Persist every incoming ICAP request to disk for later replay or analysis.
-  # Disable to reduce I/O in pure benchmarking scenarios.
-  # Type: bool | Default: true
-  enabled: true
+  # Persist every incoming ICAP request to disk for later analysis.
+  # Enable only when request capture is required.
+  # Type: bool | Default: false
+  enabled: false
 
   # Directory for stored request files. Created automatically if absent.
   # Type: string | Default: "./data/requests"
@@ -364,172 +343,14 @@ storage:
     # Type: duration | Default: 5s
     cache_interval: 5s
 
-  # ---------------------------------------------------------------------------
-  # CIRCUIT BREAKER (storage) — isolate storage failures from request flow
-  # ---------------------------------------------------------------------------
-  circuit_breaker:
-    # Enable the circuit breaker for storage write operations.
-    # When tripped, storage is silently skipped until the circuit resets,
-    # preventing a slow disk from stalling the ICAP request path.
-    # Type: bool | Default: true
-    enabled: true
-
-    # Open the circuit after this many consecutive write failures.
-    # Type: int | Default: 5
-    max_failures: 5
-
-    # Duration to wait in the Open state before probing with one request
-    # (transition to Half-Open).
-    # Type: duration | Default: 30s
-    reset_timeout: 30s
-
-    # Number of consecutive successes in Half-Open state needed to close
-    # the circuit and resume normal operation.
-    # Type: int | Default: 3
-    success_threshold: 3
-
-
-# =============================================================================
-# RATE_LIMIT — global request rate limiting (all clients combined)
-# =============================================================================
-rate_limit:
-  # Enable the global rate limiter. Requests that exceed the limit receive
-  # ICAP 429 Too Many Requests.
-  # Type: bool | Default: true
-  enabled: true
-
-  # Maximum sustained request rate across all clients.
-  # Type: float64 (RPS) | Default: 10000
-  requests_per_second: 10000
-
-  # Maximum burst size. Allows short spikes above requests_per_second.
-  # Type: int | Default: 15000
-  burst: 15000
-
-  # Rate-limiting algorithm.
-  # Values:
-  #   "sharded_token_bucket" — best performance for 10k+ RPS (default)
-  #   "token_bucket"         — single-lock token bucket, simpler
-  #   "sliding_window"       — precise but more memory per client
-  # Type: string | Default: "sharded_token_bucket"
-  algorithm: "sharded_token_bucket"
-
-
-# =============================================================================
-# PER_CLIENT_RATE_LIMIT — per source-IP rate limiting
-# Protects against a single client overwhelming the server.
-# =============================================================================
-per_client_rate_limit:
-  # Enable per-client rate limiting. Each unique client IP gets its own bucket.
-  # Type: bool | Default: false
-  enabled: false
-
-  # Allowed requests per second per client IP.
-  # Type: int | Default: 100
-  requests_per_second: 100
-
-  # Per-client burst capacity.
-  # Type: int | Default: 200
-  burst: 200
-
-  # Maximum number of client IPs to track simultaneously. LRU eviction applies
-  # when the limit is reached to prevent unbounded memory growth.
-  # Type: int | Default: 10000
-  max_clients: 10000
-
-  # Evict idle client entries after this duration of inactivity.
-  # Type: duration | Default: 5m
-  ttl: 5m
-
-
-# =============================================================================
-# PER_METHOD_RATE_LIMIT — separate limits for REQMOD, RESPMOD, OPTIONS
-# =============================================================================
-per_method_rate_limit:
-  # Enable per-method rate limiting.
-  # Type: bool | Default: false
-  enabled: false
-
-  # Allowed requests per second for each ICAP method independently.
-  # Type: float64 | Default: 5000
-  requests_per_second: 5000
-
-  # Per-method burst capacity.
-  # Type: int | Default: 7500
-  burst: 7500
-
-
-# =============================================================================
-# CHAOS — fault injection for resilience testing
-# All probabilities are in the range 0.0 (never) to 1.0 (always).
-# =============================================================================
-chaos:
-  # Master switch. All chaos features are disabled when false.
-  # Type: bool | Default: false
-  enabled: false
-
-  # Probability of returning an ICAP 500 error response.
-  # Type: float64 [0.0–1.0] | Default: 0.10 (10%)
-  error_rate: 0.10
-
-  # Probability of simulating a server-side timeout (closes connection).
-  # Type: float64 [0.0–1.0] | Default: 0.05 (5%)
-  timeout_rate: 0.05
-
-  # Lower bound of the artificial latency range (milliseconds).
-  # Type: int (ms) | Default: 10
-  min_latency_ms: 10
-
-  # Upper bound of the artificial latency range (milliseconds).
-  # Type: int (ms) | Default: 500
-  max_latency_ms: 500
-
-  # Probability of injecting a random delay between min_latency_ms and
-  # max_latency_ms before responding.
-  # Type: float64 [0.0–1.0] | Default: 0.10 (10%)
-  latency_rate: 0.10
-
-  # Probability of abruptly closing the TCP connection without a response.
-  # Type: float64 [0.0–1.0] | Default: 0.02 (2%)
-  connection_drop_rate: 0.02
-
-
-# =============================================================================
-# PREVIEW — per-client rate limit for ICAP preview requests
-# Prevents DoS via resource-heavy preview mode.
-# =============================================================================
-preview:
-  # Enable preview-request rate limiting.
-  # Type: bool | Default: true
-  enabled: true
-
-  # Maximum preview requests allowed per client within window_seconds.
-  # Type: int | Default: 100
-  max_requests: 100
-
-  # Sliding window duration in seconds.
-  # Type: int (seconds) | Default: 60
-  window_seconds: 60
-
-  # Maximum number of distinct clients to track.
-  # Type: int | Default: 10000
-  max_clients: 10000
-
-  # When true, preview rate limiting uses X-Client-ID as the client bucket key.
-  # Keep false unless a trusted upstream injects that header consistently.
-  # When false, the limiter uses the resolved client IP instead.
-  # Type: bool | Default: false
-  trust_client_id_header: false
-
-
 # =============================================================================
 # SHARDING — O(1) scenario matching via hash-distributed shards
 # Improves matching throughput when a large number of scenarios are loaded.
 # =============================================================================
 sharding:
   # Enable scenario sharding.
-  # Type: bool | Default: true
-  enabled: true
+  # Type: bool | Default: false
+  enabled: false
 
   # Number of hash shards. Must be a power of 2 for even distribution.
   # Type: int | Default: 16
@@ -545,74 +366,6 @@ sharding:
 
 
 # =============================================================================
-# CIRCUIT_BREAKER — global circuit breaker for all components
-# Separate from the storage-specific circuit breaker above.
-# =============================================================================
-circuit_breaker:
-  # Enable circuit breakers globally for all tracked components.
-  # Type: bool | Default: false
-  enabled: false
-
-  # Default settings applied to any component not listed in "components:".
-  defaults:
-    # Number of failures within rolling_window before the circuit opens.
-    # Type: int | Default: 5
-    failure_threshold: 5
-
-    # Consecutive successes in Half-Open state to close the circuit.
-    # Type: int | Default: 3
-    success_threshold: 3
-
-    # Duration to remain in Open state before trying Half-Open.
-    # Type: duration | Default: 30s
-    open_timeout: 30s
-
-    # Maximum requests allowed through in Half-Open state.
-    # Type: int | Default: 1
-    half_open_max_requests: 1
-
-    # Time window over which failures are counted.
-    # Type: duration | Default: 60s
-    rolling_window: 60s
-
-    # Number of time-buckets within rolling_window. Higher = finer granularity.
-    # Type: int | Default: 60
-    window_buckets: 60
-
-  # Per-component overrides. Any field omitted here falls back to defaults above.
-  # Known component names: "storage", "scenario_loader", "metrics_server"
-  components:
-    storage:
-      failure_threshold: 10
-      success_threshold: 3
-      open_timeout: 60s
-      half_open_max_requests: 2
-    scenario_loader:
-      failure_threshold: 5
-      success_threshold: 3
-      open_timeout: 30s
-      half_open_max_requests: 1
-
-
-# =============================================================================
-# REPLAY — replay previously recorded requests
-# =============================================================================
-replay:
-  # Enable replay mode. When true, the server reads requests from requests_dir
-  # and sends them to a target ICAP server (used with the "replay" subcommand).
-  # Type: bool | Default: false
-  enabled: false
-
-  # Directory containing the recorded request files to replay.
-  # Type: string | Default: ""
-  # requests_dir: "./data/requests"
-
-  # Playback speed multiplier. 1.0 = original timing, 2.0 = twice as fast.
-  # Type: float64 | Default: 1.0
-  speed: 1.0
-
-
-# =============================================================================
 # PPROF — Go runtime profiling endpoints
 # WARNING: exposes detailed runtime internals. Enable only in trusted networks.
 # =============================================================================
@@ -620,25 +373,6 @@ pprof:
   # Expose /debug/pprof/* endpoints on the metrics server port.
   # Type: bool | Default: false
   enabled: false
-
-
-# =============================================================================
-# PLUGIN — Go plugin (.so) system for custom processors
-# =============================================================================
-plugin:
-  # Enable the plugin loader.
-  # Type: bool | Default: false
-  enabled: false
-
-  # Directory containing compiled plugin .so files.
-  # Type: string | Default: "./plugins"
-  dir: "./plugins"
-
-  # Explicit list of plugin names to load. Order determines priority.
-  # If empty, every .so file in dir is loaded.
-  # Type: []string | Default: [] (load all)
-  # names:
-  #   - "my-custom-processor"
 
 
 # =============================================================================

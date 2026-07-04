@@ -4,7 +4,6 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -31,8 +30,6 @@ func (e ValidationError) Error() string {
 type Validator struct {
 	validLogLevels               map[string]bool
 	validLogFormats              map[string]bool
-	validModes                   map[string]bool
-	validAlgorithms              map[string]bool
 	validBodyPatternLimitActions map[string]bool
 }
 
@@ -49,16 +46,6 @@ func NewValidator() *Validator {
 			"json": true,
 			"text": true,
 		},
-		validModes: map[string]bool{
-			"echo":   true,
-			"mock":   true,
-			"script": true,
-		},
-		validAlgorithms: map[string]bool{
-			"token_bucket":         true,
-			"sliding_window":       true,
-			"sharded_token_bucket": true,
-		},
 		validBodyPatternLimitActions: map[string]bool{
 			BodyPatternLimitActionNoMatch: true,
 			BodyPatternLimitActionError:   true,
@@ -69,7 +56,7 @@ func NewValidator() *Validator {
 // Validate validates the entire configuration and returns a list of errors.
 // Returns an empty slice if the configuration is valid.
 func (v *Validator) Validate(cfg *Config) []ValidationError {
-	var errors []ValidationError
+	errors := make([]ValidationError, 0, 8)
 
 	// Validate server configuration
 	errors = append(errors, v.validateServer(&cfg.Server)...)
@@ -83,26 +70,11 @@ func (v *Validator) Validate(cfg *Config) []ValidationError {
 	// Validate mock configuration
 	errors = append(errors, v.validateMock(&cfg.Mock)...)
 
-	// Validate chaos configuration
-	if cfg.Chaos.Enabled {
-		errors = append(errors, v.validateChaos(&cfg.Chaos)...)
-	}
-
 	// Validate storage configuration
 	errors = append(errors, v.validateStorage(&cfg.Storage)...)
 
-	// Validate rate limit configuration
-	if cfg.RateLimit.Enabled {
-		errors = append(errors, v.validateRateLimit(&cfg.RateLimit)...)
-	}
-
 	// Validate health configuration
 	errors = append(errors, v.validateHealth(&cfg.Health)...)
-
-	// Validate replay configuration
-	if cfg.Replay.Enabled {
-		errors = append(errors, v.validateReplay(&cfg.Replay)...)
-	}
 
 	return errors
 }
@@ -153,8 +125,6 @@ func (v *Validator) validateServer(cfg *ServerConfig) []ValidationError {
 			Value:   cfg.MaxBodySize,
 		})
 	}
-	errors = append(errors, validateTrustedProxies(cfg.TrustedProxies)...)
-
 	// Validate TLS configuration
 	if cfg.TLS.Enabled {
 		if cfg.TLS.CertFile == "" {
@@ -186,31 +156,6 @@ func (v *Validator) validateServer(cfg *ServerConfig) []ValidationError {
 	}
 
 	return errors
-}
-
-func validateTrustedProxies(proxies []string) []ValidationError {
-	var errors []ValidationError
-	for _, proxy := range proxies {
-		if !isValidProxyAddress(strings.TrimSpace(proxy)) {
-			errors = append(errors, ValidationError{
-				Field:   "server.trusted_proxies",
-				Message: "trusted proxy must be an IP address or CIDR range",
-				Value:   proxy,
-			})
-		}
-	}
-	return errors
-}
-
-func isValidProxyAddress(proxy string) bool {
-	if proxy == "" {
-		return false
-	}
-	if net.ParseIP(proxy) != nil {
-		return true
-	}
-	_, _, err := net.ParseCIDR(proxy)
-	return err == nil
 }
 
 // validateLogging validates logging configuration.
@@ -323,15 +268,6 @@ func validMetricsEndpointLabelMode(mode string) bool {
 func (v *Validator) validateMock(cfg *MockConfig) []ValidationError {
 	var errors []ValidationError
 
-	// Validate default mode - empty string is also invalid
-	if cfg.DefaultMode == "" || !v.validModes[strings.ToLower(cfg.DefaultMode)] {
-		errors = append(errors, ValidationError{
-			Field:   "mock.default_mode",
-			Message: "invalid mock mode, must be one of: echo, mock, script",
-			Value:   cfg.DefaultMode,
-		})
-	}
-
 	// Validate default timeout
 	if cfg.DefaultTimeout < 0 {
 		errors = append(errors, ValidationError{
@@ -365,64 +301,6 @@ func (v *Validator) validateMockMatching(cfg *MockMatchingConfig) []ValidationEr
 	return errors
 }
 
-// validateChaos validates chaos configuration.
-func (v *Validator) validateChaos(cfg *ChaosConfig) []ValidationError {
-	var errors []ValidationError
-
-	// Validate error rate
-	if cfg.ErrorRate < 0 || cfg.ErrorRate > 1 {
-		errors = append(errors, ValidationError{
-			Field:   "chaos.error_rate",
-			Message: "error rate must be between 0 and 1",
-			Value:   cfg.ErrorRate,
-		})
-	}
-
-	// Validate timeout rate
-	if cfg.TimeoutRate < 0 || cfg.TimeoutRate > 1 {
-		errors = append(errors, ValidationError{
-			Field:   "chaos.timeout_rate",
-			Message: "timeout rate must be between 0 and 1",
-			Value:   cfg.TimeoutRate,
-		})
-	}
-
-	// Validate connection drop rate
-	if cfg.ConnectionDropRate < 0 || cfg.ConnectionDropRate > 1 {
-		errors = append(errors, ValidationError{
-			Field:   "chaos.connection_drop_rate",
-			Message: "connection drop rate must be between 0 and 1",
-			Value:   cfg.ConnectionDropRate,
-		})
-	}
-
-	// Validate latency range - always check for negative values
-	if cfg.MinLatencyMs < 0 {
-		errors = append(errors, ValidationError{
-			Field:   "chaos.latency",
-			Message: "minimum latency must be non-negative",
-			Value:   cfg.MinLatencyMs,
-		})
-	}
-	if cfg.MaxLatencyMs < 0 {
-		errors = append(errors, ValidationError{
-			Field:   "chaos.latency",
-			Message: "maximum latency must be non-negative",
-			Value:   cfg.MaxLatencyMs,
-		})
-	}
-	// Check min > max only if both are non-negative
-	if cfg.MinLatencyMs >= 0 && cfg.MaxLatencyMs >= 0 && cfg.MaxLatencyMs > 0 && cfg.MinLatencyMs > cfg.MaxLatencyMs {
-		errors = append(errors, ValidationError{
-			Field:   "chaos.latency",
-			Message: "minimum latency cannot be greater than maximum latency",
-			Value:   fmt.Sprintf("min=%d, max=%d", cfg.MinLatencyMs, cfg.MaxLatencyMs),
-		})
-	}
-
-	return errors
-}
-
 // validateStorage validates storage configuration.
 func (v *Validator) validateStorage(cfg *StorageConfig) []ValidationError {
 	var errors []ValidationError
@@ -445,40 +323,6 @@ func (v *Validator) validateStorage(cfg *StorageConfig) []ValidationError {
 				Value:   cfg.RotateAfter,
 			})
 		}
-	}
-
-	return errors
-}
-
-// validateRateLimit validates rate limit configuration.
-func (v *Validator) validateRateLimit(cfg *RateLimitConfig) []ValidationError {
-	var errors []ValidationError
-
-	// Validate requests per second
-	if cfg.RequestsPerSecond < 0 {
-		errors = append(errors, ValidationError{
-			Field:   "rate_limit.requests_per_second",
-			Message: "requests per second must be non-negative",
-			Value:   cfg.RequestsPerSecond,
-		})
-	}
-
-	// Validate burst
-	if cfg.Burst < 0 {
-		errors = append(errors, ValidationError{
-			Field:   "rate_limit.burst",
-			Message: "burst must be non-negative",
-			Value:   cfg.Burst,
-		})
-	}
-
-	// Validate algorithm - empty string is also invalid when rate limit is enabled
-	if cfg.Algorithm == "" || !v.validAlgorithms[strings.ToLower(cfg.Algorithm)] {
-		errors = append(errors, ValidationError{
-			Field:   "rate_limit.algorithm",
-			Message: "invalid rate limit algorithm, must be one of: token_bucket, sliding_window, sharded_token_bucket",
-			Value:   cfg.Algorithm,
-		})
 	}
 
 	return errors
@@ -518,22 +362,6 @@ func (v *Validator) validateHealth(cfg *HealthConfig) []ValidationError {
 	return errors
 }
 
-// validateReplay validates replay configuration.
-func (v *Validator) validateReplay(cfg *ReplayConfig) []ValidationError {
-	var errors []ValidationError
-
-	// Validate speed
-	if cfg.Speed <= 0 {
-		errors = append(errors, ValidationError{
-			Field:   "replay.speed",
-			Message: "replay speed must be positive",
-			Value:   cfg.Speed,
-		})
-	}
-
-	return errors
-}
-
 // ValidatePort validates a port number.
 func ValidatePort(port int) error {
 	if port < 1 || port > 65535 {
@@ -546,14 +374,6 @@ func ValidatePort(port int) error {
 func ValidateDuration(d time.Duration) error {
 	if d < 0 {
 		return fmt.Errorf("duration must be non-negative, got %v", d)
-	}
-	return nil
-}
-
-// ValidateRate validates a rate is between 0 and 1.
-func ValidateRate(rate float64) error {
-	if rate < 0 || rate > 1 {
-		return fmt.Errorf("rate must be between 0 and 1, got %f", rate)
 	}
 	return nil
 }

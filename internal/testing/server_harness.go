@@ -563,12 +563,6 @@ func NewStorageServerHarness(t testing.TB) *StorageServerHarness {
 		RotateAfter: 100,
 		Workers:     4,
 		QueueSize:   100,
-		CircuitBreaker: config.CircuitBreakerConfig{
-			Enabled:          false,
-			MaxFailures:      5,
-			ResetTimeout:     30 * time.Second,
-			SuccessThreshold: 3,
-		},
 	}
 
 	stor, err := storage.NewFileStorage(cfg, nil)

@@ -20,10 +20,8 @@
 - **Path captures** — endpoints like `/env/{id}/status` extract `{id}` from the URI; captured values are available as `${id}` in body/set/http_headers
 - **Multi-method / multi-endpoint per port** — `method:` and `endpoint:` accept a scalar or a list; a single ICAP listener serves them all
 - **Regex matching** — match headers, URLs, and other fields against regular expressions (`re:` prefix)
-- **Rate limiting** — sharded token-bucket rate limiter configurable per server
 - **Prometheus metrics** — expose request counts, latencies, and error rates at `/metrics`
 - **Health checks** — HTTP `/health` and `/ready` endpoints for readiness probing
-- **Request replay** — record and replay captured ICAP requests for regression testing
 - **Hot-reload** — scenario files are watched and reloaded without restarting the server
 
 ---
@@ -83,6 +81,8 @@ The server supports two modes, selected by the top-level structure of the YAML c
 server:
   host: "0.0.0.0"
   port: 1344
+
+mock:
   scenarios_dir: "./configs/scenarios/default"
 
 health:
@@ -128,7 +128,7 @@ metrics:
 
 See `configs/example.yaml` for a full annotated configuration reference.
 
-### Management API and trusted client identity
+### Management API and client identity
 
 The health HTTP server can also expose authenticated management endpoints for live reloads:
 
@@ -140,12 +140,8 @@ Enable them with `management.enabled: true`. If you do not set `management.token
 `management.token_env`, the server still starts but logs a warning because the management API is
 unauthenticated.
 
-For client identity, two separate trust knobs exist:
-
-- `server.trust_client_ip_header: true` + `server.trusted_proxies:` lets the server honor
-  `X-Client-IP` only from trusted proxy peers.
-- `preview.trust_client_id_header: true` lets preview rate limiting bucket requests by
-  `X-Client-ID`; keep it off unless that header is injected by a trusted upstream.
+For client identity, the server uses the peer TCP remote address. `X-Client-IP` can still be used in
+scenario header matching, but it is not trusted as `Request.ClientIP`.
 
 ---
 
@@ -333,9 +329,6 @@ Notes:
 # Start the server with a config file
 icap-mock server --config configs/my-config.yaml
 
-# Replay recorded requests against a running server
-icap-mock replay --dir data/requests --target icap://localhost:1344/scan
-
 # Validate a server config without starting listeners
 icap-mock server --config configs/my-config.yaml --validate
 
@@ -385,18 +378,15 @@ icap-mock/
 │   ├── config/           # Config loading and validation
 │   ├── server/           # ICAP protocol server and connection handling
 │   ├── handler/          # REQMOD, RESPMOD, OPTIONS handlers
-│   ├── processor/        # Mock, echo, chaos, and JavaScript processors
+│   ├── processor/        # Mock and echo processors
 │   ├── storage/          # Scenario registry (v1 legacy + v2 current)
 │   ├── router/           # Request routing
-│   ├── middleware/        # Rate limiter, body size limit, request logger
+│   ├── middleware/        # Storage, panic recovery, body size limit, request logger
 │   ├── metrics/          # Prometheus metrics and collector
-│   ├── ratelimit/        # Sharded token-bucket implementation
-│   ├── replay/           # Request replay engine
 │   ├── health/           # /health and /ready HTTP handlers
-│   └── circuitbreaker/   # Circuit breaker
+│   └── management/       # Runtime management API
 ├── pkg/
 │   ├── icap/             # ICAP protocol types (request, response, headers)
-│   ├── plugin/           # Plugin interface
 │   └── pool/             # Buffer pools
 ├── configs/              # Example server and scenario configs
 ├── monitoring/           # Prometheus config and Grafana dashboards

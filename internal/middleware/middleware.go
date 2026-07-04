@@ -11,89 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/handler"
 	"github.com/icap-mock/icap-mock/internal/metrics"
-	"github.com/icap-mock/icap-mock/internal/ratelimit"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/internal/util"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
-
-// CircuitBreakerConfig holds configuration for the circuit breaker used by StorageMiddleware.
-type CircuitBreakerConfig struct {
-	Metrics          *metrics.Collector
-	Component        string
-	MaxFailures      int
-	ResetTimeout     time.Duration
-	SuccessThreshold int
-	Enabled          bool
-}
-
-// DefaultCircuitBreakerConfig returns the default circuit breaker configuration.
-func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
-	return CircuitBreakerConfig{
-		Enabled:          true,
-		MaxFailures:      5,
-		ResetTimeout:     30 * time.Second,
-		SuccessThreshold: 3,
-		Component:        "storage",
-	}
-}
-
-// toCircuitBreakerConfig converts to the circuitbreaker package Config.
-func (cfg CircuitBreakerConfig) toCircuitBreakerConfig() circuitbreaker.Config {
-	c := circuitbreaker.DefaultConfig()
-	if cfg.MaxFailures > 0 {
-		c.FailureThreshold = cfg.MaxFailures
-	}
-	if cfg.ResetTimeout > 0 {
-		c.OpenTimeout = cfg.ResetTimeout
-	}
-	if cfg.SuccessThreshold > 0 {
-		c.SuccessThreshold = cfg.SuccessThreshold
-		c.HalfOpenMaxRequests = cfg.SuccessThreshold
-	}
-	c.Enabled = cfg.Enabled
-	return c
-}
-
-// RateLimiterMiddleware returns middleware that checks rate limit before processing.
-// If rate limit is exceeded, returns ICAP 429 (Too Many Requests).
-func RateLimiterMiddleware(limiter ratelimit.Limiter) handler.Middleware {
-	return RateLimiterMiddlewareForServer(limiter, nil, "")
-}
-
-// RateLimiterMiddlewareForServer checks rate limits and records denied requests by server.
-func RateLimiterMiddlewareForServer(
-	limiter ratelimit.Limiter,
-	collector *metrics.Collector,
-	server string,
-) handler.Middleware {
-	return func(next handler.Handler) handler.Handler {
-		return handler.WrapHandler(handler.Func(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
-			if !limiter.Allow() {
-				recordRateLimitExceeded(collector, server)
-				resp := icap.NewResponse(429)
-				resp.SetHeader("X-RateLimit-Remaining", "0")
-				resp.SetHeader("Connection", "close")
-				return resp, nil
-			}
-			return next.Handle(ctx, req)
-		}), next.Method())
-	}
-}
-
-func recordRateLimitExceeded(collector *metrics.Collector, server string) {
-	if collector == nil {
-		return
-	}
-	if server == "" {
-		collector.RecordRateLimitExceeded("")
-		return
-	}
-	collector.RecordRateLimitExceededForServer(server)
-}
 
 // PanicRecoveryMiddleware returns middleware that recovers from panics in handlers.
 // If a panic occurs, it logs the error and returns a 500 Internal Server Error response.
@@ -126,37 +49,34 @@ type storageJob struct {
 
 // StorageMiddlewareConfig holds configuration for the storage middleware.
 type StorageMiddlewareConfig struct {
-	Metrics        *metrics.Collector
-	CircuitBreaker CircuitBreakerConfig
-	Workers        int
-	QueueSize      int
-	MaxBodySize    int64
+	Metrics     *metrics.Collector
+	Workers     int
+	QueueSize   int
+	MaxBodySize int64
 }
 
 // DefaultStorageMiddlewareConfig returns the default configuration.
 func DefaultStorageMiddlewareConfig() StorageMiddlewareConfig {
 	return StorageMiddlewareConfig{
-		Workers:        4,
-		QueueSize:      1000,
-		CircuitBreaker: DefaultCircuitBreakerConfig(),
+		Workers:   4,
+		QueueSize: 1000,
 	}
 }
 
 // StorageMiddleware manages a pool of workers for async storage operations.
 type StorageMiddleware struct {
-	ctx            context.Context
-	store          storage.Storage
-	jobs           chan *storageJob
-	cancel         context.CancelFunc
-	logger         *slog.Logger
-	circuitBreaker *circuitbreaker.CircuitBreaker
-	metrics        *metrics.Collector
-	wg             sync.WaitGroup
-	jobsMu         sync.Mutex // protects send-on-jobs and close(jobs) from racing
-	rejectedCount  int64
-	maxQueueSize   int
-	maxBodySize    int64
-	stopped        bool // protected by jobsMu
+	ctx           context.Context
+	store         storage.Storage
+	jobs          chan *storageJob
+	cancel        context.CancelFunc
+	logger        *slog.Logger
+	metrics       *metrics.Collector
+	wg            sync.WaitGroup
+	jobsMu        sync.Mutex // protects send-on-jobs and close(jobs) from racing
+	rejectedCount int64
+	maxQueueSize  int
+	maxBodySize   int64
+	stopped       bool // protected by jobsMu
 }
 
 // StorageMiddlewareWithPool returns middleware that saves requests to storage
@@ -165,30 +85,15 @@ func StorageMiddlewareWithPool(store storage.Storage, logger *slog.Logger, cfg S
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // cancel managed elsewhere
 	jobs := make(chan *storageJob, cfg.QueueSize)
 
-	var cb *circuitbreaker.CircuitBreaker
-	if cfg.CircuitBreaker.Enabled {
-		component := cfg.CircuitBreaker.Component
-		if component == "" {
-			component = "storage"
-		}
-		cbCfg := cfg.CircuitBreaker.toCircuitBreakerConfig()
-		var recorder circuitbreaker.MetricsRecorder
-		if cfg.Metrics != nil {
-			recorder = cfg.Metrics
-		}
-		cb = circuitbreaker.NewCircuitBreaker(component, cbCfg, logger, recorder)
-	}
-
 	m := &StorageMiddleware{
-		jobs:           jobs,
-		ctx:            ctx,
-		cancel:         cancel,
-		store:          store,
-		logger:         logger,
-		circuitBreaker: cb,
-		metrics:        cfg.Metrics,
-		maxQueueSize:   cfg.QueueSize,
-		maxBodySize:    cfg.MaxBodySize,
+		jobs:         jobs,
+		ctx:          ctx,
+		cancel:       cancel,
+		store:        store,
+		logger:       logger,
+		metrics:      cfg.Metrics,
+		maxQueueSize: cfg.QueueSize,
+		maxBodySize:  cfg.MaxBodySize,
 	}
 
 	for i := 0; i < cfg.Workers; i++ {
@@ -300,24 +205,10 @@ func (m *StorageMiddleware) processStorageJob(job *storageJob, draining bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			m.logger.Error("panic in storage worker", "error", r)
-			if m.circuitBreaker != nil {
-				m.circuitBreaker.RecordResult(false)
-			}
 		}
 	}()
 
-	var err error
-	if m.circuitBreaker != nil {
-		err = m.circuitBreaker.Call(job.ctx, func() error {
-			return m.store.SaveRequest(job.ctx, job.req)
-		})
-		if errors.Is(err, circuitbreaker.ErrCircuitOpen) {
-			return
-		}
-	} else {
-		err = m.store.SaveRequest(job.ctx, job.req)
-	}
-
+	err := m.store.SaveRequest(job.ctx, job.req)
 	if err != nil {
 		m.logger.WarnContext(job.ctx, "failed to save request",
 			"error", err,
@@ -339,12 +230,6 @@ func (m *StorageMiddleware) Middleware() handler.Middleware {
 	return m.Wrap
 }
 
-// GetCircuitBreaker returns the circuit breaker instance for monitoring.
-// Returns nil if the circuit breaker is not enabled.
-func (m *StorageMiddleware) GetCircuitBreaker() *circuitbreaker.CircuitBreaker {
-	return m.circuitBreaker
-}
-
 // SetMetrics sets the Prometheus metrics collector.
 func (m *StorageMiddleware) SetMetrics(collector *metrics.Collector) {
 	m.metrics = collector
@@ -364,9 +249,6 @@ func NewStorageMiddlewareWithPool(store storage.Storage, logger *slog.Logger, cf
 
 	return StorageMiddlewareWithPool(store, logger, cfg), nil
 }
-
-// LegacyStorageMiddleware returns middleware that saves requests to storage.
-//
 
 // ChainMiddleware applies multiple middleware to a handler in order.
 func ChainMiddleware(h handler.Handler, middlewares ...handler.Middleware) handler.Handler {

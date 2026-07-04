@@ -39,7 +39,7 @@ func TestStorageMiddleware_WrapWithBodyLimitBoundsSnapshotRead(t *testing.T) {
 
 func newTestStorageMiddleware(store storage.Storage) *StorageMiddleware {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := StorageMiddlewareConfig{Workers: 1, QueueSize: 1, CircuitBreaker: CircuitBreakerConfig{Enabled: false}}
+	cfg := StorageMiddlewareConfig{Workers: 1, QueueSize: 1}
 	return StorageMiddlewareWithPool(store, logger, cfg)
 }
 

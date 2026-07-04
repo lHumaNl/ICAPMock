@@ -23,18 +23,6 @@ var sizeBuckets = []float64{
 	100, 1000, 10000, 100000, 1e6, 10e6, 100e6,
 }
 
-// Histogram buckets for rate limit wait times in seconds.
-// Covers the range from 1ms to 10s.
-var waitTimeBuckets = []float64{
-	0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
-}
-
-// Histogram buckets for replay durations in seconds.
-// Covers the range from 10ms to 60s.
-var replayDurationBuckets = []float64{
-	0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
-}
-
 // Histogram buckets for config reload durations in seconds.
 // Covers the range from 1ms to 10s.
 var configReloadDurationBuckets = []float64{
@@ -43,7 +31,7 @@ var configReloadDurationBuckets = []float64{
 
 // Collector collects and exposes Prometheus metrics for the ICAP Mock Server.
 // It provides methods to record various metrics related to request processing,
-// errors, connections, scenarios, chaos, rate limiting, replay, and streaming.
+// errors, connections, scenarios, and streaming.
 //
 // All methods are safe for concurrent use.
 type Collector struct {
@@ -77,25 +65,6 @@ type Collector struct {
 	scenariosLoadedLabels    map[string]struct{}
 	scenarioLabels           *scenarioLabelLimiter
 
-	// Chaos metrics
-	chaosInjected *prometheus.CounterVec
-
-	// Rate limit metrics
-	rateLimitExceeded *prometheus.CounterVec
-	rateLimitWaitTime *prometheus.HistogramVec
-
-	// Per-client rate limit metrics
-	perClientRateLimitExceeded  *prometheus.CounterVec
-	perClientRateLimitWaitTime  *prometheus.HistogramVec
-	perClientRateLimitActive    *prometheus.GaugeVec
-	perClientRateLimitEvictions *prometheus.CounterVec
-
-	// Replay metrics
-	replayRequestsTotal  prometheus.Counter
-	replayRequestsFailed prometheus.Counter
-	replayDuration       prometheus.Histogram
-	replayBehindOriginal prometheus.Gauge
-
 	// Streaming metrics
 	streamingActive     prometheus.Gauge
 	streamingBytesTotal *prometheus.CounterVec
@@ -126,16 +95,6 @@ type Collector struct {
 	storageQueueDrained         prometheus.Counter
 	storageQueueLength          prometheus.Gauge
 
-	// Script pool metrics
-	scriptPoolRejected *prometheus.CounterVec
-	scriptPoolLength   prometheus.Gauge
-	scriptPoolWorkers  prometheus.Gauge
-
-	// Circuit breaker metrics
-	circuitBreakerState       *prometheus.GaugeVec
-	circuitBreakerTransitions *prometheus.CounterVec
-	circuitBreakerFailures    *prometheus.CounterVec
-
 	// Disk monitoring metrics
 	storageDiskUsageBytes     prometheus.Gauge
 	storageDiskAvailableBytes prometheus.Gauge
@@ -147,10 +106,6 @@ type Collector struct {
 
 	// Adaptive timeout metrics
 	adaptiveTimeoutCurrent *prometheus.GaugeVec
-
-	// Preview rate limit metrics
-	previewRequestsRejected *prometheus.CounterVec
-	previewClientsActive    prometheus.Gauge
 
 	scenariosLoadedMu sync.Mutex
 }
@@ -336,101 +291,6 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		),
 		scenarioLabels: newScenarioLabelLimiter(maxScenarioLatencySeries),
 
-		// Chaos metrics
-		chaosInjected: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "chaos_injected_total",
-				Help:      "Total number of chaos injections by type.",
-			},
-			[]string{"type"},
-		),
-
-		// Rate limit metrics
-		rateLimitExceeded: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "rate_limit_exceeded_total",
-				Help:      "Total number of rate limit exceeded events by server.",
-			},
-			[]string{"server"},
-		),
-		rateLimitWaitTime: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "icap",
-				Name:      "rate_limit_wait_seconds",
-				Help:      "Time spent waiting due to rate limiting in seconds by server.",
-				Buckets:   waitTimeBuckets,
-			},
-			[]string{"server"},
-		),
-
-		// Per-client rate limit metrics
-		perClientRateLimitExceeded: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "per_client_rate_limit_exceeded_total",
-				Help:      "Total number of per-client rate limit exceeded events by server.",
-			},
-			[]string{"server"},
-		),
-		perClientRateLimitWaitTime: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "icap",
-				Name:      "per_client_rate_limit_wait_seconds",
-				Help:      "Time spent waiting due to per-client rate limiting in seconds by server.",
-				Buckets:   waitTimeBuckets,
-			},
-			[]string{"server"},
-		),
-		perClientRateLimitActive: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace: "icap",
-				Name:      "per_client_rate_limit_active_clients",
-				Help:      "Current number of active clients tracked in per-client rate limiter by server.",
-			},
-			[]string{"server"},
-		),
-		perClientRateLimitEvictions: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "per_client_rate_limit_evictions_total",
-				Help:      "Total number of client evictions from the per-client rate limiter cache by server.",
-			},
-			[]string{"server"},
-		),
-
-		// Replay metrics
-		replayRequestsTotal: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "replay_requests_total",
-				Help:      "Total number of replayed requests.",
-			},
-		),
-		replayRequestsFailed: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "replay_requests_failed_total",
-				Help:      "Total number of failed replay requests.",
-			},
-		),
-		replayDuration: prometheus.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "icap",
-				Name:      "replay_duration_seconds",
-				Help:      "Duration of replay operations in seconds.",
-				Buckets:   replayDurationBuckets,
-			},
-		),
-		replayBehindOriginal: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: "icap",
-				Name:      "replay_behind_original_seconds",
-				Help:      "How far behind the replay is compared to the original timeline in seconds.",
-			},
-		),
-
 		// Streaming metrics
 		streamingActive: prometheus.NewGauge(
 			prometheus.GaugeOpts{
@@ -581,56 +441,6 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			},
 		),
 
-		// Script pool metrics
-		scriptPoolRejected: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "script_pool_rejected_total",
-				Help:      "Total number of script executions rejected due to queue being full.",
-			},
-			[]string{"queue_size", "max_queue_size"},
-		),
-		scriptPoolLength: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: "icap",
-				Name:      "script_pool_queue_length",
-				Help:      "Current number of items in the script execution queue.",
-			},
-		),
-		scriptPoolWorkers: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: "icap",
-				Name:      "script_pool_workers",
-				Help:      "Current number of active script worker goroutines.",
-			},
-		),
-
-		// Circuit breaker metrics
-		circuitBreakerState: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace: "icap",
-				Name:      "circuit_breaker_state",
-				Help:      "Current state of circuit breaker (1=open, 0.5=half-open, 0=closed).",
-			},
-			[]string{"component"},
-		),
-		circuitBreakerTransitions: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "circuit_breaker_transitions_total",
-				Help:      "Total number of circuit breaker state transitions by component and state change.",
-			},
-			[]string{"component", "from_state", "to_state"},
-		),
-		circuitBreakerFailures: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "circuit_breaker_failures_total",
-				Help:      "Total number of failures recorded by circuit breaker by component.",
-			},
-			[]string{"component"},
-		),
-
 		// Disk monitoring metrics
 		storageDiskUsageBytes: prometheus.NewGauge(
 			prometheus.GaugeOpts{
@@ -680,23 +490,6 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			},
 			[]string{"endpoint", "method"},
 		),
-
-		// Preview rate limit metrics
-		previewRequestsRejected: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "icap",
-				Name:      "preview_requests_rejected_total",
-				Help:      "Total number of preview requests rejected due to rate limiting.",
-			},
-			[]string{}, // No labels to prevent high cardinality
-		),
-		previewClientsActive: prometheus.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: "icap",
-				Name:      "preview_clients_active",
-				Help:      "Current number of active clients tracked by preview rate limiter.",
-			},
-		),
 	}
 
 	// Register all metrics with the provided registry
@@ -719,17 +512,6 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		c.scenarioRequests,
 		c.scenarioResponseDuration,
 		c.scenariosLoaded,
-		c.chaosInjected,
-		c.rateLimitExceeded,
-		c.rateLimitWaitTime,
-		c.perClientRateLimitExceeded,
-		c.perClientRateLimitWaitTime,
-		c.perClientRateLimitActive,
-		c.perClientRateLimitEvictions,
-		c.replayRequestsTotal,
-		c.replayRequestsFailed,
-		c.replayDuration,
-		c.replayBehindOriginal,
 		c.streamingActive,
 		c.streamingBytesTotal,
 		c.configReloadTotal,
@@ -748,20 +530,12 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		c.storageBackpressureRejected,
 		c.storageQueueDrained,
 		c.storageQueueLength,
-		c.scriptPoolRejected,
-		c.scriptPoolLength,
-		c.scriptPoolWorkers,
-		c.circuitBreakerState,
-		c.circuitBreakerTransitions,
-		c.circuitBreakerFailures,
 		c.storageDiskUsageBytes,
 		c.storageDiskAvailableBytes,
 		c.storageDiskWarningsTotal,
 		c.storageDiskErrorsTotal,
 		c.tlsCertificateExpiryDays,
 		c.adaptiveTimeoutCurrent,
-		c.previewRequestsRejected,
-		c.previewClientsActive,
 	)
 
 	return c, nil
@@ -1042,126 +816,6 @@ func (c *Collector) RecordFallbackScenarioRequest(server, response string, durat
 	c.RecordScenarioRequestForServer(server, fallbackScenarioMetricLabel, response, duration)
 }
 
-// RecordChaosInjected increments the counter for chaos injections.
-// Common chaos types include "latency", "error", "timeout", "connection_drop".
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordChaosInjected(chaosType string) {
-	c.chaosInjected.WithLabelValues(chaosType).Inc()
-}
-
-// RecordRateLimitExceeded increments the counter for rate limit exceeded events
-// for the given client identifier.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordRateLimitExceeded(_ string) {
-	c.RecordRateLimitExceededForServer(defaultServerMetricLabel)
-}
-
-// RecordRateLimitExceededForServer increments bounded rate-limit events by server.
-func (c *Collector) RecordRateLimitExceededForServer(server string) {
-	c.rateLimitExceeded.WithLabelValues(normalizedMetricLabel(server)).Inc()
-}
-
-// RecordRateLimitWaitTime records the time a request waited due to rate limiting.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordRateLimitWaitTime(_ string, waitTime time.Duration) {
-	c.RecordRateLimitWaitTimeForServer(defaultServerMetricLabel, waitTime)
-}
-
-// RecordRateLimitWaitTimeForServer records rate-limit wait time by server.
-func (c *Collector) RecordRateLimitWaitTimeForServer(server string, waitTime time.Duration) {
-	c.rateLimitWaitTime.WithLabelValues(normalizedMetricLabel(server)).Observe(waitTime.Seconds())
-}
-
-// RecordPerClientRateLimitExceeded increments the counter for per-client
-// rate limit exceeded events.
-//
-// Note: This metric does not include client IP label to prevent high cardinality
-// in Prometheus when many unique clients are being rate limited.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordPerClientRateLimitExceeded(_ string) {
-	c.RecordPerClientRateLimitExceededForServer(defaultServerMetricLabel)
-}
-
-// RecordPerClientRateLimitExceededForServer increments per-client events by server.
-func (c *Collector) RecordPerClientRateLimitExceededForServer(server string) {
-	c.perClientRateLimitExceeded.WithLabelValues(normalizedMetricLabel(server)).Inc()
-}
-
-// RecordPerClientRateLimitWaitTime records the time a request waited due
-// to per-client rate limiting.
-//
-// Note: This metric does not include client IP label to prevent high cardinality
-// in Prometheus when many unique clients are being rate limited.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordPerClientRateLimitWaitTime(waitTime time.Duration) {
-	c.RecordPerClientRateLimitWaitTimeForServer(defaultServerMetricLabel, waitTime)
-}
-
-// RecordPerClientRateLimitWaitTimeForServer records per-client wait time by server.
-func (c *Collector) RecordPerClientRateLimitWaitTimeForServer(server string, waitTime time.Duration) {
-	c.perClientRateLimitWaitTime.WithLabelValues(normalizedMetricLabel(server)).Observe(waitTime.Seconds())
-}
-
-// SetPerClientRateLimitActive sets the gauge tracking the current number
-// of active clients in the per-client rate limiter.
-//
-// This method is safe for concurrent use.
-func (c *Collector) SetPerClientRateLimitActive(count int) {
-	c.SetPerClientRateLimitActiveForServer(defaultServerMetricLabel, count)
-}
-
-// SetPerClientRateLimitActiveForServer sets active per-client limiters by server.
-func (c *Collector) SetPerClientRateLimitActiveForServer(server string, count int) {
-	c.perClientRateLimitActive.WithLabelValues(normalizedMetricLabel(server)).Set(float64(count))
-}
-
-// IncPerClientRateLimitEvictions increments the counter for client evictions
-// from the per-client rate limiter cache.
-//
-// This method is safe for concurrent use.
-func (c *Collector) IncPerClientRateLimitEvictions() {
-	c.IncPerClientRateLimitEvictionsForServer(defaultServerMetricLabel)
-}
-
-// IncPerClientRateLimitEvictionsForServer increments client evictions by server.
-func (c *Collector) IncPerClientRateLimitEvictionsForServer(server string) {
-	c.perClientRateLimitEvictions.WithLabelValues(normalizedMetricLabel(server)).Inc()
-}
-
-// RecordReplayRequest increments the counter for replayed requests.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordReplayRequest() {
-	c.replayRequestsTotal.Inc()
-}
-
-// RecordReplayFailure increments the counter for failed replay requests.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordReplayFailure() {
-	c.replayRequestsFailed.Inc()
-}
-
-// RecordReplayDuration records the duration of a replay operation.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordReplayDuration(duration time.Duration) {
-	c.replayDuration.Observe(duration.Seconds())
-}
-
-// SetReplayBehindOriginal sets the gauge indicating how far behind
-// the replay is compared to the original timeline.
-//
-// This method is safe for concurrent use.
-func (c *Collector) SetReplayBehindOriginal(seconds float64) {
-	c.replayBehindOriginal.Set(seconds)
-}
-
 // IncStreamingActive increments the gauge tracking active streaming sessions.
 // This should be called when a new streaming session starts.
 //
@@ -1333,60 +987,6 @@ func (c *Collector) SetStorageQueueLength(length int) {
 	c.storageQueueLength.Set(float64(length))
 }
 
-// RecordScriptPoolRejected increments the counter for script executions rejected
-// due to the script pool queue being full.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordScriptPoolRejected(queueSize, maxQueueSize float64) {
-	c.scriptPoolRejected.WithLabelValues(
-		fmt.Sprintf("%.0f", queueSize),
-		fmt.Sprintf("%.0f", maxQueueSize),
-	).Inc()
-}
-
-// SetScriptPoolQueueLength sets the gauge for the current number of items in the script pool queue.
-//
-// This method is safe for concurrent use.
-func (c *Collector) SetScriptPoolQueueLength(length float64) {
-	c.scriptPoolLength.Set(length)
-}
-
-// SetScriptPoolWorkers sets the gauge for the current number of active script worker goroutines.
-//
-// This method is safe for concurrent use.
-func (c *Collector) SetScriptPoolWorkers(workers float64) {
-	c.scriptPoolWorkers.Set(workers)
-}
-
-// SetCircuitBreakerState sets the gauge for the current circuit breaker state.
-// State values: "closed" = 0, "half-open" = 0.5, "open" = 1.
-//
-// This method is safe for concurrent use.
-func (c *Collector) SetCircuitBreakerState(component, state string) {
-	value := 0.0
-	switch state {
-	case "half-open":
-		value = 0.5
-	case "open":
-		value = 1.0
-	}
-	c.circuitBreakerState.WithLabelValues(component).Set(value)
-}
-
-// RecordCircuitBreakerTransition increments the counter for circuit breaker state transitions.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordCircuitBreakerTransition(component, fromState, toState string) {
-	c.circuitBreakerTransitions.WithLabelValues(component, fromState, toState).Inc()
-}
-
-// RecordCircuitBreakerFailure increments the counter for circuit breaker failures.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordCircuitBreakerFailure(component string) {
-	c.circuitBreakerFailures.WithLabelValues(component).Inc()
-}
-
 // SetTLSCertificateExpiryDays sets the gauge for TLS certificate expiry.
 // The certFile parameter is the path to the certificate file.
 // Set to -1 if the certificate cannot be loaded or is invalid.
@@ -1402,22 +1002,6 @@ func (c *Collector) SetTLSCertificateExpiryDays(certFile string, days float64) {
 // This method is safe for concurrent use.
 func (c *Collector) SetAdaptiveTimeout(endpoint, method string, timeoutMs float64) {
 	c.adaptiveTimeoutCurrent.WithLabelValues(endpoint, method).Set(timeoutMs)
-}
-
-// RecordPreviewRequestRejected increments the counter for preview requests
-// rejected due to rate limiting.
-//
-// This method is safe for concurrent use.
-func (c *Collector) RecordPreviewRequestRejected(_ string) {
-	c.previewRequestsRejected.WithLabelValues().Inc()
-}
-
-// SetPreviewClientsActive sets the gauge for the current number
-// of active clients tracked by the preview rate limiter.
-//
-// This method is safe for concurrent use.
-func (c *Collector) SetPreviewClientsActive(count int) {
-	c.previewClientsActive.Set(float64(count))
 }
 
 // RecordAPIRequest increments the bounded management API request counter.

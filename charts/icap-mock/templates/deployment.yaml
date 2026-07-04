@@ -76,8 +76,6 @@ spec:
               value: {{ .Values.metrics.enabled | quote }}
             - name: ICAP_STORAGE_ENABLED
               value: {{ .Values.storage.enabled | quote }}
-            - name: ICAP_RATE_LIMIT_ENABLED
-              value: {{ .Values.rateLimit.enabled | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.logging.level | quote }}
             {{- with .Values.extraEnv }}

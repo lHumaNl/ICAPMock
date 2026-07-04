@@ -3,15 +3,12 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 func warnEnvParse(key, value string, err error) {
@@ -162,17 +159,17 @@ func (l *Loader) LoadFromFile(path string) (*Config, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".yaml", ".yml":
-		if err := yaml.Unmarshal(data, cfg); err != nil {
+		if err := loadYAMLConfig(data, cfg); err != nil {
 			return nil, fmt.Errorf("failed to parse YAML config: %w", err)
 		}
 	case ".json":
-		if err := json.Unmarshal(data, cfg); err != nil {
+		if err := loadJSONConfig(data, cfg); err != nil {
 			return nil, fmt.Errorf("failed to parse JSON config: %w", err)
 		}
 	default:
 		// Try YAML first, then JSON
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			if jsonErr := json.Unmarshal(data, cfg); jsonErr != nil {
+		if err := loadYAMLConfig(data, cfg); err != nil {
+			if jsonErr := loadJSONConfig(data, cfg); jsonErr != nil {
 				return nil, fmt.Errorf("failed to parse config file as YAML or JSON: yaml=%w, json=%w", err, jsonErr)
 			}
 		}
@@ -185,19 +182,18 @@ func (l *Loader) LoadFromFile(path string) (*Config, error) {
 // Environment variables follow the pattern: ICAP_<SECTION>_<KEY>
 // For example: ICAP_SERVER_PORT, ICAP_LOGGING_LEVEL.
 func (l *Loader) LoadFromEnv(cfg *Config) error {
+	if err := l.rejectRemovedEnvVars(); err != nil {
+		return err
+	}
 	l.loadServerEnv(cfg)
 	l.loadTLSEnv(cfg)
 	l.loadLoggingEnv(cfg)
 	l.loadMetricsEnv(cfg)
 	l.loadMockEnv(cfg)
-	l.loadChaosEnv(cfg)
 	l.loadStorageEnv(cfg)
-	l.loadRateLimitEnv(cfg)
 	l.loadHealthEnv(cfg)
 	l.loadManagementEnv(cfg)
-	l.loadReplayEnv(cfg)
 	l.loadShardingEnv(cfg)
-	l.loadPreviewEnv(cfg)
 	l.loadPprofEnv(cfg)
 	return nil
 }
@@ -211,23 +207,6 @@ func (l *Loader) envStr(key string, dst *string) {
 	if v := os.Getenv(l.envPrefix + key); v != "" {
 		*dst = v
 	}
-}
-
-func (l *Loader) envStrSlice(key string, dst *[]string) {
-	if v := os.Getenv(l.envPrefix + key); v != "" {
-		*dst = splitEnvList(v)
-	}
-}
-
-func splitEnvList(value string) []string {
-	parts := strings.Split(value, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }
 
 // envInt reads an environment variable, parses as int, sets dst if valid.
@@ -284,17 +263,6 @@ func (l *Loader) envBool(key string, dst *bool) {
 	}
 }
 
-// envFloat64 reads an environment variable, parses as float64, sets dst if valid.
-func (l *Loader) envFloat64(key string, dst *float64) {
-	if v := os.Getenv(l.envPrefix + key); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			*dst = f
-		} else {
-			warnEnvParse(l.envPrefix+key, v, err)
-		}
-	}
-}
-
 // envDuration reads an environment variable, parses as duration, sets dst if valid.
 func (l *Loader) envDuration(key string, dst *time.Duration) {
 	if v := os.Getenv(l.envPrefix + key); v != "" {
@@ -314,8 +282,6 @@ func (l *Loader) loadServerEnv(cfg *Config) {
 	l.envInt("SERVER_MAX_CONNECTIONS", &cfg.Server.MaxConnections)
 	l.envServerMaxBodySize(cfg)
 	l.envBool("SERVER_STREAMING", &cfg.Server.Streaming)
-	l.envBool("SERVER_TRUST_CLIENT_IP_HEADER", &cfg.Server.TrustClientIPHeader)
-	l.envStrSlice("SERVER_TRUSTED_PROXIES", &cfg.Server.TrustedProxies)
 }
 
 func (l *Loader) loadTLSEnv(cfg *Config) {
@@ -344,20 +310,10 @@ func (l *Loader) loadMetricsEnv(cfg *Config) {
 }
 
 func (l *Loader) loadMockEnv(cfg *Config) {
-	l.envStr("MOCK_DEFAULT_MODE", &cfg.Mock.DefaultMode)
 	l.envStr("MOCK_SCENARIOS_DIR", &cfg.Mock.ScenariosDir)
 	l.envDuration("MOCK_DEFAULT_TIMEOUT", &cfg.Mock.DefaultTimeout)
 	l.envBodySizeLimit("MOCK_MATCHING_BODY_PATTERN_LIMIT", &cfg.Mock.Matching.BodyPatternLimit)
 	l.envStr("MOCK_MATCHING_BODY_PATTERN_LIMIT_ACTION", &cfg.Mock.Matching.BodyPatternLimitAction)
-}
-
-func (l *Loader) loadChaosEnv(cfg *Config) {
-	l.envBool("CHAOS_ENABLED", &cfg.Chaos.Enabled)
-	l.envFloat64("CHAOS_ERROR_RATE", &cfg.Chaos.ErrorRate)
-	l.envFloat64("CHAOS_TIMEOUT_RATE", &cfg.Chaos.TimeoutRate)
-	l.envInt("CHAOS_MIN_LATENCY_MS", &cfg.Chaos.MinLatencyMs)
-	l.envInt("CHAOS_MAX_LATENCY_MS", &cfg.Chaos.MaxLatencyMs)
-	l.envFloat64("CHAOS_CONNECTION_DROP_RATE", &cfg.Chaos.ConnectionDropRate)
 }
 
 func (l *Loader) loadStorageEnv(cfg *Config) {
@@ -365,14 +321,6 @@ func (l *Loader) loadStorageEnv(cfg *Config) {
 	l.envStr("STORAGE_REQUESTS_DIR", &cfg.Storage.RequestsDir)
 	l.envInt64ByteSize("STORAGE_MAX_FILE_SIZE", &cfg.Storage.MaxFileSize)
 	l.envInt("STORAGE_ROTATE_AFTER", &cfg.Storage.RotateAfter)
-}
-
-func (l *Loader) loadRateLimitEnv(cfg *Config) {
-	l.envBool("RATE_LIMIT_ENABLED", &cfg.RateLimit.Enabled)
-	l.envFloat64("RATE_LIMIT_RPS", &cfg.RateLimit.RequestsPerSecond)
-	l.envFloat64("RATE_LIMIT_REQUESTS_PER_SECOND", &cfg.RateLimit.RequestsPerSecond)
-	l.envInt("RATE_LIMIT_BURST", &cfg.RateLimit.Burst)
-	l.envStr("RATE_LIMIT_ALGORITHM", &cfg.RateLimit.Algorithm)
 }
 
 func (l *Loader) loadHealthEnv(cfg *Config) {
@@ -392,21 +340,11 @@ func (l *Loader) loadManagementEnv(cfg *Config) {
 	l.envStr("MANAGEMENT_TOKEN_ENV", &cfg.Management.TokenEnv)
 }
 
-func (l *Loader) loadReplayEnv(cfg *Config) {
-	l.envBool("REPLAY_ENABLED", &cfg.Replay.Enabled)
-	l.envStr("REPLAY_REQUESTS_DIR", &cfg.Replay.RequestsDir)
-	l.envFloat64("REPLAY_SPEED", &cfg.Replay.Speed)
-}
-
 func (l *Loader) loadShardingEnv(cfg *Config) {
 	l.envBool("SHARDING_ENABLED", &cfg.Sharding.Enabled)
 	l.envInt("SHARDING_SHARD_COUNT", &cfg.Sharding.ShardCount)
 	l.envInt("SHARDING_CACHE_SIZE", &cfg.Sharding.CacheSize)
 	l.envBool("SHARDING_ENABLE_CACHE", &cfg.Sharding.EnableCache)
-}
-
-func (l *Loader) loadPreviewEnv(cfg *Config) {
-	l.envBool("PREVIEW_TRUST_CLIENT_ID_HEADER", &cfg.Preview.TrustClientIDHeader)
 }
 
 func (l *Loader) loadPprofEnv(cfg *Config) {
@@ -417,7 +355,7 @@ func (l *Loader) loadPprofEnv(cfg *Config) {
 // Only non-zero values from source are applied.
 //
 // Boolean fields (Streaming, TLS.Enabled, Metrics.Enabled, Health.Enabled,
-// Storage.Enabled, RateLimit.Enabled, Chaos.Enabled, HotReload.Enabled)
+// Storage.Enabled, HotReload.Enabled)
 // are always overwritten from source, since Go's zero value (false) is
 // indistinguishable from "not set". This means a config file that omits
 // a boolean field will set it to false, overriding any default of true.
@@ -426,15 +364,10 @@ func (l *Loader) mergeConfigs(dst, src *Config) {
 	mergeLoggingConfig(dst, src)
 	mergeMetricsConfig(dst, src)
 	mergeMockConfig(dst, src)
-	mergeChaosConfig(dst, src)
 	mergeStorageConfig(dst, src)
-	mergeRateLimitConfig(dst, src)
 	mergeHealthConfig(dst, src)
 	mergeManagementConfig(dst, src)
-	mergeReplayConfig(dst, src)
-	mergePluginConfig(dst, src)
 	mergeShardingConfig(dst, src)
-	dst.Preview.TrustClientIDHeader = src.Preview.TrustClientIDHeader
 	dst.Pprof.Enabled = src.Pprof.Enabled
 	mergeMultiServerConfig(dst, src)
 }
@@ -481,13 +414,6 @@ func mergeInt64(dst *int64, src int64) {
 	}
 }
 
-// mergeFloat64 sets dst to src if src is non-zero.
-func mergeFloat64(dst *float64, src float64) {
-	if src != 0 {
-		*dst = src
-	}
-}
-
 // mergeDuration sets dst to src if src is non-zero.
 func mergeDuration(dst *time.Duration, src time.Duration) {
 	if src != 0 {
@@ -501,9 +427,6 @@ func mergeServerConfig(dst, src *Config) {
 	mergeDuration(&dst.Server.ReadTimeout, src.Server.ReadTimeout)
 	mergeDuration(&dst.Server.WriteTimeout, src.Server.WriteTimeout)
 	mergeInt(&dst.Server.MaxConnections, src.Server.MaxConnections)
-	if len(src.Server.TrustedProxies) > 0 {
-		dst.Server.TrustedProxies = src.Server.TrustedProxies
-	}
 	if src.Server.maxBodySizeSet {
 		dst.Server.MaxBodySize = src.Server.MaxBodySize
 		dst.Server.maxBodySizeSet = true
@@ -511,7 +434,6 @@ func mergeServerConfig(dst, src *Config) {
 		mergeInt64(&dst.Server.MaxBodySize, src.Server.MaxBodySize)
 	}
 	dst.Server.Streaming = src.Server.Streaming
-	dst.Server.TrustClientIPHeader = src.Server.TrustClientIPHeader
 
 	// TLS
 	mergeStr(&dst.Server.TLS.CertFile, src.Server.TLS.CertFile)
@@ -539,7 +461,6 @@ func mergeMetricsConfig(dst, src *Config) {
 }
 
 func mergeMockConfig(dst, src *Config) {
-	mergeStr(&dst.Mock.DefaultMode, src.Mock.DefaultMode)
 	mergeStr(&dst.Mock.ScenariosDir, src.Mock.ScenariosDir)
 	mergeDuration(&dst.Mock.DefaultTimeout, src.Mock.DefaultTimeout)
 	mergeMockMatchingConfig(&dst.Mock.Matching, src.Mock.Matching)
@@ -552,28 +473,11 @@ func mergeMockMatchingConfig(dst *MockMatchingConfig, src MockMatchingConfig) {
 	mergeStr(&dst.BodyPatternLimitAction, src.BodyPatternLimitAction)
 }
 
-func mergeChaosConfig(dst, src *Config) {
-	dst.Chaos.Enabled = src.Chaos.Enabled
-	mergeFloat64(&dst.Chaos.ErrorRate, src.Chaos.ErrorRate)
-	mergeFloat64(&dst.Chaos.TimeoutRate, src.Chaos.TimeoutRate)
-	mergeInt(&dst.Chaos.MinLatencyMs, src.Chaos.MinLatencyMs)
-	mergeInt(&dst.Chaos.MaxLatencyMs, src.Chaos.MaxLatencyMs)
-	mergeFloat64(&dst.Chaos.LatencyRate, src.Chaos.LatencyRate)
-	mergeFloat64(&dst.Chaos.ConnectionDropRate, src.Chaos.ConnectionDropRate)
-}
-
 func mergeStorageConfig(dst, src *Config) {
 	dst.Storage.Enabled = src.Storage.Enabled
 	mergeStr(&dst.Storage.RequestsDir, src.Storage.RequestsDir)
 	mergeInt64(&dst.Storage.MaxFileSize, src.Storage.MaxFileSize)
 	mergeInt(&dst.Storage.RotateAfter, src.Storage.RotateAfter)
-}
-
-func mergeRateLimitConfig(dst, src *Config) {
-	dst.RateLimit.Enabled = src.RateLimit.Enabled
-	mergeFloat64(&dst.RateLimit.RequestsPerSecond, src.RateLimit.RequestsPerSecond)
-	mergeInt(&dst.RateLimit.Burst, src.RateLimit.Burst)
-	mergeStr(&dst.RateLimit.Algorithm, src.RateLimit.Algorithm)
 }
 
 func mergeHealthConfig(dst, src *Config) {
@@ -596,20 +500,6 @@ func mergeManagementConfig(dst, src *Config) {
 	}
 	mergeStr(&dst.Management.Token, src.Management.Token)
 	mergeStr(&dst.Management.TokenEnv, src.Management.TokenEnv)
-}
-
-func mergeReplayConfig(dst, src *Config) {
-	dst.Replay.Enabled = src.Replay.Enabled
-	mergeStr(&dst.Replay.RequestsDir, src.Replay.RequestsDir)
-	mergeFloat64(&dst.Replay.Speed, src.Replay.Speed)
-}
-
-func mergePluginConfig(dst, src *Config) {
-	dst.Plugin.Enabled = src.Plugin.Enabled
-	mergeStr(&dst.Plugin.Dir, src.Plugin.Dir)
-	if len(src.Plugin.Names) > 0 {
-		dst.Plugin.Names = src.Plugin.Names
-	}
 }
 
 func mergeShardingConfig(dst, src *Config) {

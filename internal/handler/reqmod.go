@@ -33,15 +33,14 @@ type ReqmodHandler struct {
 //   - proc: The processor to use for handling requests (must not be nil)
 //   - m: The metrics collector for recording request metrics (can be nil)
 //   - logger: The logger for structured logging (can be nil)
-//   - previewRateLimiter: The preview rate limiter (can be nil)
 //
 // Returns a new ReqmodHandler instance.
 //
 // Example:
 //
-//	h := handler.NewReqmodHandler(processor, metricsCollector, logger, previewRateLimiter)
-func NewReqmodHandler(proc processor.Processor, m *metrics.Collector, logger *slog.Logger, previewRateLimiter *PreviewRateLimiter) *ReqmodHandler {
-	return NewReqmodHandlerForServer("default", proc, m, logger, previewRateLimiter)
+//	h := handler.NewReqmodHandler(processor, metricsCollector, logger)
+func NewReqmodHandler(proc processor.Processor, m *metrics.Collector, logger *slog.Logger) *ReqmodHandler {
+	return NewReqmodHandlerForServer("default", proc, m, logger)
 }
 
 // NewReqmodHandlerForServer creates a REQMOD handler that records server-labeled metrics.
@@ -50,10 +49,9 @@ func NewReqmodHandlerForServer(
 	proc processor.Processor,
 	m *metrics.Collector,
 	logger *slog.Logger,
-	previewRateLimiter *PreviewRateLimiter,
 ) *ReqmodHandler {
 	return &ReqmodHandler{
-		baseHandler: newBaseHandlerForServer(server, icap.MethodREQMOD, proc, m, logger, previewRateLimiter),
+		baseHandler: newBaseHandlerForServer(server, icap.MethodREQMOD, proc, m, logger),
 	}
 }
 

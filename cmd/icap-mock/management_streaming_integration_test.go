@@ -22,8 +22,6 @@ import (
 	"github.com/icap-mock/icap-mock/internal/health"
 	"github.com/icap-mock/icap-mock/internal/logger"
 	"github.com/icap-mock/icap-mock/internal/management"
-	"github.com/icap-mock/icap-mock/internal/middleware"
-	"github.com/icap-mock/icap-mock/internal/ratelimit"
 	"github.com/icap-mock/icap-mock/internal/server"
 )
 
@@ -404,7 +402,6 @@ func startIntegrationRuntimeWithConfig(t *testing.T, scenariosDir string, mutate
 	cfg.Management.ConfigReloadEnabled = false
 	cfg.Metrics.Enabled = false
 	cfg.Storage.Enabled = false
-	cfg.RateLimit.Enabled = false
 	cfg.Mock.ScenariosDir = scenariosDir
 	if mutate != nil {
 		mutate(cfg)
@@ -426,7 +423,7 @@ func startIntegrationRuntimeWithConfig(t *testing.T, scenariosDir string, mutate
 	}
 
 	runtimeManager := management.NewRuntimeManager(cfg, cfg.SourcePath)
-	servers, firstRegistry, err := startAllServers(ctx, cfg, buildServerEntries(cfg), collector, ratelimit.Limiter(nil), (*middleware.StorageMiddleware)(nil), log, runtimeManager)
+	servers, firstRegistry, err := startAllServers(ctx, cfg, buildServerEntries(cfg), collector, nil, log, runtimeManager)
 	if err != nil {
 		cancel()
 		if healthServer != nil {

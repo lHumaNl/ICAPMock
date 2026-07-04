@@ -23,12 +23,10 @@ import (
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/middleware"
 	"github.com/icap-mock/icap-mock/internal/processor"
-	"github.com/icap-mock/icap-mock/internal/ratelimit"
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/internal/server"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
-	"github.com/icap-mock/icap-mock/pkg/plugin"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -38,8 +36,6 @@ import (
 var (
 	// errStorageDisabled is returned by createStorageManager when storage is not enabled.
 	errStorageDisabled = errors.New("storage is disabled")
-	// errPluginsDisabled is returned by loadPlugins when plugins are not enabled.
-	errPluginsDisabled = errors.New("plugins are disabled")
 )
 
 const validateDefaultScenarioName = "default"
@@ -67,11 +63,8 @@ func RunValidateMode(w io.Writer, cfg *config.Config) error {
 	printLoggingConfig(w, cfg)
 	printMetricsConfig(w, cfg)
 	printMockConfig(w, cfg, &allPassed)
-	printChaosConfig(w, cfg)
 	printStorageConfig(w, cfg)
-	printRateLimitConfig(w, cfg)
 	printHealthConfig(w, cfg)
-	printPluginConfig(w, cfg)
 
 	// Print validation summary
 	if allPassed {
@@ -128,7 +121,6 @@ func printMetricsConfig(w io.Writer, cfg *config.Config) {
 // printMockConfig prints mock configuration for validation.
 func printMockConfig(w io.Writer, cfg *config.Config, allPassed *bool) {
 	fmt.Fprintf(w, "Mock Configuration:\n")                            //nolint:errcheck
-	fmt.Fprintf(w, "  default_mode: %s\n", cfg.Mock.DefaultMode)       //nolint:errcheck
 	fmt.Fprintf(w, "  scenarios_dir: %s\n", cfg.Mock.ScenariosDir)     //nolint:errcheck
 	fmt.Fprintf(w, "  default_timeout: %s\n", cfg.Mock.DefaultTimeout) //nolint:errcheck
 
@@ -184,19 +176,6 @@ func countLoadedScenarios(scenarios []*storage.Scenario) int {
 	return count
 }
 
-// printChaosConfig prints chaos configuration for validation.
-func printChaosConfig(w io.Writer, cfg *config.Config) {
-	if cfg.Chaos.Enabled {
-		fmt.Fprintf(w, "Chaos Configuration:\n")                                                //nolint:errcheck
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.Chaos.Enabled)                                    //nolint:errcheck
-		fmt.Fprintf(w, "  error_rate: %.2f\n", cfg.Chaos.ErrorRate)                             //nolint:errcheck
-		fmt.Fprintf(w, "  timeout_rate: %.2f\n", cfg.Chaos.TimeoutRate)                         //nolint:errcheck
-		fmt.Fprintf(w, "  latency: %d-%d ms\n", cfg.Chaos.MinLatencyMs, cfg.Chaos.MaxLatencyMs) //nolint:errcheck
-		fmt.Fprintf(w, "  connection_drop_rate: %.2f\n", cfg.Chaos.ConnectionDropRate)          //nolint:errcheck
-		fmt.Fprintln(w)                                                                         //nolint:errcheck
-	}
-}
-
 // printStorageConfig prints storage configuration for validation.
 func printStorageConfig(w io.Writer, cfg *config.Config) {
 	if cfg.Storage.Enabled {
@@ -206,18 +185,6 @@ func printStorageConfig(w io.Writer, cfg *config.Config) {
 		fmt.Fprintf(w, "  max_file_size: %d bytes\n", cfg.Storage.MaxFileSize)   //nolint:errcheck
 		fmt.Fprintf(w, "  rotate_after: %d requests\n", cfg.Storage.RotateAfter) //nolint:errcheck
 		fmt.Fprintln(w)                                                          //nolint:errcheck
-	}
-}
-
-// printRateLimitConfig prints rate limit configuration for validation.
-func printRateLimitConfig(w io.Writer, cfg *config.Config) {
-	if cfg.RateLimit.Enabled {
-		fmt.Fprintf(w, "Rate Limit Configuration:\n")                                    //nolint:errcheck
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.RateLimit.Enabled)                         //nolint:errcheck
-		fmt.Fprintf(w, "  requests_per_second: %.0f\n", cfg.RateLimit.RequestsPerSecond) //nolint:errcheck
-		fmt.Fprintf(w, "  burst: %d\n", cfg.RateLimit.Burst)                             //nolint:errcheck
-		fmt.Fprintf(w, "  algorithm: %s\n", cfg.RateLimit.Algorithm)                     //nolint:errcheck
-		fmt.Fprintln(w)                                                                  //nolint:errcheck
 	}
 }
 
@@ -231,16 +198,6 @@ func printHealthConfig(w io.Writer, cfg *config.Config) {
 		fmt.Fprintf(w, "  ready_path: %s\n", cfg.Health.ReadyPath)   //nolint:errcheck
 	}
 	fmt.Fprintln(w) //nolint:errcheck
-}
-
-// printPluginConfig prints plugin configuration for validation.
-func printPluginConfig(w io.Writer, cfg *config.Config) {
-	if cfg.Plugin.Enabled {
-		fmt.Fprintf(w, "Plugin Configuration:\n")             //nolint:errcheck
-		fmt.Fprintf(w, "  enabled: %v\n", cfg.Plugin.Enabled) //nolint:errcheck
-		fmt.Fprintf(w, "  dir: %s\n", cfg.Plugin.Dir)         //nolint:errcheck
-		fmt.Fprintln(w)                                       //nolint:errcheck
-	}
 }
 
 // Run starts the ICAP server with the given configuration.
@@ -259,9 +216,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("creating metrics collector: %w", err)
 	}
 
-	// Create rate limiter (used for request throttling)
-	limiter := createRateLimiter(cfg)
-
 	// Create storage manager and middleware
 	store, storageMiddleware, err := createStorageStack(cfg, collector, log)
 	if err != nil {
@@ -274,14 +228,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Determine server entries: use Servers map if present, otherwise fall back to legacy config
 	serverEntries := buildServerEntries(cfg)
 	runtimeManager := management.NewRuntimeManager(cfg, cfg.SourcePath)
-
-	// Load plugins if enabled
-	pluginLoader := tryLoadPlugins(cfg, log)
-	defer func() {
-		if pluginLoader != nil {
-			_ = pluginLoader.Close()
-		}
-	}()
 
 	// Start health check server if enabled
 	healthServer, err := createHealthServer(cfg)
@@ -296,7 +242,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	launchMetricsServer(ctx, cfg, log, metricsRegistry, collector)
 
 	// Start all ICAP servers
-	allServers, firstRegistry, err := startAllServers(ctx, cfg, serverEntries, collector, limiter, storageMiddleware, log, runtimeManager)
+	allServers, firstRegistry, err := startAllServers(ctx, cfg, serverEntries, collector, storageMiddleware, log, runtimeManager)
 	if err != nil {
 		return err
 	}
@@ -336,7 +282,6 @@ func startAllServers(
 	cfg *config.Config,
 	serverEntries []serverEntry,
 	collector *metrics.Collector,
-	limiter ratelimit.Limiter,
 	storageMiddleware *middleware.StorageMiddleware,
 	log *logger.Logger,
 	runtimeManager *management.RuntimeManager,
@@ -375,7 +320,7 @@ func startAllServers(
 
 		rtr := router.NewRouter()
 		rtr.SetLogger(log.Logger)
-		if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, registry, entry); err != nil {
+		if err := registerHandlers(rtr, proc, collector, storageMiddleware, log, registry, entry); err != nil {
 			return nil, nil, fmt.Errorf("registering handlers for %s: %w", entry.name, err)
 		}
 
@@ -654,18 +599,6 @@ func sortedInlineScenarioNames(scenarios map[string]config.InlineScenarioEntry) 
 	return names
 }
 
-// tryLoadPlugins loads plugins if enabled, logging any errors.
-func tryLoadPlugins(cfg *config.Config, log *logger.Logger) *plugin.DynamicLoader {
-	if !cfg.Plugin.Enabled {
-		return nil
-	}
-	pluginLoader, pluginErr := loadPlugins(cfg, log)
-	if pluginErr != nil {
-		log.Warn("failed to load plugins", "error", pluginErr)
-	}
-	return pluginLoader
-}
-
 // createHealthServer creates a health server if health checks are enabled.
 func createHealthServer(cfg *config.Config) (*health.Server, error) {
 	if !cfg.Health.Enabled {
@@ -705,15 +638,10 @@ func createStorageStack(cfg *config.Config, collector *metrics.Collector, log *l
 		return store, nil, nil
 	}
 	storageCfg := middleware.StorageMiddlewareConfig{
+		Metrics:     collector,
 		Workers:     cfg.Storage.Workers,
 		QueueSize:   cfg.Storage.QueueSize,
 		MaxBodySize: cfg.Server.MaxBodySize,
-		CircuitBreaker: middleware.CircuitBreakerConfig{
-			Enabled:          cfg.Storage.CircuitBreaker.Enabled,
-			MaxFailures:      cfg.Storage.CircuitBreaker.MaxFailures,
-			ResetTimeout:     cfg.Storage.CircuitBreaker.ResetTimeout,
-			SuccessThreshold: cfg.Storage.CircuitBreaker.SuccessThreshold,
-		},
 	}
 	sm, err := middleware.NewStorageMiddlewareWithPool(store, log.Logger, storageCfg)
 	if err != nil {
@@ -736,23 +664,6 @@ func createMetricsCollector() (*prometheus.Registry, *metrics.Collector, error) 
 		return nil, nil, err
 	}
 	return reg, collector, nil
-}
-
-// createRateLimiter creates a rate limiter based on configuration.
-func createRateLimiter(cfg *config.Config) ratelimit.Limiter {
-	if !cfg.RateLimit.Enabled {
-		return nil
-	}
-
-	switch cfg.RateLimit.Algorithm {
-	case "sliding_window":
-		return ratelimit.NewSlidingWindowLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst)
-	case "sharded_token_bucket":
-		// Use key-based sharded limiter with global key
-		return ratelimit.NewGlobalKeyBasedLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, ratelimit.GlobalKey)
-	default:
-		return ratelimit.NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst)
-	}
 }
 
 // createStorageManager creates a storage manager based on configuration.
@@ -782,32 +693,6 @@ func loadScenarios(
 	return nil
 }
 
-// loadPlugins loads plugins from the configured directory.
-func loadPlugins(cfg *config.Config, log *logger.Logger) (*plugin.DynamicLoader, error) {
-	if !cfg.Plugin.Enabled {
-		return nil, errPluginsDisabled
-	}
-
-	log.Info("loading plugins", "directory", cfg.Plugin.Dir)
-
-	// Check if directory exists
-	if _, err := os.Stat(cfg.Plugin.Dir); os.IsNotExist(err) {
-		return nil, fmt.Errorf("plugin directory does not exist: %s", cfg.Plugin.Dir)
-	}
-
-	// Create plugin loader
-	loader := plugin.NewLoader()
-
-	// Load all plugins from directory
-	if err := loader.LoadDir(cfg.Plugin.Dir); err != nil {
-		_ = loader.Close()
-		return nil, fmt.Errorf("loading plugins: %w", err)
-	}
-
-	log.Info("plugins loaded", "count", len(plugin.List()))
-	return loader, nil
-}
-
 // createProcessorChain creates the processor chain for handling requests.
 func createProcessorChain(
 	cfg *config.Config,
@@ -817,82 +702,29 @@ func createProcessorChain(
 	serverName string,
 	maxBodySize int64,
 ) (proc processor.Processor, cleanup func(context.Context)) {
-	// Create processors in order: mock -> plugins -> chaos (if enabled) -> echo
-	var processors []processor.Processor
-	var cleanups []func(context.Context)
+	// Create mock processor with echo fallback.
+	processors := make([]processor.Processor, 0, 2)
 
-	// Add script processor if script mode is configured
-	if cfg.Mock.DefaultMode == "script" {
-		scriptProc := processor.NewScriptProcessorWithMaxBodySize(registry, log, cfg.Mock.DefaultTimeout, maxBodySize)
-		scriptProc.SetMetricsForServer(collector, serverName)
-		processors = append(processors, scriptProc)
-		cleanups = append(cleanups, func(ctx context.Context) { _ = scriptProc.Shutdown(ctx) })
-		log.Info("script processor added to chain")
-	}
+	echoProc := processor.NewEchoProcessor()
+	echoProc.SetMetricsForServer(collector, serverName)
 
 	// Create mock processor with scenario registry
 	mockProc := processor.NewMockProcessorWithMaxBodySize(registry, log, maxBodySize)
 	mockProc.SetMetricsForServer(collector, serverName)
-	processors = append(processors, mockProc)
+	processors = append(processors, mockProc, echoProc)
 
-	// Add plugin processor if plugins are loaded
-	if cfg.Plugin.Enabled && len(plugin.List()) > 0 {
-		pluginProcessor := plugin.CreatePluginProcessor()
-		processors = append(processors, pluginProcessor)
-		log.Info("plugin processor added to chain", "count", len(plugin.List()))
-	}
-
-	// Add echo processor for fallback
-	echoProc := processor.NewEchoProcessor()
-	echoProc.SetMetricsForServer(collector, serverName)
-	processors = append(processors, echoProc)
-
-	// Wrap with chaos processor if enabled
-	if cfg.Chaos.Enabled {
-		chaosConfig := processor.ChaosConfig{
-			Enabled:            cfg.Chaos.Enabled,
-			ErrorRate:          cfg.Chaos.ErrorRate,
-			TimeoutRate:        cfg.Chaos.TimeoutRate,
-			MinLatencyMs:       cfg.Chaos.MinLatencyMs,
-			MaxLatencyMs:       cfg.Chaos.MaxLatencyMs,
-			LatencyRate:        cfg.Chaos.LatencyRate,
-			ConnectionDropRate: cfg.Chaos.ConnectionDropRate,
-		}
-		// Create a chain of non-chaos processors
-		baseChain := processor.Chain(processors...)
-		chaosProc := processor.NewChaosProcessor(chaosConfig, baseChain, log)
-		return chaosProc, func(ctx context.Context) {
-			for _, fn := range cleanups {
-				fn(ctx)
-			}
-		}
-	}
-
-	// Return the chain of processors
-	return processor.Chain(processors...), func(ctx context.Context) {
-		for _, fn := range cleanups {
-			fn(ctx)
-		}
-	}
+	baseChain := processor.Chain(processors...)
+	return processor.WithTimeout(baseChain, cfg.Mock.DefaultTimeout), func(context.Context) {}
 }
 
 // buildMiddlewareChain creates the middleware chain function.
-// Order: Panic Recovery -> Rate Limiter -> Storage -> Handler.
+// Order: Panic Recovery -> Storage -> Handler.
 func buildMiddlewareChain(
 	log *logger.Logger,
-	limiter ratelimit.Limiter,
-	collector *metrics.Collector,
-	serverName string,
 	storageMiddleware *middleware.StorageMiddleware,
-	cfg *config.Config,
 	maxBodySize int64,
 ) func(handler.Handler) handler.Handler {
 	panicRecovery := middleware.PanicRecoveryMiddleware(log.Logger)
-
-	var rateLimitMiddleware handler.Middleware
-	if limiter != nil && cfg.RateLimit.Enabled {
-		rateLimitMiddleware = middleware.RateLimiterMiddlewareForServer(limiter, collector, serverName)
-	}
 
 	var storageMW handler.Middleware
 	if storageMiddleware != nil {
@@ -903,9 +735,6 @@ func buildMiddlewareChain(
 
 	return func(h handler.Handler) handler.Handler {
 		wrapped := panicRecovery(h)
-		if rateLimitMiddleware != nil {
-			wrapped = rateLimitMiddleware(wrapped)
-		}
 		if storageMW != nil {
 			wrapped = storageMW(wrapped)
 		}
@@ -917,28 +746,12 @@ func buildMiddlewareChain(
 func createHandlers(
 	proc processor.Processor,
 	collector *metrics.Collector,
-	cfg *config.Config,
 	log *logger.Logger,
 	entry serverEntry,
 	applyMiddleware func(handler.Handler) handler.Handler,
 ) (wrappedReqmod, wrappedRespmod, wrappedOptions handler.Handler) {
-	var previewRateLimiter *handler.PreviewRateLimiter
-	if cfg.Preview.Enabled {
-		previewRateLimiter = handler.NewPreviewRateLimiter(
-			handler.PreviewRateLimiterConfig{
-				Enabled:             cfg.Preview.Enabled,
-				MaxRequests:         cfg.Preview.MaxRequests,
-				WindowSeconds:       cfg.Preview.WindowSeconds,
-				MaxClients:          cfg.Preview.MaxClients,
-				TrustClientIDHeader: cfg.Preview.TrustClientIDHeader,
-			},
-			collector,
-			log.Logger,
-		)
-	}
-
-	reqmodHandler := handler.NewReqmodHandlerForServer(entry.name, proc, collector, log.Logger, previewRateLimiter)
-	respmodHandler := handler.NewRespmodHandlerForServer(entry.name, proc, collector, log.Logger, previewRateLimiter)
+	reqmodHandler := handler.NewReqmodHandlerForServer(entry.name, proc, collector, log.Logger)
+	respmodHandler := handler.NewRespmodHandlerForServer(entry.name, proc, collector, log.Logger)
 	optionsHandler := handler.NewOptionsHandler(optionsHandlerConfig(entry))
 
 	return applyMiddleware(reqmodHandler), applyMiddleware(respmodHandler), applyMiddleware(optionsHandler)
@@ -961,16 +774,14 @@ func registerHandlers(
 	rtr *router.Router,
 	proc processor.Processor,
 	collector *metrics.Collector,
-	limiter ratelimit.Limiter,
 	storageMiddleware *middleware.StorageMiddleware,
-	cfg *config.Config,
 	log *logger.Logger,
 	registry storage.ScenarioRegistry,
 	entry serverEntry,
 ) error {
 	maxBodySize := entry.serverCfg.MaxBodySize
-	applyMiddleware := buildMiddlewareChain(log, limiter, collector, entry.name, storageMiddleware, cfg, maxBodySize)
-	wrappedReqmod, wrappedRespmod, wrappedOptions := createHandlers(proc, collector, cfg, log, entry, applyMiddleware)
+	applyMiddleware := buildMiddlewareChain(log, storageMiddleware, maxBodySize)
+	wrappedReqmod, wrappedRespmod, wrappedOptions := createHandlers(proc, collector, log, entry, applyMiddleware)
 
 	// Register default endpoints
 	defaultEndpoints := []string{"/reqmod", "/respmod", "/options"}

@@ -23,6 +23,7 @@ data:
       read_timeout: {{ .Values.icap.readTimeout | quote }}
       write_timeout: {{ .Values.icap.writeTimeout | quote }}
       max_connections: {{ .Values.icap.maxConnections }}
+      streaming: {{ .Values.icap.streaming }}
 
     servers:
       {{- range $name, $srv := .Values.icap.servers }}
@@ -39,11 +40,21 @@ data:
       read_timeout: {{ .Values.icap.readTimeout | quote }}
       write_timeout: {{ .Values.icap.writeTimeout | quote }}
       max_connections: {{ .Values.icap.maxConnections }}
+      streaming: {{ .Values.icap.streaming }}
+      {{- if .Values.tls.enabled }}
+      tls:
+        enabled: true
+        cert_file: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
+        key_file: {{ printf "%s/tls.key" .Values.tls.mountPath | quote }}
+      {{- end }}
+
+    mock:
       scenarios_dir: {{ .Values.icap.scenariosDir | quote }}
 
     {{- end }}
 
     health:
+      enabled: true
       port: {{ .Values.health.port }}
 
     metrics:
@@ -57,18 +68,8 @@ data:
     storage:
       enabled: {{ .Values.storage.enabled }}
       {{- if .Values.storage.enabled }}
-      path: {{ .Values.storage.path | quote }}
+      requests_dir: {{ .Values.storage.path | quote }}
       {{- end }}
-
-    rate_limit:
-      enabled: {{ .Values.rateLimit.enabled }}
-
-    {{- if .Values.tls.enabled }}
-    tls:
-      enabled: true
-      cert_file: {{ printf "%s/tls.crt" .Values.tls.mountPath | quote }}
-      key_file: {{ printf "%s/tls.key" .Values.tls.mountPath | quote }}
-    {{- end }}
 
   # -------------------------------------------------------------------------
   # Extra config files

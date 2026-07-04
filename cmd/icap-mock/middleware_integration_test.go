@@ -17,45 +17,10 @@ import (
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/middleware"
 	"github.com/icap-mock/icap-mock/internal/processor"
-	"github.com/icap-mock/icap-mock/internal/ratelimit"
 	"github.com/icap-mock/icap-mock/internal/router"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
-
-// TestRegisterHandlers_RateLimiterIntegration tests that rate limiter middleware
-// is properly integrated when enabled.
-func TestRegisterHandlers_RateLimiterIntegration(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-	cfg.RateLimit.Enabled = true
-	cfg.RateLimit.RequestsPerSecond = 100
-	cfg.RateLimit.Burst = 150
-
-	log, err := logger.New(cfg.Logging)
-	if err != nil {
-		t.Fatalf("Failed to create logger: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = log.Close()
-	})
-
-	registry := prometheus.NewRegistry()
-	collector, err := metrics.NewCollector(registry)
-	if err != nil {
-		t.Fatalf("Failed to create metrics collector: %v", err)
-	}
-
-	limiter := ratelimit.NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst)
-	rtr := router.NewRouter()
-	proc := processor.NewEchoProcessor()
-
-	if err := registerHandlers(rtr, proc, collector, limiter, nil, cfg, log, nil, testServerEntry(cfg)); err != nil {
-		t.Fatalf("registerHandlers() failed: %v", err)
-	}
-}
 
 // TestRegisterHandlers_StorageMiddlewareIntegration tests that storage middleware
 // is properly integrated when enabled.
@@ -64,7 +29,6 @@ func TestRegisterHandlers_StorageMiddlewareIntegration(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.SetDefaults()
-	cfg.RateLimit.Enabled = false
 	cfg.Storage.Enabled = true
 	cfg.Storage.Workers = 2
 	cfg.Storage.QueueSize = 10
@@ -110,7 +74,7 @@ func TestRegisterHandlers_StorageMiddlewareIntegration(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, nil, storageMiddleware, cfg, log, nil, testServerEntry(cfg)); err != nil {
+	if err := registerHandlers(rtr, proc, collector, storageMiddleware, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
@@ -122,7 +86,6 @@ func TestRegisterHandlers_DisabledMiddleware(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.SetDefaults()
-	cfg.RateLimit.Enabled = false
 	cfg.Storage.Enabled = false
 
 	log, err := logger.New(cfg.Logging)
@@ -142,18 +105,17 @@ func TestRegisterHandlers_DisabledMiddleware(t *testing.T) {
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, nil, nil, cfg, log, nil, testServerEntry(cfg)); err != nil {
+	if err := registerHandlers(rtr, proc, collector, nil, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
 }
 
-// TestRegisterHandlers_AllMiddleware tests that all middleware works together.
-func TestRegisterHandlers_AllMiddleware(t *testing.T) {
+// TestRegisterHandlers_StorageAndRecoveryMiddleware tests that remaining middleware works together.
+func TestRegisterHandlers_StorageAndRecoveryMiddleware(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
 	cfg.SetDefaults()
-	cfg.RateLimit.Enabled = true
 	cfg.Storage.Enabled = true
 	cfg.Storage.Workers = 2
 	cfg.Storage.QueueSize = 10
@@ -196,52 +158,11 @@ func TestRegisterHandlers_AllMiddleware(t *testing.T) {
 		_ = store.Close()
 	})
 
-	limiter := ratelimit.NewTokenBucketLimiter(1000, 100)
 	rtr := router.NewRouter()
 	proc := processor.NewEchoProcessor()
 
-	if err := registerHandlers(rtr, proc, collector, limiter, storageMiddleware, cfg, log, nil, testServerEntry(cfg)); err != nil {
+	if err := registerHandlers(rtr, proc, collector, storageMiddleware, log, nil, testServerEntry(cfg)); err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
-	}
-}
-
-// TestMiddlewareChain_RateLimitPreventsRequests tests that rate limiter
-// prevents excessive requests.
-func TestMiddlewareChain_RateLimitPreventsRequests(t *testing.T) {
-	t.Parallel()
-
-	// Create a handler that returns success
-	baseHandler := handler.WrapHandler(func(_ context.Context, _ *icap.Request) (*icap.Response, error) {
-		return icap.NewResponse(icap.StatusOK), nil
-	}, "REQMOD")
-
-	// Create a very strict rate limiter (only 1 request allowed)
-	limiter := ratelimit.NewTokenBucketLimiter(1, 1)
-
-	// Apply rate limiter middleware
-	rateLimitMW := middleware.RateLimiterMiddleware(limiter)
-	wrappedHandler := rateLimitMW(baseHandler)
-
-	// First request should succeed
-	req1, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-	resp1, err1 := wrappedHandler.Handle(context.Background(), req1)
-
-	if err1 != nil {
-		t.Errorf("First request failed with error: %v", err1)
-	}
-	if resp1.StatusCode != icap.StatusOK {
-		t.Errorf("First request StatusCode = %d, want %d", resp1.StatusCode, icap.StatusOK)
-	}
-
-	// Second request should be rate limited
-	req2, _ := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/test")
-	resp2, err2 := wrappedHandler.Handle(context.Background(), req2)
-
-	if err2 != nil {
-		t.Errorf("Second request failed with error: %v", err2)
-	}
-	if resp2.StatusCode != 429 {
-		t.Errorf("Second request StatusCode = %d, want 429", resp2.StatusCode)
 	}
 }
 
@@ -258,11 +179,10 @@ func TestMiddlewareChain_StorageSavesRequests(t *testing.T) {
 		return icap.NewResponse(icap.StatusOK), nil
 	}, "REQMOD")
 
-	// Create storage middleware with worker pool (replaces deprecated LegacyStorageMiddleware)
+	// Create storage middleware with a worker pool.
 	storageCfg := middleware.StorageMiddlewareConfig{
-		Workers:        1,
-		QueueSize:      10,
-		CircuitBreaker: middleware.CircuitBreakerConfig{Enabled: false},
+		Workers:   1,
+		QueueSize: 10,
 	}
 	storageMW, err := middleware.NewStorageMiddlewareWithPool(store, nil, storageCfg)
 	if err != nil {
@@ -316,7 +236,7 @@ func TestRegisterHandlers_StorageUsesPerServerMaxBodySize(t *testing.T) {
 
 	entry := testServerEntry(cfg)
 	entry.serverCfg.MaxBodySize = serverMaxBodySize
-	err = registerHandlers(rtr, proc, nil, nil, storageMW, cfg, log, nil, entry)
+	err = registerHandlers(rtr, proc, nil, storageMW, log, nil, entry)
 	if err != nil {
 		t.Fatalf("registerHandlers() failed: %v", err)
 	}
@@ -337,9 +257,8 @@ func TestRegisterHandlers_StorageUsesPerServerMaxBodySize(t *testing.T) {
 func testStorageMiddleware(t *testing.T, store storage.Storage, log *logger.Logger) *middleware.StorageMiddleware {
 	t.Helper()
 	cfg := middleware.StorageMiddlewareConfig{
-		Workers:        1,
-		QueueSize:      10,
-		CircuitBreaker: middleware.CircuitBreakerConfig{Enabled: false},
+		Workers:   1,
+		QueueSize: 10,
 	}
 	storageMW, err := middleware.NewStorageMiddlewareWithPool(store, log.Logger, cfg)
 	if err != nil {

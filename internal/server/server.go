@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/icap-mock/icap-mock/internal/circuitbreaker"
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/router"
@@ -112,13 +111,10 @@ type ICAPServer struct {
 	addr                       net.Addr
 	listener                   net.Listener
 	serverCtx                  context.Context
-	scenarioCircuitBreaker     *circuitbreaker.CircuitBreaker
 	router                     *router.Router
 	pool                       *ConnectionPool
 	semaphore                  chan struct{}
-	metricsCircuitBreaker      *circuitbreaker.CircuitBreaker
 	tlsMonitor                 *TLSCertificateMonitor
-	storageCircuitBreaker      *circuitbreaker.CircuitBreaker
 	stopChan                   chan struct{}
 	tcpListener                *net.TCPListener
 	config                     *config.ServerConfig
@@ -222,43 +218,6 @@ func (s *ICAPServer) SetGoroutineMonitorConfig(cfg GoroutineMonitorConfig) {
 	s.goroutineMu.Lock()
 	defer s.goroutineMu.Unlock()
 	s.goroutineConfig = cfg
-}
-
-// SetCircuitBreakers sets the circuit breakers for the server.
-// This should be called before Start() for the circuit breakers to be active.
-// Circuit breakers protect external operations from cascade failures.
-//
-// Parameters:
-//   - storageCB: Circuit breaker for storage operations
-//   - scenarioCB: Circuit breaker for scenario loading
-//   - metricsCB: Circuit breaker for metrics collection
-//
-// Example:
-//
-//	server.SetCircuitBreakers(storageCB, scenarioCB, metricsCB)
-func (s *ICAPServer) SetCircuitBreakers(
-	storageCB *circuitbreaker.CircuitBreaker,
-	scenarioCB *circuitbreaker.CircuitBreaker,
-	metricsCB *circuitbreaker.CircuitBreaker,
-) {
-	s.storageCircuitBreaker = storageCB
-	s.scenarioCircuitBreaker = scenarioCB
-	s.metricsCircuitBreaker = metricsCB
-}
-
-// StorageCircuitBreaker returns the storage circuit breaker.
-func (s *ICAPServer) StorageCircuitBreaker() *circuitbreaker.CircuitBreaker {
-	return s.storageCircuitBreaker
-}
-
-// ScenarioCircuitBreaker returns the scenario loader circuit breaker.
-func (s *ICAPServer) ScenarioCircuitBreaker() *circuitbreaker.CircuitBreaker {
-	return s.scenarioCircuitBreaker
-}
-
-// MetricsCircuitBreaker returns the metrics server circuit breaker.
-func (s *ICAPServer) MetricsCircuitBreaker() *circuitbreaker.CircuitBreaker {
-	return s.metricsCircuitBreaker
 }
 
 // GetGoroutineStats returns the current goroutine monitoring statistics.
@@ -569,14 +528,9 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				s.handleParseError(conn, err, requestReader.Started(), keepAliveWait)
 				return
 			}
-			// Extract client IP
+			// Extract client IP from the peer socket only.
 			req.RemoteAddr = conn.RemoteAddr()
-			req.ClientIP = extractClientIP(
-				req.Header,
-				conn.RemoteAddr(),
-				s.config.TrustClientIPHeader,
-				s.config.TrustedProxies,
-			)
+			req.ClientIP = extractClientIP(conn.RemoteAddr())
 
 			if receiveErr := s.receiveRequestBodies(conn, req); receiveErr != nil {
 				s.logger.Debug("closing connection after request body receive failed",

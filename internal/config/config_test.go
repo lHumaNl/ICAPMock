@@ -35,7 +35,6 @@ func TestConfig_SetDefaults(t *testing.T) {
 		{"default", "Metrics.EndpointLabelMode", "Metrics.EndpointLabelMode"},
 
 		// Mock defaults
-		{"mock", "Mock.DefaultMode", "Mock.DefaultMode"},
 		{5 * time.Second, "Mock.DefaultTimeout", "Mock.DefaultTimeout"},
 		{"icap-mock", "Mock.ServiceID", "Mock.ServiceID"},
 
@@ -89,8 +88,6 @@ func TestConfig_SetDefaults(t *testing.T) {
 				actual = cfg.Metrics.EndpointLabelMode
 
 			// Mock
-			case "Mock.DefaultMode":
-				actual = cfg.Mock.DefaultMode
 			case "Mock.DefaultTimeout":
 				actual = cfg.Mock.DefaultTimeout
 			case "Mock.ServiceID":
@@ -131,20 +128,11 @@ func TestConfig_Structure(t *testing.T) {
 	if &cfg.Mock == nil {
 		t.Error("Mock config is nil")
 	}
-	if &cfg.Chaos == nil {
-		t.Error("Chaos config is nil")
-	}
 	if &cfg.Storage == nil {
 		t.Error("Storage config is nil")
 	}
-	if &cfg.RateLimit == nil {
-		t.Error("RateLimit config is nil")
-	}
 	if &cfg.Health == nil {
 		t.Error("Health config is nil")
-	}
-	if &cfg.Replay == nil {
-		t.Error("Replay config is nil")
 	}
 }
 
@@ -175,45 +163,13 @@ func TestTLSConfig(t *testing.T) {
 	}
 }
 
-// TestChaosConfig tests Chaos configuration defaults and ranges.
-func TestChaosConfig_Defaults(t *testing.T) {
-	cfg := &Config{}
-	cfg.SetDefaults()
-
-	// Chaos should be disabled by default
-	if cfg.Chaos.Enabled {
-		t.Error("Chaos should be disabled by default")
-	}
-}
-
-// TestRateLimitConfig tests RateLimit configuration.
-func TestRateLimitConfig_Algorithms(t *testing.T) {
-	cfg := &Config{}
-	cfg.SetDefaults()
-
-	// Rate limit should be configurable
-	cfg.RateLimit.Algorithm = "token_bucket"
-	if cfg.RateLimit.Algorithm != "token_bucket" {
-		t.Error("RateLimit algorithm should be settable")
-	}
-
-	cfg.RateLimit.Algorithm = "sliding_window"
-	if cfg.RateLimit.Algorithm != "sliding_window" {
-		t.Error("RateLimit algorithm should be settable")
-	}
-}
-
 // TestMockConfig tests Mock configuration.
 func TestMockConfig(t *testing.T) {
 	cfg := &MockConfig{
-		DefaultMode:    "echo",
 		ScenariosDir:   "./scenarios",
 		DefaultTimeout: 5 * time.Second,
 	}
 
-	if cfg.DefaultMode != "echo" {
-		t.Errorf("DefaultMode = %s, want echo", cfg.DefaultMode)
-	}
 	if cfg.ScenariosDir != "./scenarios" {
 		t.Errorf("ScenariosDir = %s, want ./scenarios", cfg.ScenariosDir)
 	}
@@ -236,22 +192,6 @@ func TestStorageConfig(t *testing.T) {
 	}
 	if cfg.RequestsDir != "./data/requests" {
 		t.Errorf("RequestsDir = %s, want ./data/requests", cfg.RequestsDir)
-	}
-}
-
-// TestReplayConfig tests Replay configuration.
-func TestReplayConfig(t *testing.T) {
-	cfg := &ReplayConfig{
-		Enabled:     true,
-		RequestsDir: "./data/requests",
-		Speed:       2.0,
-	}
-
-	if !cfg.Enabled {
-		t.Error("Replay should be enabled")
-	}
-	if cfg.Speed != 2.0 {
-		t.Errorf("Speed = %f, want 2.0", cfg.Speed)
 	}
 }
 
@@ -318,13 +258,6 @@ func TestStorageConfig_QueueSize_Range(t *testing.T) {
 func TestStorageConfig_QueueSize_HighLoad(t *testing.T) {
 	cfg := &Config{}
 	cfg.SetDefaults()
-
-	// QueueSize should be >= RateLimit.RequestsPerSecond for high-load scenarios
-	rps := int(cfg.RateLimit.RequestsPerSecond)
-	if cfg.Storage.QueueSize < rps {
-		t.Errorf("Storage.QueueSize (%d) should be >= RequestsPerSecond (%d) for high-load",
-			cfg.Storage.QueueSize, rps)
-	}
 
 	// QueueSize should handle at least 1 second of traffic at full rate
 	if cfg.Storage.QueueSize < 10000 {

@@ -26,15 +26,14 @@ type RespmodHandler struct {
 //   - proc: The processor to use for handling requests (must not be nil)
 //   - m: The metrics collector for recording request metrics (can be nil)
 //   - logger: The logger for structured logging (can be nil)
-//   - previewRateLimiter: The preview rate limiter (can be nil)
 //
 // Returns a new RespmodHandler instance.
 //
 // Example:
 //
-//	h := handler.NewRespmodHandler(processor, metricsCollector, logger, previewRateLimiter)
-func NewRespmodHandler(proc processor.Processor, m *metrics.Collector, logger *slog.Logger, previewRateLimiter *PreviewRateLimiter) *RespmodHandler {
-	return NewRespmodHandlerForServer("default", proc, m, logger, previewRateLimiter)
+//	h := handler.NewRespmodHandler(processor, metricsCollector, logger)
+func NewRespmodHandler(proc processor.Processor, m *metrics.Collector, logger *slog.Logger) *RespmodHandler {
+	return NewRespmodHandlerForServer("default", proc, m, logger)
 }
 
 // NewRespmodHandlerForServer creates a RESPMOD handler that records server-labeled metrics.
@@ -43,10 +42,9 @@ func NewRespmodHandlerForServer(
 	proc processor.Processor,
 	m *metrics.Collector,
 	logger *slog.Logger,
-	previewRateLimiter *PreviewRateLimiter,
 ) *RespmodHandler {
 	return &RespmodHandler{
-		baseHandler: newBaseHandlerForServer(server, icap.MethodRESPMOD, proc, m, logger, previewRateLimiter),
+		baseHandler: newBaseHandlerForServer(server, icap.MethodRESPMOD, proc, m, logger),
 	}
 }
 

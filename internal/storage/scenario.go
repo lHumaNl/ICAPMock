@@ -325,7 +325,6 @@ type ResponseTemplate struct {
 	HTTPBody     string            `yaml:"http_body,omitempty" json:"http_body,omitempty"`
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty" json:"http_body_file,omitempty"`
 	Error        string            `yaml:"error,omitempty" json:"error,omitempty"`
-	Script       string            `yaml:"script,omitempty" json:"script,omitempty"`
 	Status       int               `yaml:"status,omitempty" json:"status,omitempty"`
 	ICAPStatus   int               `yaml:"icap_status" json:"icap_status"`
 	HTTPStatus   int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
@@ -379,37 +378,9 @@ func (r *scenarioRegistry) Load(path string) error {
 		return NewScenarioLoadError(path, err)
 	}
 
-	// Detect format: v2 (scenarios is a map) vs v1 (scenarios is an array)
-	isV2, orderedNames, err := detectV2Format(data)
+	scenarios, err := loadScenariosFromData(data, path)
 	if err != nil {
-		return NewScenarioParseError(path, err)
-	}
-
-	var scenarios []Scenario
-
-	if isV2 {
-		var sf ScenarioFileV2
-		if err := yaml.Unmarshal(data, &sf); err != nil {
-			return NewScenarioParseError(path, err)
-		}
-		converted, err := ConvertV2ToScenarios(&sf, orderedNames)
-		if err != nil {
-			return &ScenarioError{
-				Operation:  "convert_v2",
-				FilePath:   path,
-				Message:    err.Error(),
-				Suggestion: "check v2 scenario format",
-			}
-		}
-		for _, s := range converted {
-			scenarios = append(scenarios, *s)
-		}
-	} else {
-		loaded, loadErr := loadScenarioFileV1(data, path)
-		if loadErr != nil {
-			return loadErr
-		}
-		scenarios = loaded
+		return err
 	}
 
 	// Validate and compile regex patterns
@@ -458,6 +429,46 @@ func (r *scenarioRegistry) Load(path string) error {
 	})
 
 	return nil
+}
+
+func loadScenariosFromData(data []byte, path string) ([]Scenario, error) {
+	if removedKeyErr := rejectRemovedScenarioYAMLKeys(data, path); removedKeyErr != nil {
+		return nil, removedKeyErr
+	}
+
+	isV2, orderedNames, detectErr := detectV2Format(data)
+	if detectErr != nil {
+		return nil, NewScenarioParseError(path, detectErr)
+	}
+	if !isV2 {
+		return loadScenarioFileV1(data, path)
+	}
+
+	return loadScenarioFileV2(data, path, orderedNames)
+}
+
+func loadScenarioFileV2(data []byte, path string, orderedNames []string) ([]Scenario, error) {
+	var sf ScenarioFileV2
+	if err := yaml.Unmarshal(data, &sf); err != nil {
+		return nil, NewScenarioParseError(path, err)
+	}
+
+	converted, err := ConvertV2ToScenarios(&sf, orderedNames)
+	if err != nil {
+		return nil, &ScenarioError{
+			Operation:  "convert_v2",
+			FilePath:   path,
+			Message:    err.Error(),
+			Suggestion: "check v2 scenario format",
+		}
+	}
+
+	scenarios := make([]Scenario, 0, len(converted))
+	for _, scenario := range converted {
+		scenarios = append(scenarios, *scenario)
+	}
+
+	return scenarios, nil
 }
 
 // detectV2Format checks if the YAML data uses v2 format (scenarios is a mapping).

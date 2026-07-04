@@ -10,8 +10,8 @@ import (
 // This interface follows the Interface Segregation Principle (ISP) by separating
 // read/query operations from write operations.
 //
-// Clients that only need to retrieve or query requests (e.g., replay engines,
-// monitoring tools, admin dashboards) should depend on this interface rather
+// Clients that only need to retrieve or query requests (e.g., monitoring tools
+// or admin dashboards) should depend on this interface rather
 // than the full Storage interface.
 //
 // Implementations must be thread-safe for concurrent access.

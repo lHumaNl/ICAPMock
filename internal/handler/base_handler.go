@@ -18,12 +18,11 @@ import (
 // baseHandler contains the shared logic for REQMOD and RESPMOD handlers.
 // It is not exported; ReqmodHandler and RespmodHandler embed it.
 type baseHandler struct {
-	processorVal       atomic.Value
-	metricsVal         atomic.Value
-	logger             *slog.Logger
-	previewRateLimiter *PreviewRateLimiter
-	method             string
-	server             string
+	processorVal atomic.Value
+	metricsVal   atomic.Value
+	logger       *slog.Logger
+	method       string
+	server       string
 }
 
 func newBaseHandlerForServer(
@@ -32,13 +31,11 @@ func newBaseHandlerForServer(
 	proc processor.Processor,
 	m *metrics.Collector,
 	logger *slog.Logger,
-	previewRateLimiter *PreviewRateLimiter,
 ) baseHandler {
 	h := baseHandler{
-		method:             method,
-		server:             server,
-		logger:             logger,
-		previewRateLimiter: previewRateLimiter,
+		method: method,
+		server: server,
+		logger: logger,
 	}
 	if proc != nil {
 		h.processorVal.Store(proc)
@@ -125,13 +122,6 @@ func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, star
 		)
 	}
 
-	// Check preview rate limit
-	if h.previewRateLimiter != nil {
-		if resp := h.checkPreviewRateLimit(ctx, req); resp != nil {
-			return resp, nil
-		}
-	}
-
 	if h.getMetrics() != nil {
 		h.getMetrics().RecordPreviewRequestForServer(h.server, h.method, true)
 	}
@@ -148,28 +138,6 @@ func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, star
 
 	h.recordRequestMetrics(start, resp, err, "preview_processing_error")
 	return resp, err
-}
-
-// checkPreviewRateLimit checks preview rate limit and returns a 429 response if exceeded, or nil if OK.
-func (h *baseHandler) checkPreviewRateLimit(ctx context.Context, req *icap.Request) *icap.Response {
-	exceeded, remaining, resetIn := h.previewRateLimiter.CheckLimit(req)
-	if !exceeded {
-		return nil
-	}
-	resp := icap.NewResponse(icap.StatusServiceUnavailable)
-	resp.SetHeader("Retry-After", fmt.Sprintf("%d", int(resetIn.Seconds())))
-	resp.SetHeader("X-RateLimit-Limit", fmt.Sprintf("%d", h.previewRateLimiter.config.MaxRequests))
-	resp.SetHeader("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
-	resp.SetHeader("X-RateLimit-Reset", fmt.Sprintf("%d", int(resetIn.Seconds())))
-
-	if h.logger != nil {
-		h.logger.WarnContext(ctx, "preview rate limit exceeded, returning 429",
-			"request_id", util.RequestIDFromContext(ctx),
-			"remaining", remaining,
-			"reset_in_seconds", resetIn.Seconds(),
-		)
-	}
-	return resp
 }
 
 // resolvePreviewResponse determines the appropriate response for a preview request.

@@ -145,22 +145,10 @@ func TestValidateMode_WithAllFeatures(t *testing.T) {
 	cfg.Metrics.Port = 9090
 	cfg.Metrics.Path = "/metrics"
 
-	cfg.Chaos.Enabled = true
-	cfg.Chaos.ErrorRate = 0.1
-	cfg.Chaos.TimeoutRate = 0.05
-	cfg.Chaos.MinLatencyMs = 50
-	cfg.Chaos.MaxLatencyMs = 200
-	cfg.Chaos.ConnectionDropRate = 0.01
-
 	cfg.Storage.Enabled = true
 	cfg.Storage.RequestsDir = "./data/requests"
 	cfg.Storage.MaxFileSize = 104857600
 	cfg.Storage.RotateAfter = 10000
-
-	cfg.RateLimit.Enabled = true
-	cfg.RateLimit.RequestsPerSecond = 10000
-	cfg.RateLimit.Burst = 15000
-	cfg.RateLimit.Algorithm = "token_bucket"
 
 	cfg.Health.Enabled = true
 	cfg.Health.Port = 8080
@@ -180,9 +168,7 @@ func TestValidateMode_WithAllFeatures(t *testing.T) {
 	// Verify all sections are printed
 	expectedSections := []string{
 		"Metrics Configuration:",
-		"Chaos Configuration:",
 		"Storage Configuration:",
-		"Rate Limit Configuration:",
 		"Health Configuration:",
 	}
 
@@ -457,76 +443,6 @@ func TestValidateMode_TimeoutDisplay(t *testing.T) {
 	}
 }
 
-// TestValidateMode_ChaosConfiguration tests chaos configuration output.
-func TestValidateMode_ChaosConfiguration(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-	cfg.Mock.ScenariosDir = ""
-	cfg.Chaos.Enabled = true
-	cfg.Chaos.ErrorRate = 0.15
-	cfg.Chaos.TimeoutRate = 0.05
-	cfg.Chaos.MinLatencyMs = 100
-	cfg.Chaos.MaxLatencyMs = 500
-	cfg.Chaos.ConnectionDropRate = 0.02
-
-	var buf bytes.Buffer
-
-	_ = RunValidateMode(&buf, cfg)
-
-	output := buf.String()
-
-	// Verify chaos configuration values
-	expectedChaos := []string{
-		"Chaos Configuration:",
-		"enabled: true",
-		"error_rate: 0.15",
-		"timeout_rate: 0.05",
-		"latency: 100-500 ms",
-		"connection_drop_rate: 0.02",
-	}
-
-	for _, val := range expectedChaos {
-		if !bytes.Contains([]byte(output), []byte(val)) {
-			t.Errorf("Expected output to contain %q, got:\n%s", val, output)
-		}
-	}
-}
-
-// TestValidateMode_RateLimitConfiguration tests rate limit configuration output.
-func TestValidateMode_RateLimitConfiguration(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.Config{}
-	cfg.SetDefaults()
-	cfg.Mock.ScenariosDir = ""
-	cfg.RateLimit.Enabled = true
-	cfg.RateLimit.RequestsPerSecond = 5000
-	cfg.RateLimit.Burst = 7500
-	cfg.RateLimit.Algorithm = "sliding_window"
-
-	var buf bytes.Buffer
-
-	_ = RunValidateMode(&buf, cfg)
-
-	output := buf.String()
-
-	// Verify rate limit configuration values
-	expectedRateLimit := []string{
-		"Rate Limit Configuration:",
-		"requests_per_second: 5000",
-		"burst: 7500",
-		"algorithm: sliding_window",
-	}
-
-	for _, val := range expectedRateLimit {
-		if !bytes.Contains([]byte(output), []byte(val)) {
-			t.Errorf("Expected output to contain %q, got:\n%s", val, output)
-		}
-	}
-}
-
 // TestValidateMode_StorageConfiguration tests storage configuration output.
 func TestValidateMode_StorageConfiguration(t *testing.T) {
 	t.Parallel()
@@ -593,9 +509,7 @@ func TestValidateMode_DisabledFeatures(t *testing.T) {
 
 	// Ensure all optional features are disabled
 	cfg.Metrics.Enabled = false
-	cfg.Chaos.Enabled = false
 	cfg.Storage.Enabled = false
-	cfg.RateLimit.Enabled = false
 
 	var buf bytes.Buffer
 
@@ -605,9 +519,7 @@ func TestValidateMode_DisabledFeatures(t *testing.T) {
 
 	// These sections should NOT appear when features are disabled
 	unexpectedSections := []string{
-		"Chaos Configuration:",
 		"Storage Configuration:",
-		"Rate Limit Configuration:",
 	}
 
 	for _, section := range unexpectedSections {

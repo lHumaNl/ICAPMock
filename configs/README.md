@@ -5,7 +5,7 @@
 The `configs/` directory contains two kinds of configuration files:
 
 - **Main config** (`*.yaml` at the top level) — controls server settings: ports, timeouts,
-  logging, metrics, hot reload, rate limits, etc.
+  logging, metrics, hot reload, and management endpoints.
 - **Scenario configs** (`scenarios/<name>/*.yaml`) — define how the mock responds to requests:
   which headers to match, what status codes and bodies to return, how long to delay, etc.
 
@@ -105,7 +105,7 @@ mock:
 - `unlimited` is allowed, but the effective limit is still capped by `server.max_body_size` when that
   server-side limit is finite.
 
-### Management API, reloads, and trusted headers
+### Management API and reloads
 
 The health HTTP server can expose runtime management endpoints when `management.enabled: true`:
 
@@ -125,20 +125,8 @@ Available routes:
 
 If no token is configured, the server logs a warning because the management API is left open.
 
-Trusted client identity is configured separately:
-
-```yaml
-server:
-  trust_client_ip_header: true
-  trusted_proxies: ["192.0.2.0/24", "127.0.0.1"]
-
-preview:
-  trust_client_id_header: true
-```
-
-- `server.trust_client_ip_header` allows `X-Client-IP`, but only from trusted proxy peers.
-- `preview.trust_client_id_header` makes preview rate limiting use `X-Client-ID` buckets; keep it
-  disabled unless a trusted upstream owns that header.
+Client identity is derived from the peer TCP remote address. Headers such as `X-Client-IP` remain
+available for scenario matching but do not set `Request.ClientIP`.
 
 ---
 

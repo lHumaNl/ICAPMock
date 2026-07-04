@@ -45,64 +45,6 @@ func parseDurationFields(fields ...durationField) error {
 	return nil
 }
 
-// CircuitBreakerGlobalConfig contains global circuit breaker configuration.
-// Circuit breakers provide automatic failure isolation for external dependencies.
-type CircuitBreakerGlobalConfig struct {
-	Components map[string]CircuitBreakerComponentConfig `yaml:"components" json:"components"`
-	Defaults   CircuitBreakerComponentConfig            `yaml:"defaults" json:"defaults"`
-	Enabled    bool                                     `yaml:"enabled" json:"enabled"`
-}
-
-// CircuitBreakerComponentConfig contains circuit breaker configuration for a single component.
-type CircuitBreakerComponentConfig struct {
-	// FailureThreshold is the number of failures to open the circuit.
-	// Default: 5
-	FailureThreshold int `yaml:"failure_threshold" json:"failure_threshold"`
-
-	// SuccessThreshold is the number of successes to close from HALF_OPEN.
-	// Default: 3
-	SuccessThreshold int `yaml:"success_threshold" json:"success_threshold"`
-
-	// OpenTimeout is the duration to wait before trying HALF_OPEN.
-	// Default: 30s
-	OpenTimeout time.Duration `yaml:"open_timeout" json:"open_timeout"`
-
-	// HalfOpenMaxRequests limits requests in HALF_OPEN state.
-	// Default: 1
-	HalfOpenMaxRequests int `yaml:"half_open_max_requests" json:"half_open_max_requests"`
-
-	// RollingWindow is the time window for failure counting.
-	// Default: 60s
-	RollingWindow time.Duration `yaml:"rolling_window" json:"rolling_window"`
-
-	// WindowBuckets is the number of buckets in the rolling window.
-	// Default: 60
-	WindowBuckets int `yaml:"window_buckets" json:"window_buckets"`
-}
-
-// UnmarshalJSON implements custom JSON unmarshaling for CircuitBreakerComponentConfig.
-// It handles time.Duration fields which can be strings like "30s".
-func (c *CircuitBreakerComponentConfig) UnmarshalJSON(data []byte) error {
-	type Alias CircuitBreakerComponentConfig
-
-	temp := struct {
-		*Alias
-		OpenTimeout   string `json:"open_timeout"`
-		RollingWindow string `json:"rolling_window"`
-	}{
-		Alias: (*Alias)(c),
-	}
-
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	return parseDurationFields(
-		durationField{raw: temp.OpenTimeout, target: &c.OpenTimeout, name: "open_timeout"},
-		durationField{raw: temp.RollingWindow, target: &c.RollingWindow, name: "rolling_window"},
-	)
-}
-
 // DefaultsConfig contains shared default settings inherited by all servers.
 // Individual servers can override any of these fields.
 type DefaultsConfig struct {
@@ -268,26 +210,18 @@ func (e *ServerEntryConfig) ToServerConfig(defaults DefaultsConfig) ServerConfig
 // Config is the root configuration structure for the ICAP Mock Server.
 // It contains all sub-configurations for different components.
 type Config struct {
-	SourcePath         string                       `yaml:"-" json:"-"`
-	Servers            map[string]ServerEntryConfig `yaml:"servers,omitempty" json:"servers,omitempty"`
-	Health             HealthConfig                 `yaml:"health" json:"health"`
-	Management         ManagementConfig             `yaml:"management" json:"management"`
-	Plugin             PluginConfig                 `yaml:"plugin" json:"plugin"`
-	Metrics            MetricsConfig                `yaml:"metrics" json:"metrics"`
-	Replay             ReplayConfig                 `yaml:"replay" json:"replay"`
-	Mock               MockConfig                   `yaml:"mock" json:"mock"`
-	Logging            LoggingConfig                `yaml:"logging" json:"logging"`
-	RateLimit          RateLimitConfig              `yaml:"rate_limit" json:"rate_limit"`
-	CircuitBreaker     CircuitBreakerGlobalConfig   `yaml:"circuit_breaker" json:"circuit_breaker"`
-	Defaults           DefaultsConfig               `yaml:"defaults,omitempty" json:"defaults,omitempty"`
-	Server             ServerConfig                 `yaml:"server" json:"server"`
-	Storage            StorageConfig                `yaml:"storage" json:"storage"`
-	Chaos              ChaosConfig                  `yaml:"chaos" json:"chaos"`
-	PerClientRateLimit PerClientRateLimitConfig     `yaml:"per_client_rate_limit" json:"per_client_rate_limit"`
-	Preview            PreviewConfig                `yaml:"preview" json:"preview"`
-	Sharding           ShardingConfig               `yaml:"sharding" json:"sharding"`
-	PerMethodRateLimit PerMethodRateLimitConfig     `yaml:"per_method_rate_limit" json:"per_method_rate_limit"`
-	Pprof              PprofConfig                  `yaml:"pprof" json:"pprof"`
+	SourcePath string                       `yaml:"-" json:"-"`
+	Servers    map[string]ServerEntryConfig `yaml:"servers,omitempty" json:"servers,omitempty"`
+	Health     HealthConfig                 `yaml:"health" json:"health"`
+	Management ManagementConfig             `yaml:"management" json:"management"`
+	Metrics    MetricsConfig                `yaml:"metrics" json:"metrics"`
+	Mock       MockConfig                   `yaml:"mock" json:"mock"`
+	Logging    LoggingConfig                `yaml:"logging" json:"logging"`
+	Defaults   DefaultsConfig               `yaml:"defaults,omitempty" json:"defaults,omitempty"`
+	Server     ServerConfig                 `yaml:"server" json:"server"`
+	Storage    StorageConfig                `yaml:"storage" json:"storage"`
+	Sharding   ShardingConfig               `yaml:"sharding" json:"sharding"`
+	Pprof      PprofConfig                  `yaml:"pprof" json:"pprof"`
 }
 
 // SetDefaults sets default values for all configuration fields.
@@ -329,7 +263,6 @@ func (c *Config) SetDefaults() {
 	c.Metrics.EndpointLabelMode = "default"
 
 	// Mock defaults
-	c.Mock.DefaultMode = "mock"
 	c.Mock.DefaultTimeout = 5 * time.Second
 	c.Mock.ServiceID = "icap-mock"
 	c.Mock.Matching.BodyPatternLimit = NewBodySizeLimit(DefaultBodyPatternLimitBytes)
@@ -340,17 +273,8 @@ func (c *Config) SetDefaults() {
 	c.Mock.HotReload.Debounce = time.Second
 	c.Mock.HotReload.WatchDirectory = true
 
-	// Chaos defaults (disabled by default)
-	c.Chaos.Enabled = false
-	c.Chaos.ErrorRate = 0.1
-	c.Chaos.TimeoutRate = 0.05
-	c.Chaos.MinLatencyMs = 10
-	c.Chaos.MaxLatencyMs = 500
-	c.Chaos.LatencyRate = 0.1
-	c.Chaos.ConnectionDropRate = 0.02
-
-	// Storage defaults (enabled by default)
-	c.Storage.Enabled = true
+	// Storage defaults (disabled by default)
+	c.Storage.Enabled = false
 	c.Storage.RequestsDir = "./data/requests"
 	c.Storage.MaxFileSize = 104857600 // 100MB
 	c.Storage.RotateAfter = 10000
@@ -366,30 +290,6 @@ func (c *Config) SetDefaults() {
 	c.Storage.DiskMonitor.UseSyscalls = true              // Use platform-specific syscalls (fast)
 	c.Storage.DiskMonitor.CacheInterval = 5 * time.Second // Cache results for 5 seconds
 
-	// Circuit Breaker defaults (enabled by default for resilience)
-	c.Storage.CircuitBreaker.Enabled = true
-	c.Storage.CircuitBreaker.MaxFailures = 5
-	c.Storage.CircuitBreaker.ResetTimeout = 30 * time.Second
-	c.Storage.CircuitBreaker.SuccessThreshold = 3
-
-	// RateLimit defaults (enabled by default for production safety)
-	c.RateLimit.Enabled = true
-	c.RateLimit.RequestsPerSecond = 10000
-	c.RateLimit.Burst = 15000
-	c.RateLimit.Algorithm = "sharded_token_bucket"
-
-	// PerClientRateLimit defaults (disabled by default to avoid breaking changes)
-	c.PerClientRateLimit.Enabled = false
-	c.PerClientRateLimit.RequestsPerSecond = 100
-	c.PerClientRateLimit.Burst = 200
-	c.PerClientRateLimit.MaxClients = 10000
-	c.PerClientRateLimit.TTL = 5 * time.Minute
-
-	// PerMethodRateLimit defaults (disabled by default)
-	c.PerMethodRateLimit.Enabled = false
-	c.PerMethodRateLimit.RequestsPerSecond = 5000
-	c.PerMethodRateLimit.Burst = 7500
-
 	// Health defaults
 	c.Health.Enabled = true
 	c.Health.Port = 8080
@@ -401,58 +301,16 @@ func (c *Config) SetDefaults() {
 	c.Management.ScenarioReloadEnabled = false
 	c.Management.ConfigReloadEnabled = false
 
-	// Replay defaults (disabled by default)
-	c.Replay.Enabled = false
-	c.Replay.Speed = 1.0
-
 	// Pprof defaults (disabled by default for security)
 	// Production profiling should be explicitly enabled
 	c.Pprof.Enabled = false
 
-	// Plugin defaults (disabled by default)
-	c.Plugin.Enabled = false
-	c.Plugin.Dir = "./plugins"
-	c.Plugin.Names = nil
-
-	// Sharding defaults (enabled by default for performance)
-	c.Sharding.Enabled = true
+	// Sharding defaults (disabled by default)
+	c.Sharding.Enabled = false
 	c.Sharding.ShardCount = 16
 	c.Sharding.CacheSize = 1000
 	c.Sharding.EnableCache = true
 
-	// Preview rate limiting defaults (enabled by default for security)
-	c.Preview.Enabled = true
-	c.Preview.MaxRequests = 100
-	c.Preview.WindowSeconds = 60
-	c.Preview.MaxClients = 10000
-	c.Preview.TrustClientIDHeader = false
-
-	// Circuit Breaker defaults (disabled by default for backward compatibility)
-	c.CircuitBreaker.Enabled = false
-	c.CircuitBreaker.Defaults = CircuitBreakerComponentConfig{
-		FailureThreshold:    5,
-		SuccessThreshold:    3,
-		OpenTimeout:         30 * time.Second,
-		HalfOpenMaxRequests: 1,
-		RollingWindow:       60 * time.Second,
-		WindowBuckets:       60,
-	}
-
-	// Per-component circuit breaker defaults
-	c.CircuitBreaker.Components = map[string]CircuitBreakerComponentConfig{
-		"storage": {
-			FailureThreshold:    10,
-			SuccessThreshold:    3,
-			OpenTimeout:         60 * time.Second,
-			HalfOpenMaxRequests: 2,
-		},
-		"scenario_loader": {
-			FailureThreshold:    5,
-			SuccessThreshold:    3,
-			OpenTimeout:         30 * time.Second,
-			HalfOpenMaxRequests: 1,
-		},
-	}
 }
 
 // ServerConfig contains ICAP server configuration.
@@ -468,12 +326,9 @@ type ServerConfig struct {
 	Port            int           `yaml:"port" json:"port"`
 	MaxConnections  int           `yaml:"max_connections" json:"max_connections"`
 	Streaming       bool          `yaml:"streaming" json:"streaming"`
-	// TrustClientIPHeader enables X-Client-IP only for trusted proxy peers.
-	TrustClientIPHeader bool `yaml:"trust_client_ip_header" json:"trust_client_ip_header"`
-	maxBodySizeSet      bool
-	TLS                 TLSConfig `yaml:"tls" json:"tls"`
-	Host                string    `yaml:"host" json:"host"`
-	TrustedProxies      []string  `yaml:"trusted_proxies" json:"trusted_proxies"`
+	maxBodySizeSet  bool
+	TLS             TLSConfig `yaml:"tls" json:"tls"`
+	Host            string    `yaml:"host" json:"host"`
 }
 
 // EffectiveMaxBodySize returns the configured body size limit.
@@ -662,7 +517,6 @@ type MetricsConfig struct {
 
 // MockConfig contains mock processor configuration.
 type MockConfig struct {
-	DefaultMode    string             `yaml:"default_mode" json:"default_mode"`
 	ScenariosDir   string             `yaml:"scenarios_dir" json:"scenarios_dir"`
 	ServiceID      string             `yaml:"service_id" json:"service_id"`
 	Matching       MockMatchingConfig `yaml:"matching" json:"matching"`
@@ -842,158 +696,15 @@ func (c *MockConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// PerClientRateLimitConfig contains per-client rate limiting configuration.
-// Per-client rate limiting protects against DoS attacks by limiting requests
-// from individual IP addresses independently.
-type PerClientRateLimitConfig struct {
-	// Enabled enables per-client rate limiting.
-	// When enabled, each client IP has its own rate limit bucket.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// RequestsPerSecond is the maximum requests per second per client.
-	// Each client IP has an independent bucket with this rate.
-	// Default: 100
-	RequestsPerSecond int `yaml:"requests_per_second" json:"requests_per_second"`
-
-	// Burst is the maximum burst capacity per client.
-	// Allows temporary traffic bursts from each client.
-	// Default: 200 (2x requests_per_second)
-	Burst int `yaml:"burst" json:"burst"`
-
-	// MaxClients is the maximum number of clients tracked in the cache.
-	// When this limit is reached, the least recently used client is evicted.
-	// This protects against memory exhaustion from tracking too many IPs.
-	// Default: 10000
-	MaxClients int `yaml:"max_clients" json:"max_clients"`
-
-	// TTL is the time-to-live for inactive client entries.
-	// Clients not accessed within this period are candidates for eviction.
-	// Default: 5m (5 minutes)
-	TTL time.Duration `yaml:"ttl" json:"ttl"`
-}
-
-// UnmarshalJSON implements custom JSON unmarshaling for PerClientRateLimitConfig.
-// It handles time.Duration fields which can be strings like "5m".
-func (c *PerClientRateLimitConfig) UnmarshalJSON(data []byte) error {
-	type Alias PerClientRateLimitConfig
-
-	temp := struct {
-		*Alias
-		TTL string `json:"ttl"`
-	}{
-		Alias: (*Alias)(c),
-	}
-
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	if temp.TTL != "" {
-		d, err := time.ParseDuration(temp.TTL)
-		if err != nil {
-			return fmt.Errorf("invalid ttl: %w", err)
-		}
-		c.TTL = d
-	}
-
-	return nil
-}
-
-// CircuitBreakerConfig contains circuit breaker configuration for storage operations.
-// The circuit breaker has three states: Closed (normal), Open (failing fast),
-// and Half-Open (testing recovery).
-type CircuitBreakerConfig struct {
-	// Enabled enables the circuit breaker for storage operations.
-	// When disabled, storage failures are logged but don't affect request flow.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// MaxFailures is the number of consecutive failures before opening the circuit.
-	// Once this threshold is reached, the circuit opens and storage is skipped.
-	// Default: 5
-	MaxFailures int `yaml:"max_failures" json:"max_failures"`
-
-	// ResetTimeout is the duration to wait before transitioning from Open to Half-Open.
-	// In Half-Open state, a single request is allowed through to test recovery.
-	// Default: 30s
-	ResetTimeout time.Duration `yaml:"reset_timeout" json:"reset_timeout"`
-
-	// SuccessThreshold is the number of consecutive successes in Half-Open state
-	// required to close the circuit and resume normal operation.
-	// Default: 3
-	SuccessThreshold int `yaml:"success_threshold" json:"success_threshold"`
-}
-
-// UnmarshalJSON implements custom JSON unmarshaling for CircuitBreakerConfig.
-// It handles time.Duration fields which can be strings like "30s".
-func (c *CircuitBreakerConfig) UnmarshalJSON(data []byte) error {
-	type Alias CircuitBreakerConfig
-
-	temp := struct {
-		*Alias
-		ResetTimeout string `json:"reset_timeout"`
-	}{
-		Alias: (*Alias)(c),
-	}
-
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	if temp.ResetTimeout != "" {
-		d, err := time.ParseDuration(temp.ResetTimeout)
-		if err != nil {
-			return fmt.Errorf("invalid reset_timeout: %w", err)
-		}
-		c.ResetTimeout = d
-	}
-
-	return nil
-}
-
-// ChaosConfig contains chaos engineering configuration.
-// Chaos features are disabled by default.
-type ChaosConfig struct {
-	// Enabled enables chaos engineering features.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// ErrorRate is the probability of injecting an error (0.0 to 1.0).
-	// Default: 0.1 (10%)
-	ErrorRate float64 `yaml:"error_rate" json:"error_rate"`
-
-	// TimeoutRate is the probability of injecting a timeout (0.0 to 1.0).
-	// Default: 0.05 (5%)
-	TimeoutRate float64 `yaml:"timeout_rate" json:"timeout_rate"`
-
-	// MinLatencyMs is the minimum latency to inject in milliseconds.
-	// Default: 10
-	MinLatencyMs int `yaml:"min_latency_ms" json:"min_latency_ms"`
-
-	// MaxLatencyMs is the maximum latency to inject in milliseconds.
-	// Default: 500
-	MaxLatencyMs int `yaml:"max_latency_ms" json:"max_latency_ms"`
-
-	// LatencyRate is the probability of injecting latency (0.0 to 1.0).
-	// Default: 0.1 (10%)
-	LatencyRate float64 `yaml:"latency_rate" json:"latency_rate"`
-
-	// ConnectionDropRate is the probability of dropping connections (0.0 to 1.0).
-	// Default: 0.02 (2%)
-	ConnectionDropRate float64 `yaml:"connection_drop_rate" json:"connection_drop_rate"`
-}
-
 // StorageConfig contains request storage configuration.
 type StorageConfig struct {
-	RequestsDir    string               `yaml:"requests_dir" json:"requests_dir"`
-	DiskMonitor    DiskMonitorConfig    `yaml:"disk_monitor" json:"disk_monitor"`
-	CircuitBreaker CircuitBreakerConfig `yaml:"circuit_breaker" json:"circuit_breaker"`
-	MaxFileSize    int64                `yaml:"max_file_size" json:"max_file_size"`
-	RotateAfter    int                  `yaml:"rotate_after" json:"rotate_after"`
-	Workers        int                  `yaml:"workers" json:"workers"`
-	QueueSize      int                  `yaml:"queue_size" json:"queue_size"`
-	Enabled        bool                 `yaml:"enabled" json:"enabled"`
+	RequestsDir string            `yaml:"requests_dir" json:"requests_dir"`
+	DiskMonitor DiskMonitorConfig `yaml:"disk_monitor" json:"disk_monitor"`
+	MaxFileSize int64             `yaml:"max_file_size" json:"max_file_size"`
+	RotateAfter int               `yaml:"rotate_after" json:"rotate_after"`
+	Workers     int               `yaml:"workers" json:"workers"`
+	QueueSize   int               `yaml:"queue_size" json:"queue_size"`
+	Enabled     bool              `yaml:"enabled" json:"enabled"`
 }
 
 // DiskMonitorConfig contains disk space monitoring configuration for storage operations.
@@ -1030,33 +741,6 @@ func (c *DiskMonitorConfig) UnmarshalJSON(data []byte) error {
 		durationField{raw: temp.CheckInterval, target: &c.CheckInterval, name: "check_interval"},
 		durationField{raw: temp.CacheInterval, target: &c.CacheInterval, name: "cache_interval"},
 	)
-}
-
-// RateLimitConfig contains rate limiting configuration.
-type RateLimitConfig struct {
-	Algorithm         string  `yaml:"algorithm" json:"algorithm"`
-	RequestsPerSecond float64 `yaml:"requests_per_second" json:"requests_per_second"`
-	Burst             int     `yaml:"burst" json:"burst"`
-	Enabled           bool    `yaml:"enabled" json:"enabled"`
-}
-
-// PerMethodRateLimitConfig contains per-method rate limiting configuration.
-// Per-method rate limiting allows different rate limits for REQMOD, RESPMOD, and OPTIONS.
-type PerMethodRateLimitConfig struct {
-	// Enabled enables per-method rate limiting.
-	// When enabled, each ICAP method (REQMOD, RESPMOD, OPTIONS) has its own rate limit bucket.
-	// Default: false
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// RequestsPerSecond is the maximum requests per second per method.
-	// Each method has an independent bucket with this rate.
-	// Default: 5000
-	RequestsPerSecond float64 `yaml:"requests_per_second" json:"requests_per_second"`
-
-	// Burst is the maximum burst capacity per method.
-	// Allows temporary traffic bursts for each method.
-	// Default: 7500 (1.5x requests_per_second)
-	Burst int `yaml:"burst" json:"burst"`
 }
 
 // HealthConfig contains health check endpoint configuration.
@@ -1139,13 +823,6 @@ func (c ManagementConfig) ResolvedToken() string {
 	return os.Getenv(c.TokenEnv)
 }
 
-// ReplayConfig contains request replay configuration.
-type ReplayConfig struct {
-	RequestsDir string  `yaml:"requests_dir" json:"requests_dir"`
-	Speed       float64 `yaml:"speed" json:"speed"`
-	Enabled     bool    `yaml:"enabled" json:"enabled"`
-}
-
 // PprofConfig contains pprof profiling endpoint configuration.
 // Pprof endpoints are disabled by default for security reasons.
 // Enable only when needed for production profiling and diagnostics.
@@ -1156,13 +833,6 @@ type PprofConfig struct {
 	// Only enable in trusted environments or with proper access controls.
 	// Default: false
 	Enabled bool `yaml:"enabled" json:"enabled"`
-}
-
-// PluginConfig contains plugin system configuration.
-type PluginConfig struct {
-	Dir     string   `yaml:"dir" json:"dir"`
-	Names   []string `yaml:"names" json:"names"`
-	Enabled bool     `yaml:"enabled" json:"enabled"`
 }
 
 // ShardingConfig contains scenario sharding configuration for O(1) matching.
@@ -1180,43 +850,26 @@ type ShardingConfig struct {
 // UnmarshalJSON tracks explicitly provided sharding boolean fields.
 func (c *ShardingConfig) UnmarshalJSON(data []byte) error {
 	type Alias ShardingConfig
-	temp := struct {
-		*Alias
-		Enabled     *bool `json:"enabled"`
-		EnableCache *bool `json:"enable_cache"`
-	}{Alias: (*Alias)(c)}
+	var temp Alias
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return err
 	}
-	c.enabledSet = temp.Enabled != nil
-	c.cacheSet = temp.EnableCache != nil
+	*c = ShardingConfig(temp)
+
+	fields := struct {
+		Enabled     *bool `json:"enabled"`
+		EnableCache *bool `json:"enable_cache"`
+	}{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if fields.Enabled != nil {
+		c.Enabled = *fields.Enabled
+	}
+	if fields.EnableCache != nil {
+		c.EnableCache = *fields.EnableCache
+	}
+	c.enabledSet = fields.Enabled != nil
+	c.cacheSet = fields.EnableCache != nil
 	return nil
-}
-
-// PreviewConfig contains preview mode rate limiting configuration.
-// This prevents DoS attacks by limiting the number of preview requests
-// per client within a time window.
-type PreviewConfig struct {
-	// MaxRequests is the maximum number of preview requests allowed
-	// per client within the time window.
-	// Default: 100
-	MaxRequests int `yaml:"max_requests" json:"max_requests"`
-
-	// WindowSeconds is the duration of the sliding window in seconds.
-	// Default: 60 seconds
-	WindowSeconds int `yaml:"window_seconds" json:"window_seconds"`
-
-	// MaxClients is the maximum number of clients to track.
-	// When this limit is reached, the least recently used client is evicted.
-	// Default: 10000
-	MaxClients int `yaml:"max_clients" json:"max_clients"`
-
-	// Enabled enables preview rate limiting.
-	// When true, preview requests are rate-limited per client.
-	// Default: true
-	Enabled bool `yaml:"enabled" json:"enabled"`
-
-	// TrustClientIDHeader enables X-Client-ID for preview rate-limit buckets.
-	// Default: false
-	TrustClientIDHeader bool `yaml:"trust_client_id_header" json:"trust_client_id_header"`
 }

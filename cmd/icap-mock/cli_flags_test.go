@@ -168,6 +168,27 @@ func TestServerCommand_MetricsFlags(t *testing.T) {
 	}
 }
 
+func TestServerCommand_RemovedFlagsRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "mock mode", args: []string{"--mock.mode", "echo"}},
+		{name: "mock default mode", args: []string{"--mock.default-mode", "mock"}},
+		{name: "trust client ip header", args: []string{"--server.trust-client-ip-header", "true"}},
+		{name: "trusted proxies", args: []string{"--server.trusted-proxies", "127.0.0.1"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := NewServerCommand()
+			if err := cmd.Parse(tc.args); err == nil {
+				t.Fatal("Parse() error = nil, want unknown flag for removed option")
+			}
+		})
+	}
+}
+
 // TestServerCommand_LoggingFlags tests logging-related flags.
 func TestServerCommand_LoggingFlags(t *testing.T) {
 	cmd := NewServerCommand()
@@ -237,20 +258,11 @@ func TestServerCommand_FlagDefaults(t *testing.T) {
 	if cmd.metricsEnabled {
 		t.Error("metricsEnabled default = true, want false")
 	}
-	if cmd.chaosEnabled {
-		t.Error("chaosEnabled default = true, want false")
-	}
 	if cmd.storageEnabled {
 		t.Error("storageEnabled default = true, want false")
 	}
-	if cmd.rateLimitEnabled {
-		t.Error("rateLimitEnabled default = true, want false")
-	}
 	if cmd.healthEnabled {
 		t.Error("healthEnabled default = true, want false")
-	}
-	if cmd.pluginEnabled {
-		t.Error("pluginEnabled default = true, want false")
 	}
 	if cmd.pprofEnabled {
 		t.Error("pprofEnabled default = true, want false")
@@ -300,18 +312,10 @@ func TestServerCommand_ApplyOverridesAppliesRegisteredFlags(t *testing.T) {
 		"--logging.max-backups", "0",
 		"--logging.max-age", "0",
 		"--mock.timeout", "0s",
-		"--chaos.timeout-rate", "0",
-		"--chaos.min-latency-ms", "0",
-		"--chaos.max-latency-ms", "0",
-		"--chaos.connection-drop-rate", "0",
 		"--storage.max-size", "0",
 		"--storage.rotate", "0",
-		"--rate-limit.burst", "0",
-		"--rate-limit.algorithm", "token_bucket",
 		"--health.path", "/live",
 		"--health.ready-path", "/startup",
-		"--replay.enabled",
-		"--replay.speed", "0",
 	})
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
@@ -329,17 +333,14 @@ func assertAppliedOverrides(t *testing.T, cfg *config.Config) {
 	if cfg.Logging.MaxSize != 0 || cfg.Logging.MaxBackups != 0 || cfg.Logging.MaxAge != 0 {
 		t.Fatalf("logging rotation = %d/%d/%d, want zeros", cfg.Logging.MaxSize, cfg.Logging.MaxBackups, cfg.Logging.MaxAge)
 	}
-	if cfg.Mock.DefaultTimeout != 0*time.Second || cfg.Chaos.TimeoutRate != 0 {
-		t.Fatalf("timeout overrides were not applied: mock=%v chaos=%v", cfg.Mock.DefaultTimeout, cfg.Chaos.TimeoutRate)
+	if cfg.Mock.DefaultTimeout != 0*time.Second {
+		t.Fatalf("mock timeout override was not applied: %v", cfg.Mock.DefaultTimeout)
 	}
-	if cfg.Storage.MaxFileSize != 0 || cfg.Storage.RotateAfter != 0 || cfg.RateLimit.Burst != 0 {
+	if cfg.Storage.MaxFileSize != 0 || cfg.Storage.RotateAfter != 0 {
 		t.Fatalf("zero numeric overrides were not applied")
 	}
-	if cfg.RateLimit.Algorithm != "token_bucket" || cfg.Health.HealthPath != "/live" || cfg.Health.ReadyPath != "/startup" {
-		t.Fatalf("string overrides were not applied: %+v %+v", cfg.RateLimit, cfg.Health)
-	}
-	if !cfg.Replay.Enabled || cfg.Replay.Speed != 0 {
-		t.Fatalf("replay overrides = enabled %v speed %v, want true/0", cfg.Replay.Enabled, cfg.Replay.Speed)
+	if cfg.Health.HealthPath != "/live" || cfg.Health.ReadyPath != "/startup" {
+		t.Fatalf("string overrides were not applied: %+v", cfg.Health)
 	}
 }
 

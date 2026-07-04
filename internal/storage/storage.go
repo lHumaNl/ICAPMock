@@ -27,7 +27,7 @@ const (
 // This interface is provided for backward compatibility and for clients
 // that need both read and write capabilities. Clients with more specific
 // needs should use:
-//   - RequestReader - for read/query operations (replay engines, monitoring)
+//   - RequestReader - for read/query operations (monitoring, admin dashboards)
 //   - RequestWriter - for write/lifecycle operations (request handlers)
 //
 // Implementations must be thread-safe for concurrent access.
