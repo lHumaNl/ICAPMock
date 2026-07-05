@@ -37,7 +37,7 @@ func assertScenarioBucketLayout(t *testing.T, buckets []*dto.Bucket) {
 			t.Fatalf("bucket[%d] upper bound = %v, want %v", i, got, want)
 		}
 	}
-	for _, want := range []float64{0.1, 1, 2, 5, 10, 60, 120} {
+	for _, want := range []float64{0.001, 0.01, 0.05, 0.1, 1, 2, 5, 10, 60, 120} {
 		if !hasBucketUpperBound(buckets, want) {
 			t.Fatalf("missing bucket upper bound %v", want)
 		}

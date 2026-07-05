@@ -89,7 +89,7 @@ descriptions are emitted only in structured ERROR logs.
 
 Scenario response latency uses the classic histogram
 `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` with
-finite buckets at 0.1-second intervals through 1 second, 0.25-second intervals through 2 seconds,
+finite buckets at 0.001, 0.01, and 0.05 seconds, then 0.1-second intervals through 1 second, 0.25-second intervals through 2 seconds,
 0.5-second intervals through 5 seconds, 1-second intervals through 10 seconds, 5-second intervals
 through 60 seconds, and 10-second intervals through 120 seconds. Query quantiles from
 `icap_scenario_response_duration_seconds_bucket` with `le`.

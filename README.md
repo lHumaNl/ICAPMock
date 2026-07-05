@@ -363,7 +363,7 @@ Grafana will be available at `http://localhost:3000` (default credentials: `admi
 Override these credentials via environment variables or a secret before any shared or exposed deployment.
 
 `icap_scenario_response_duration_seconds` uses classic Prometheus buckets. The finite bucket
-layout is `0.1, 0.2, ..., 1.0`, then `1.25, 1.5, 1.75, 2.0`, then `2.5, 3.0, ..., 5.0`,
+layout starts with `0.001, 0.01, 0.05`, then `0.1, 0.2, ..., 1.0`, then `1.25, 1.5, 1.75, 2.0`, then `2.5, 3.0, ..., 5.0`,
 then `6, 7, 8, 9, 10`, then `15, 20, ..., 60`, then `70, 80, ..., 120` seconds,
 plus the implicit `+Inf` bucket.
 
