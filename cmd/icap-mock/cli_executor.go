@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
-	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -36,8 +35,6 @@ var (
 	// errStorageDisabled is returned by createStorageManager when storage is not enabled.
 	errStorageDisabled = errors.New("storage is disabled")
 )
-
-const validateDefaultScenarioName = "default"
 
 // PrintVersion prints version information to stdout.
 func PrintVersion() {
@@ -122,6 +119,12 @@ func printMockConfig(w io.Writer, cfg *config.Config, allPassed *bool) {
 	fmt.Fprintf(w, "  scenarios_dir: %s\n", cfg.Mock.ScenariosDir)     //nolint:errcheck
 	fmt.Fprintf(w, "  default_timeout: %s\n", cfg.Mock.DefaultTimeout) //nolint:errcheck
 
+	if len(cfg.Servers) > 0 {
+		validateMultiServerScenarioDirectories(w, cfg, allPassed)
+		fmt.Fprintln(w) //nolint:errcheck
+		return
+	}
+
 	if cfg.Mock.ScenariosDir != "" {
 		validateScenarioDirectory(w, cfg, allPassed)
 	}
@@ -129,49 +132,12 @@ func printMockConfig(w io.Writer, cfg *config.Config, allPassed *bool) {
 }
 
 func validateScenarioDirectory(w io.Writer, cfg *config.Config, allPassed *bool) {
-	count, err := countScenarioFiles(cfg.Mock.ScenariosDir)
-	if err != nil {
-		fmt.Fprintf(w, "  WARNING: scenarios directory not found: %s\n", cfg.Mock.ScenariosDir) //nolint:errcheck
-		*allPassed = false
-		return
-	}
 	factory := newScenarioRegistryFactory(cfg.Mock.Matching, cfg.Server.MaxBodySize, cfg.Sharding)
-	registry, err := management.LoadScenarioDirectory(cfg.Mock.ScenariosDir, factory)
-	if err != nil {
-		fmt.Fprintf(w, "  ERROR: scenarios validation failed: %v\n", err) //nolint:errcheck
-		*allPassed = false
-		return
-	}
-	validScenarios := countLoadedScenarios(registry.List())
-	fmt.Fprintf(w, "  scenarios loaded: %d files found, %d scenarios valid\n", count, validScenarios) //nolint:errcheck
-}
-
-func countScenarioFiles(dir string) (int, error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, file := range files {
-		if !file.IsDir() && isScenarioYAMLFile(file.Name()) {
-			count++
-		}
-	}
-	return count, nil
+	validateScenarioDirectoryPath(w, cfg.Mock.ScenariosDir, factory, allPassed, "  ")
 }
 
 func isScenarioYAMLFile(name string) bool {
 	return strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")
-}
-
-func countLoadedScenarios(scenarios []*storage.Scenario) int {
-	count := 0
-	for _, scenario := range scenarios {
-		if scenario.Name != validateDefaultScenarioName {
-			count++
-		}
-	}
-	return count
 }
 
 // printStorageConfig prints storage configuration for validation.
