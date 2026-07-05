@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Load-test focused dashboard for ICAP Mock Prometheus metrics.",
+  "description": "ICAP Mock metrics.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -5154,9 +5154,7 @@
   "refresh": "",
   "schemaVersion": 42,
   "tags": [
-    "icap-mock",
-    "loadtest",
-    "prometheus"
+    "icap-mock"
   ],
   "templating": {
     "list": [
@@ -5411,6 +5409,6 @@
   "timezone": "browser",
   "title": "ICAP Mock",
   "uid": "icap-mock-loadtest",
-  "version": 100,
+  "version": 101,
   "weekStart": ""
 }
