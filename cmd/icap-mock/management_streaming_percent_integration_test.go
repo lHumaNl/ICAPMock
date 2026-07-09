@@ -146,7 +146,7 @@ func openPartialChunk(t *testing.T, rt *integrationRuntime, requestHead, body st
 
 func assertPercentFINResponse(t *testing.T, resp, body string) {
 	t.Helper()
-	assertContains(t, resp, "Connection: close")
+	assertNotContains(t, resp, "Connection: close")
 	assertContains(t, resp, "28\r\n"+body[:40]+"\r\n")
 	assertNotContains(t, resp, "28\r\n"+body[40:80]+"\r\n")
 	assertNotContains(t, resp, "14\r\n"+body[80:]+"\r\n")

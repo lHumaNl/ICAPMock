@@ -436,7 +436,47 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 		scenarios = append(scenarios, s)
 	}
 
+	if file.Defaults.Use != "" && !containsScenarioNamed(scenarios, defaultScenarioName) {
+		fallback, err := buildDefaultsUseFallbackScenario(file)
+		if err != nil {
+			return nil, err
+		}
+		scenarios = append(scenarios, fallback)
+	}
+
 	return scenarios, nil
+}
+
+func containsScenarioNamed(scenarios []*Scenario, name string) bool {
+	for _, scenario := range scenarios {
+		if scenario != nil && scenario.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func buildDefaultsUseFallbackScenario(file *ScenarioFileV2) (*Scenario, error) {
+	resp, weighted, err := resolveResponse(
+		"defaults.use fallback",
+		InlineResponseV2{Use: file.Defaults.Use},
+		nil,
+		file,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Scenario{
+		Name: defaultScenarioName,
+		// defaults.use is the file-wide fallback. It must be reachable when no
+		// scenario matches, including requests outside defaults.endpoint; those
+		// defaults are only for materializing ordinary scenarios.
+		Match:             MatchRule{},
+		Response:          resp,
+		WeightedResponses: weighted,
+		Priority:          -1,
+	}, nil
 }
 
 // resolveScenarioResponse produces the non-branches response for a scenario:

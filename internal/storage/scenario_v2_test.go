@@ -3,11 +3,15 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 // --- ParseDelay tests ---
@@ -354,6 +358,89 @@ func TestConvertV2ToScenarios_HeaderMerge(t *testing.T) {
 	}
 	if h["extra"] != "extra-value" {
 		t.Errorf("extra: got %q, want extra-value", h["extra"])
+	}
+}
+
+func TestConvertV2ToScenarios_CleanTemplateKeepsICAPHeaders(t *testing.T) {
+	file := &ScenarioFileV2{
+		Defaults: ScenarioDefaultsV2{
+			Method:   MethodList{"REQMOD"},
+			Endpoint: EndpointList{"/scan"},
+			Headers: map[string]string{
+				"Server": "Test ICAP Service/1.0",
+				"ISTag":  `"test-clean-204"`,
+			},
+			ResponseTemplates: map[string]ResponseTemplateV2{
+				"clean": {
+					Inline: &InlineResponseV2{
+						Status: 204,
+						Set: map[string]string{
+							"X-Clean": "true",
+						},
+					},
+				},
+			},
+		},
+		Scenarios: map[string]ScenarioEntryV2{
+			"clean-response": {Use: "clean"},
+		},
+	}
+
+	scenarios, err := ConvertV2ToScenarios(file, []string{"clean-response"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := scenarios[0].Response.Headers
+	if got["Server"] != "Test ICAP Service/1.0" {
+		t.Fatalf("Server header = %q", got["Server"])
+	}
+	if got["ISTag"] != `"test-clean-204"` {
+		t.Fatalf("ISTag header = %q", got["ISTag"])
+	}
+	if got["X-Clean"] != "true" {
+		t.Fatalf("X-Clean header = %q", got["X-Clean"])
+	}
+	if scenarios[0].Response.ICAPStatus != 204 {
+		t.Fatalf("ICAPStatus = %d, want 204", scenarios[0].Response.ICAPStatus)
+	}
+}
+
+func TestLoadV2DefaultsUseFallbackKeepsICAPHeaders(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenarioFile := filepath.Join(tmpDir, "fallback.yaml")
+	yamlContent := `defaults:
+  method: [REQMOD, RESPMOD]
+  endpoint: [/primary/reqmod, /primary/respmod]
+  headers:
+    ISTag: '"test-clean-204"'
+    Server: "Test ICAP Service/1.0"
+  response_templates:
+    clean:
+      status: 204
+  use: clean
+`
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	registry := NewScenarioRegistry()
+	if err := registry.Load(scenarioFile); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	req := &icap.Request{Method: icap.MethodREQMOD, URI: "icap://127.0.0.1:1344/unmatched", Header: icap.NewHeader()}
+	scenario, err := registry.Match(req)
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if scenario.Name != defaultScenarioName {
+		t.Fatalf("scenario = %q, want %q", scenario.Name, defaultScenarioName)
+	}
+	if got := scenario.Response.Headers["Server"]; got != "Test ICAP Service/1.0" {
+		t.Fatalf("Server header = %q", got)
+	}
+	if got := scenario.Response.Headers["ISTag"]; got != `"test-clean-204"` {
+		t.Fatalf("ISTag header = %q", got)
 	}
 }
 

@@ -4,6 +4,7 @@ package icap
 
 import (
 	"bytes"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -151,13 +152,23 @@ func (h Header) Walk(fn func(key, value string) bool) {
 	if h == nil {
 		return
 	}
-	for k, values := range h {
+	for _, k := range h.sortedKeys() {
+		values := h[k]
 		for _, v := range values {
 			if !fn(k, v) {
 				return
 			}
 		}
 	}
+}
+
+func (h Header) sortedKeys() []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Len returns the number of unique header keys.
@@ -201,7 +212,8 @@ func (h Header) WriteToBuffer(buf *bytes.Buffer) {
 	if h == nil {
 		return
 	}
-	for k, values := range h {
+	for _, k := range h.sortedKeys() {
+		values := h[k]
 		for _, v := range values {
 			buf.WriteString(k)
 			buf.WriteString(": ")

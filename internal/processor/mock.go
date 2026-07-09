@@ -290,6 +290,14 @@ func (p *MockProcessor) buildResponse(scenario *storage.Scenario, req *icap.Requ
 		resp.SetHeader(key, value)
 	}
 
+	// 204 means the ICAP service did not modify the encapsulated message. Do not
+	// echo the original HTTP headers/body back in the ICAP response; the response
+	// serializer will advertise Encapsulated: null-body=0 while preserving any
+	// ICAP envelope headers configured by the scenario.
+	if scenario.Response.ICAPStatus == icap.StatusNoContentNeeded {
+		return resp, nil
+	}
+
 	// Set body if specified
 	body, err := scenario.Response.GetBody()
 	if err != nil {

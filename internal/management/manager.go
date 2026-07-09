@@ -596,7 +596,7 @@ func mergeScenarioFile(dst storage.ScenarioRegistry, path string, newRegistry fu
 		return err
 	}
 	for _, scenario := range tmp.List() {
-		if scenario.Name == defaultScenarioName {
+		if isImplicitDefaultScenario(scenario) {
 			continue
 		}
 		if err := dst.Add(scenario); err != nil {
@@ -604,4 +604,8 @@ func mergeScenarioFile(dst storage.ScenarioRegistry, path string, newRegistry fu
 		}
 	}
 	return nil
+}
+
+func isImplicitDefaultScenario(scenario *storage.Scenario) bool {
+	return reflect.DeepEqual(scenario, storage.DefaultScenario())
 }

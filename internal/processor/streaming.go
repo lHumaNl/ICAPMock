@@ -60,7 +60,7 @@ func (p *MockProcessor) attachStream(resp *icap.Response, tmpl *storage.Response
 	}
 	setStreamContentLength(target.Header, payload)
 	if target.BodyStream.FinishMode == icap.StreamFinishFIN {
-		resp.SetHeader("Connection", "close")
+		resp.MarkCloseAfterWrite()
 	}
 	return nil
 }

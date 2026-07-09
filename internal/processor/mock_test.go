@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -674,7 +676,7 @@ func TestMockProcessor_PassThroughSharesBodyWithoutMutatingRequest(t *testing.T)
 	}
 }
 
-func TestMockProcessor_StreamFINModeSetsConnectionClose(t *testing.T) {
+func TestMockProcessor_StreamFINModeMarksCloseAfterWrite(t *testing.T) {
 	registry := storage.NewScenarioRegistry()
 	if err := registry.Add(responseBodyStreamScenario(icap.StreamFinishFIN)); err != nil {
 		t.Fatalf("Add() error = %v", err)
@@ -685,8 +687,154 @@ func TestMockProcessor_StreamFINModeSetsConnectionClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if got, ok := resp.GetHeader("Connection"); !ok || got != "close" {
-		t.Fatalf("Connection header = %q, %v; want close, true", got, ok)
+	if got, ok := resp.GetHeader("Connection"); ok {
+		t.Fatalf("Connection header = %q, %v; want absent", got, ok)
+	}
+	if !resp.CloseAfterWrite() {
+		t.Fatal("CloseAfterWrite = false, want true")
+	}
+}
+
+func TestMockProcessor_Clean204PreservesHeadersAndUsesNullBody(t *testing.T) {
+	tests := []struct {
+		request func(*testing.T) *icap.Request
+		name    string
+		method  string
+	}{
+		{
+			name:   "REQMOD",
+			method: icap.MethodREQMOD,
+			request: func(t *testing.T) *icap.Request {
+				t.Helper()
+				req := createTestREQMODRequest(t)
+				req.HTTPRequest = &icap.HTTPMessage{
+					Method: "POST",
+					URI:    "file:///tmp/sample",
+					Proto:  "HTTP/1.1",
+					Header: icap.NewHeader(),
+				}
+				return req
+			},
+		},
+		{
+			name:    "RESPMOD",
+			method:  icap.MethodRESPMOD,
+			request: createTestRESPMODRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := storage.NewScenarioRegistry()
+			if err := registry.Add(&storage.Scenario{
+				Name:  "clean-204",
+				Match: storage.MatchRule{Methods: []string{tt.method}},
+				Response: storage.ResponseTemplate{
+					ICAPStatus: icap.StatusNoContentNeeded,
+					Headers: map[string]string{
+						"Server": "Test ICAP Service/1.0",
+						"ISTag":  `"test-clean-204"`,
+					},
+				},
+				Priority: 100,
+			}); err != nil {
+				t.Fatalf("Add() error = %v", err)
+			}
+
+			resp, err := NewMockProcessor(registry, createTestLogger(t)).Process(context.Background(), tt.request(t))
+			if err != nil {
+				t.Fatalf("Process() error = %v", err)
+			}
+			if resp.HTTPRequest != nil || resp.HTTPResponse != nil {
+				t.Fatalf("204 response carried encapsulated HTTP: request=%v response=%v", resp.HTTPRequest, resp.HTTPResponse)
+			}
+
+			var out bytes.Buffer
+			if _, err := resp.WriteTo(&out); err != nil {
+				t.Fatalf("WriteTo() error = %v", err)
+			}
+			wire := out.String()
+			for _, want := range []string{
+				"ICAP/1.0 204 No Content Needed",
+				"Server: Test ICAP Service/1.0",
+				`ISTag: "test-clean-204"`,
+				"Encapsulated: null-body=0",
+			} {
+				if !strings.Contains(wire, want) {
+					t.Fatalf("wire response missing %q: %q", want, wire)
+				}
+			}
+			if strings.Contains(wire, "HTTP/1.1") || strings.Contains(wire, "file:///tmp/sample") {
+				t.Fatalf("204 response should not serialize encapsulated HTTP: %q", wire)
+			}
+		})
+	}
+}
+
+func TestMockProcessor_LoadedDefaultsUseCleanPreservesHeaders(t *testing.T) {
+	tmpDir := t.TempDir()
+	scenarioFile := filepath.Join(tmpDir, "fallback.yaml")
+	yamlContent := `defaults:
+  method: REQMOD
+  endpoint: /primary
+  headers:
+    Server: Test ICAP Service/1.0
+    ISTag: '"test-clean-204"'
+  response_templates:
+    clean:
+      status: 204
+  use: clean
+scenarios:
+  explicit-clean:
+    use: clean
+`
+	if err := os.WriteFile(scenarioFile, []byte(yamlContent), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Load(scenarioFile); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	processor := NewMockProcessor(registry, createTestLogger(t))
+
+	for _, tc := range []struct {
+		name string
+		uri  string
+	}{
+		{name: "explicit scenario use clean", uri: "icap://127.0.0.1:1344/primary"},
+		{name: "defaults use clean fallback", uri: "icap://127.0.0.1:1344/unmatched"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := processor.Process(context.Background(), &icap.Request{
+				Method: icap.MethodREQMOD,
+				URI:    tc.uri,
+				Header: icap.NewHeader(),
+			})
+			if err != nil {
+				t.Fatalf("Process() error = %v", err)
+			}
+			assertClean204WireHeaders(t, resp)
+		})
+	}
+}
+
+func assertClean204WireHeaders(t *testing.T, resp *icap.Response) {
+	t.Helper()
+	var out bytes.Buffer
+	if _, err := resp.WriteTo(&out); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	wire := out.String()
+	for _, want := range []string{
+		"ICAP/1.0 204 No Content Needed",
+		"Server: Test ICAP Service/1.0",
+		`ISTag: "test-clean-204"`,
+		"Encapsulated: null-body=0",
+	} {
+		if !strings.Contains(wire, want) {
+			t.Fatalf("wire response missing %q: %q", want, wire)
+		}
 	}
 }
 

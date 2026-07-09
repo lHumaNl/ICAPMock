@@ -208,6 +208,51 @@ func TestResponse204NoContent(t *testing.T) {
 	if !strings.Contains(output, "ICAP/1.0 204 No Content Needed") {
 		t.Errorf("Output missing 204 status: %q", output)
 	}
+	if !strings.Contains(output, "Encapsulated: null-body=0") {
+		t.Errorf("Output missing null-body encapsulation: %q", output)
+	}
+}
+
+func TestResponse204NoContentPreservesICAPHeaders(t *testing.T) {
+	resp := icap.NewResponse(204)
+	resp.SetHeader("Server", "Test ICAP Service/1.0")
+	resp.SetHeader("ISTag", `"test-clean-204"`)
+
+	var buf bytes.Buffer
+	if _, err := resp.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Server: Test ICAP Service/1.0") {
+		t.Fatalf("Output missing Server header: %q", output)
+	}
+	if !strings.Contains(output, `ISTag: "test-clean-204"`) {
+		t.Fatalf("Output missing ISTag header: %q", output)
+	}
+	if !strings.Contains(output, "Encapsulated: null-body=0") {
+		t.Fatalf("Output missing null-body encapsulation: %q", output)
+	}
+}
+
+func TestResponseStringMatchesWriteToForClean204(t *testing.T) {
+	resp := icap.NewResponse(204)
+	resp.SetHeader("Server", "Test ICAP Service/1.0")
+	resp.SetHeader("ISTag", `"test-clean-204"`)
+
+	var out bytes.Buffer
+	if _, err := resp.WriteTo(&out); err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+
+	got := resp.String()
+	want := out.String()
+	if got != want {
+		t.Fatalf("String() mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+	if !strings.Contains(got, "Encapsulated: null-body=0") {
+		t.Fatalf("String() missing null-body encapsulation: %q", got)
+	}
 }
 
 // TestResponseWithHTTPRequest tests response with embedded HTTP request.
@@ -282,6 +327,32 @@ func TestResponseWriteToDirectMatchesBufferedString(t *testing.T) {
 	}
 	if got, want := out.String(), resp.String(); got != want {
 		t.Fatalf("direct output mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestResponseCloseAfterWriteDoesNotSerializeHeader(t *testing.T) {
+	resp := icap.NewResponse(200)
+	resp.MarkCloseAfterWrite()
+
+	var out bytes.Buffer
+	_, err := resp.WriteTo(&out)
+	if err != nil {
+		t.Fatalf("WriteTo() error = %v", err)
+	}
+	if strings.Contains(out.String(), "Connection: close") {
+		t.Fatalf("internal close signal serialized: %q", out.String())
+	}
+	if !resp.CloseAfterWrite() {
+		t.Fatal("CloseAfterWrite = false, want true")
+	}
+}
+
+func TestResponseClonePreservesCloseAfterWrite(t *testing.T) {
+	original := icap.NewResponse(200)
+	original.MarkCloseAfterWrite()
+
+	if !original.Clone().CloseAfterWrite() {
+		t.Fatal("clone CloseAfterWrite = false, want true")
 	}
 }
 

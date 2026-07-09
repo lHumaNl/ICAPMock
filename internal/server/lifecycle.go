@@ -106,8 +106,15 @@ func isNetTimeout(err error) bool {
 }
 
 func responseHasConnectionClose(resp *icap.Response) bool {
+	if resp == nil {
+		return false
+	}
 	connHeader, ok := resp.GetHeader("Connection")
 	return ok && headerValueHasToken(connHeader, "close")
+}
+
+func shouldCloseAfterResponse(resp *icap.Response) bool {
+	return resp.CloseAfterWrite() || responseHasConnectionClose(resp)
 }
 
 func headerHasToken(headers icap.Header, key, token string) bool {

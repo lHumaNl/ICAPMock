@@ -103,7 +103,7 @@ func TestRealIntegration_StreamingFINModeClosesWithoutFinalChunk(t *testing.T) {
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("expected clean EOF after FIN stream, got %v", err)
 	}
-	assertContains(t, resp, "Connection: close")
+	assertNotContains(t, resp, "Connection: close")
 	assertContains(t, resp, "3\r\nwxy\r\n")
 	assertNotContains(t, resp, "1\r\nz\r\n0\r\n\r\n")
 	assertNotContains(t, resp, "0\r\n\r\n")
@@ -183,7 +183,7 @@ func TestRealIntegration_REQMODRequestHTTPBodyFINClosesWithoutFinalChunk(t *test
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("expected clean EOF after request_http_body FIN stream, got %v", err)
 	}
-	assertContains(t, resp, "Connection: close")
+	assertNotContains(t, resp, "Connection: close")
 	assertContains(t, resp, "2\r\nab\r\n1\r\nc\r\n")
 	assertNotContains(t, resp, "1\r\nd\r\n")
 	assertNotContains(t, resp, "0\r\n\r\n")

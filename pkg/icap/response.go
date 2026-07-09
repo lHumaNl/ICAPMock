@@ -56,13 +56,14 @@ func StatusText(code int) string {
 
 // Response represents an ICAP response.
 type Response struct {
-	BodyReader   io.Reader
-	Header       Header
-	HTTPRequest  *HTTPMessage
-	HTTPResponse *HTTPMessage
-	Proto        string
-	Body         []byte
-	StatusCode   int
+	BodyReader      io.Reader
+	Header          Header
+	HTTPRequest     *HTTPMessage
+	HTTPResponse    *HTTPMessage
+	Proto           string
+	Body            []byte
+	StatusCode      int
+	closeAfterWrite bool
 }
 
 // NewResponse creates a new ICAP response with the given status code.
@@ -129,6 +130,18 @@ func (r *Response) SetHTTPResponse(resp *HTTPMessage) {
 	r.HTTPResponse = resp
 }
 
+// MarkCloseAfterWrite asks the server to close the connection after this
+// response is written without serializing a Connection header.
+func (r *Response) MarkCloseAfterWrite() {
+	r.closeAfterWrite = true
+}
+
+// CloseAfterWrite reports whether the server should close the connection after
+// writing this response, independent of serialized ICAP headers.
+func (r *Response) CloseAfterWrite() bool {
+	return r != nil && r.closeAfterWrite
+}
+
 // IsError returns true if the status code indicates an error (4xx or 5xx).
 func (r *Response) IsError() bool {
 	return r.StatusCode >= 400
@@ -138,6 +151,7 @@ func (r *Response) IsError() bool {
 func (r *Response) Clone() *Response {
 	clone := NewResponse(r.StatusCode)
 	clone.Proto = r.Proto
+	clone.closeAfterWrite = r.closeAfterWrite
 
 	if r.Header != nil {
 		clone.Header = r.Header.Clone()
@@ -190,36 +204,7 @@ func (r *Response) WriteTo(w io.Writer) (int64, error) {
 // writeToBuffer writes the response content to a bytes.Buffer.
 // This is used by both WriteTo and String to avoid code duplication.
 func (r *Response) writeToBuffer(buf *bytes.Buffer) {
-	// Write status line
-	proto := r.Proto
-	if proto == "" {
-		proto = Version
-	}
-	buf.WriteString(proto)
-	buf.WriteByte(' ')
-	buf.WriteString(strconv.Itoa(r.StatusCode))
-	buf.WriteByte(' ')
-	buf.WriteString(StatusText(r.StatusCode))
-	buf.WriteString("\r\n")
-
-	// Write ICAP headers
-	if r.Header != nil {
-		r.Header.WriteToBuffer(buf)
-	}
-
-	// Write encapsulated HTTP message if present
-	if r.HTTPRequest != nil || r.HTTPResponse != nil {
-		// Build and write Encapsulated header
-		encap := r.BuildEncapsulatedHeader()
-		if encap != "" {
-			buf.WriteString("Encapsulated: ")
-			buf.WriteString(encap)
-			buf.WriteString("\r\n")
-		}
-	}
-
-	// Write blank line
-	buf.WriteString("\r\n")
+	r.writeEnvelopeToBuffer(buf)
 
 	// Write encapsulated content
 	if r.HTTPRequest != nil {
@@ -353,12 +338,8 @@ func (r *Response) writeEnvelopeToBuffer(buf *bytes.Buffer) {
 	if r.Header != nil {
 		r.Header.WriteToBuffer(buf)
 	}
-	if r.HTTPRequest != nil || r.HTTPResponse != nil {
-		encap := r.BuildEncapsulatedHeader()
-		if encap == "" {
-			buf.WriteString("\r\n")
-			return
-		}
+	encap := r.BuildEncapsulatedHeader()
+	if encap != "" {
 		buf.WriteString("Encapsulated: " + encap + "\r\n")
 	}
 	buf.WriteString("\r\n")

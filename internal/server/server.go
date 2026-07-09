@@ -604,8 +604,8 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				return
 			}
 
-			// Check for connection close header
-			if responseHasConnectionClose(resp) {
+			// Check for explicit or internal response close signal.
+			if shouldCloseAfterResponse(resp) {
 				return
 			}
 			requestCount++

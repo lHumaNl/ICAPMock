@@ -506,7 +506,18 @@ func detectV2Format(data []byte) (isV2 bool, names []string, err error) {
 		}
 	}
 
-	// No "scenarios" key found — treat as v1
+	// A v2 file may intentionally contain only defaults (for example,
+	// defaults.use as a file-wide fallback). Treat that as v2 so defaults are not
+	// silently ignored by the legacy v1 loader.
+	for i := 0; i < len(mapping.Content)-1; i += 2 {
+		key := mapping.Content[i]
+		value := mapping.Content[i+1]
+		if key.Value == "defaults" && value.Kind == yaml.MappingNode {
+			return true, nil, nil
+		}
+	}
+
+	// No v2 keys found — treat as v1.
 	return false, nil, nil
 }
 

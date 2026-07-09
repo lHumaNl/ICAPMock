@@ -222,8 +222,11 @@ func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t
 	if stream.FinAfterBytes != 3 {
 		t.Fatalf("FinAfterBytes = %d, want 3", stream.FinAfterBytes)
 	}
-	if got, ok := resp.GetHeader("Connection"); !ok || got != "close" {
-		t.Fatalf("Connection header = %q, %v, want close, true", got, ok)
+	if got, ok := resp.GetHeader("Connection"); ok {
+		t.Fatalf("Connection header = %q, %v, want absent", got, ok)
+	}
+	if !resp.CloseAfterWrite() {
+		t.Fatal("CloseAfterWrite = false, want true")
 	}
 }
 

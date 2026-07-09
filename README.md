@@ -316,6 +316,8 @@ Notes:
   more than that selected percentage. `fin` closes without the terminating chunk; `term` sends the
   terminating chunk after the selected partial body. Legacy `chunks` / `duration` / `finish` remain
   supported for existing files, but cannot be mixed with `send` / `throttle` / `end`.
+- `end.mode: fin` keeps ICAP response headers normal: ICAPMock does not add `Connection: close`;
+  it writes the partial chunked body, omits the terminating chunk, and then closes the TCP stream.
 - `stream.start_delay` adds a pre-first-chunk wait after the upload and scenario `delay`, independent
   from chunk pacing and `send.duration`.
 

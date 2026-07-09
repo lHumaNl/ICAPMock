@@ -69,6 +69,19 @@ func readICAPResponseStatus(t *testing.T, reader *bufio.Reader) string {
 	}
 }
 
+func readICAPResponseHeaders(t *testing.T, reader *bufio.Reader) (status string, headers []string) {
+	t.Helper()
+	status = readICAPLine(t, reader)
+	headers = make([]string, 0)
+	for {
+		line := readICAPLine(t, reader)
+		if line == "" {
+			return status, headers
+		}
+		headers = append(headers, line)
+	}
+}
+
 func readICAPLine(t *testing.T, reader *bufio.Reader) string {
 	t.Helper()
 	line, err := reader.ReadString('\n')
@@ -543,6 +556,25 @@ func TestServerHonorsConnectionCloseAfterDrainingUnreadBody(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load())
 }
 
+func TestServerCloseAfterWriteSignalClosesWithoutConnectionHeader(t *testing.T) {
+	srv := newCloseAfterWriteTestServer(t)
+	defer srv.Stop(context.Background())
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	status, headers := readICAPResponseHeaders(t, reader)
+	require.Contains(t, status, "200")
+	require.NotContains(t, strings.Join(headers, "\n"), "Connection: close")
+	require.Equal(t, "HTTP/1.1 200 OK", readICAPLine(t, reader))
+	require.Equal(t, "", readICAPLine(t, reader))
+	require.Equal(t, "4\r\npart\r\n", readPartialStreamAndEOF(t, reader))
+	require.Eventually(t, func() bool { return srv.ConnectionCount() == 0 }, time.Second, 10*time.Millisecond)
+}
+
 func TestServerClosesConnectionAfterOversizedRESPMODBodyReceive(t *testing.T) {
 	var calls atomic.Int32
 	srv := newConnectionLifecycleTestServerWithRESPMODConfig(t, time.Second, time.Second, 8, &calls)
@@ -626,6 +658,49 @@ func unreadBodyHandler(calls *atomic.Int32) func(context.Context, *icap.Request)
 		resp.SetHeader("Encapsulated", "null-body=0")
 		return resp, nil
 	}
+}
+
+func newCloseAfterWriteTestServer(t *testing.T) *ICAPServer {
+	t.Helper()
+	cfg := &config.ServerConfig{
+		Host: "127.0.0.1", Port: 0, ReadTimeout: time.Second,
+		WriteTimeout: time.Second, MaxConnections: 10,
+	}
+	srv, err := NewServer(cfg, NewConnectionPool(), nil)
+	require.NoError(t, err)
+	r := router.NewRouter()
+	require.NoError(t, r.HandleFunc("/options", closeAfterWriteHandler))
+	srv.SetRouter(r)
+	require.NoError(t, srv.Start(context.Background()))
+	return srv
+}
+
+func closeAfterWriteHandler(_ context.Context, _ *icap.Request) (*icap.Response, error) {
+	resp := icap.NewResponse(icap.StatusOK)
+	resp.SetHeader("ISTag", "close-after-write")
+	resp.SetHTTPResponse(&icap.HTTPMessage{
+		Proto: "HTTP/1.1", Status: "200", StatusText: "OK",
+		BodyStream: partialTestBodyStream(),
+	})
+	resp.MarkCloseAfterWrite()
+	return resp, nil
+}
+
+func partialTestBodyStream() *icap.BodyStream {
+	return &icap.BodyStream{
+		Payload: icap.NewBytesStreamPayload([]byte("partial")), ChunkSize: 4,
+		FinishMode: icap.StreamFinishFIN, FinAfterBytes: 4, FinAfterBytesSet: true,
+	}
+}
+
+func readPartialStreamAndEOF(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	partial := make([]byte, len("4\r\npart\r\n"))
+	_, err := io.ReadFull(reader, partial)
+	require.NoError(t, err)
+	_, err = reader.ReadByte()
+	requireIdleCloseError(t, err)
+	return string(partial)
 }
 
 func respmodChunkedRequest(addr, extraHeaders string) string {

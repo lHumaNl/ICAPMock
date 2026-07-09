@@ -915,39 +915,46 @@ func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 
 // Remove удаляет сценарий по имени.
 func (r *ShardedScenarioRegistry) Remove(name string) error {
+	removed := false
 	for _, shard := range r.shards {
 		shard.mu.Lock()
-		// Удаляем из списка
-		found := false
-		for i, s := range shard.scenarios {
+		// Удаляем из списка. A scenario name can appear in multiple shards: the
+		// initial implicit default is installed into every shard, and replacing it
+		// must remove all copies before adding a configured fallback.
+		for i := 0; i < len(shard.scenarios); {
+			s := shard.scenarios[i]
 			if s.Name == name {
 				shard.scenarios = append(shard.scenarios[:i], shard.scenarios[i+1:]...)
-				found = true
-				break
+				removed = true
+				continue
 			}
+			i++
 		}
 
 		// Удаляем из индекса
 		for key, scenarios := range shard.index {
-			for i, s := range scenarios {
+			for i := 0; i < len(scenarios); {
+				s := scenarios[i]
 				if s.Name == name {
 					if len(scenarios) == 1 {
 						delete(shard.index, key)
-					} else {
-						shard.index[key] = append(scenarios[:i], scenarios[i+1:]...)
+						removed = true
+						break
 					}
-					break
+					shard.index[key] = append(scenarios[:i], scenarios[i+1:]...)
+					scenarios = shard.index[key]
+					removed = true
+					continue
 				}
+				i++
 			}
 		}
 		shard.mu.Unlock()
-
-		if found {
-			r.afterScenarioRemoved()
-			return nil
-		}
 	}
 	if r.removeGlobalScenario(name) {
+		removed = true
+	}
+	if removed {
 		r.afterScenarioRemoved()
 		return nil
 	}

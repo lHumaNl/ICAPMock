@@ -13,6 +13,7 @@ import (
 
 	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/internal/storage"
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 func TestRuntimeManager_LoadConfigFromPathRollback(t *testing.T) {
@@ -63,6 +64,41 @@ func TestRuntimeManager_ReloadScenariosMultiFile(t *testing.T) {
 	}
 
 	assertLoaded(t, registry.List(), "one", "two")
+}
+
+func TestLoadScenarioDirectoryPreservesConfiguredDefaultFallback(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "fallback.yaml", `defaults:
+  method: [REQMOD, RESPMOD]
+  endpoint: [/primary/reqmod, /primary/respmod]
+  headers:
+    ISTag: '"test-clean-204"'
+    Server: "Test ICAP Service/1.0"
+  response_templates:
+    clean:
+      status: 204
+  use: clean
+`)
+
+	registry, err := LoadScenarioDirectory(dir, storage.NewShardedScenarioRegistry)
+	if err != nil {
+		t.Fatalf("LoadScenarioDirectory() error = %v", err)
+	}
+
+	scenario, err := registry.Match(&icap.Request{
+		Method: icap.MethodREQMOD,
+		URI:    "icap://127.0.0.1:1344/unmatched",
+		Header: icap.NewHeader(),
+	})
+	if err != nil {
+		t.Fatalf("Match() error = %v", err)
+	}
+	if scenario.Name != defaultScenarioName {
+		t.Fatalf("scenario = %q, want %q", scenario.Name, defaultScenarioName)
+	}
+	if got := scenario.Response.Headers["Server"]; got != "Test ICAP Service/1.0" {
+		t.Fatalf("Server header = %q", got)
+	}
 }
 
 func TestRuntimeManager_ReloadScenariosRollback(t *testing.T) {
