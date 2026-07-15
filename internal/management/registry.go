@@ -3,6 +3,7 @@
 package management
 
 import (
+	"context"
 	"sync"
 
 	"github.com/icap-mock/icap-mock/internal/storage"
@@ -45,8 +46,8 @@ func (r *ManagedScenarioRegistry) Load(path string) error {
 }
 
 // Match delegates scenario matching to the active registry.
-func (r *ManagedScenarioRegistry) Match(req *icap.Request) (*storage.Scenario, error) {
-	return r.current().Match(req)
+func (r *ManagedScenarioRegistry) Match(ctx context.Context, req *icap.Request) (*storage.Scenario, error) {
+	return r.current().Match(ctx, req)
 }
 
 // Reload delegates reload to the active registry.

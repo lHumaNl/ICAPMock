@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -75,13 +76,27 @@ func NewResponse(statusCode int) *Response {
 	}
 }
 
-// NewResponseError creates a new error response with a message.
+// NewResponseError creates an ICAP error response with the diagnostic message
+// in a framed, encapsulated HTTP response. The ICAP connection remains
+// reusable; callers that require connection termination must request it
+// explicitly.
 func NewResponseError(statusCode int, message string) *Response {
 	resp := NewResponse(statusCode)
-	resp.SetHeader("Connection", "close")
-	if message != "" {
-		resp.Body = []byte(message + "\r\n")
+	body := []byte(message)
+	statusText := http.StatusText(statusCode)
+	if statusText == "" {
+		statusText = StatusText(statusCode)
 	}
+	httpResp := &HTTPMessage{
+		Proto:      "HTTP/1.1",
+		Status:     strconv.Itoa(statusCode),
+		StatusText: statusText,
+		Header:     NewHeader(),
+		Body:       body,
+	}
+	httpResp.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	httpResp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	resp.SetHTTPResponse(httpResp)
 	return resp
 }
 
@@ -260,28 +275,36 @@ func (r *Response) writeHTTPMessageHead(buf *bytes.Buffer, m *HTTPMessage, isReq
 func (r *Response) BuildEncapsulatedHeader() string {
 	var parts []string
 	offset := 0
+	finalSectionHasBody := false
 
 	if r.HTTPRequest != nil {
 		parts = append(parts, fmt.Sprintf("req-hdr=%d", offset))
 		// Calculate offset for body
 		offset += r.calculateHTTPMessageSize(r.HTTPRequest, true)
 		if hasHTTPMessageBody(r.HTTPRequest) {
+			finalSectionHasBody = true
 			parts = append(parts, fmt.Sprintf("req-body=%d", offset))
 			offset += calculateHTTPMessageBodySize(r.HTTPRequest)
 		}
 	}
 
 	if r.HTTPResponse != nil {
+		finalSectionHasBody = false
 		parts = append(parts, fmt.Sprintf("res-hdr=%d", offset))
 		offset += r.calculateHTTPMessageSize(r.HTTPResponse, false)
 		if hasHTTPMessageBody(r.HTTPResponse) {
+			finalSectionHasBody = true
 			parts = append(parts, fmt.Sprintf("res-body=%d", offset))
 		}
 	}
 
-	// No body case
-	if len(parts) == 0 && len(r.Body) == 0 {
-		return "null-body=0"
+	// A bodyless encapsulated message must terminate with null-body so clients
+	// can determine the complete response boundary on a persistent connection.
+	if !finalSectionHasBody && len(r.Body) == 0 {
+		if len(parts) == 0 {
+			return "null-body=0"
+		}
+		parts = append(parts, fmt.Sprintf("null-body=%d", offset))
 	}
 
 	return strings.Join(parts, ", ")

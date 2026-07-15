@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -101,7 +102,7 @@ scenarios:
 				ClientIP: tt.clientIP,
 			}
 
-			scenario, err := registry.Match(req)
+			scenario, err := registry.Match(context.Background(), req)
 			if err != nil {
 				t.Fatalf("Match() error = %v", err)
 			}
@@ -277,7 +278,7 @@ scenarios:
 				ClientIP: tt.clientIP,
 			}
 
-			scenario, err := registry.Match(req)
+			scenario, err := registry.Match(context.Background(), req)
 			if err != nil {
 				t.Fatalf("Match() error = %v", err)
 			}
@@ -325,7 +326,7 @@ scenarios:
 		ClientIP: "8.8.8.8",
 	}
 
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -364,7 +365,7 @@ scenarios:
 		ClientIP: "8.8.8.8",
 	}
 
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -440,7 +441,7 @@ scenarios:
 				ClientIP: tt.clientIP,
 			}
 
-			scenario, err := registry.Match(req)
+			scenario, err := registry.Match(context.Background(), req)
 			if err != nil {
 				t.Fatalf("Match() error = %v", err)
 			}
@@ -540,7 +541,7 @@ scenarios:
 				ClientIP: tt.clientIP,
 			}
 
-			scenario, err := registry.Match(req)
+			scenario, err := registry.Match(context.Background(), req)
 			if err != nil {
 				t.Fatalf("Match() error = %v", err)
 			}
@@ -667,6 +668,6 @@ scenarios:
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = registry.Match(req)
+		_, _ = registry.Match(context.Background(), req)
 	}
 }

@@ -434,6 +434,7 @@ func TestResponseError(t *testing.T) {
 		{"Internal error", "Internal error", 500},
 		{"Method not supported", "Method not supported", 501},
 		{"Server busy", "Server busy", 503},
+		{"", "Encapsulated: res-hdr=0, null-body=", 500},
 	}
 
 	for _, tt := range tests {
@@ -444,12 +445,37 @@ func TestResponseError(t *testing.T) {
 				t.Errorf("StatusCode = %d, want %d", resp.StatusCode, tt.code)
 			}
 
+			if _, ok := resp.GetHeader("Connection"); ok {
+				t.Fatal("error response must not close a reusable ICAP connection")
+			}
+			if resp.HTTPResponse == nil {
+				t.Fatal("error response must contain an encapsulated HTTP response")
+			}
+			if resp.HTTPResponse.Status != strconv.Itoa(tt.code) {
+				t.Errorf("HTTP status = %q, want %d", resp.HTTPResponse.Status, tt.code)
+			}
+			if got, _ := resp.HTTPResponse.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
+				t.Errorf("Content-Type = %q, want text/plain; charset=utf-8", got)
+			}
+
 			var buf bytes.Buffer
-			resp.WriteTo(&buf)
+			if _, err := resp.WriteTo(&buf); err != nil {
+				t.Fatalf("WriteTo() error = %v", err)
+			}
 			output := buf.String()
 
 			if !strings.Contains(output, tt.wantInOutput) {
 				t.Errorf("Output should contain %q, got %q", tt.wantInOutput, output)
+			}
+			bodyToken := "res-body="
+			if tt.message == "" {
+				bodyToken = "null-body="
+			}
+			if !strings.Contains(output, "Encapsulated: res-hdr=0, "+bodyToken) {
+				t.Errorf("Output must frame the HTTP error response, got %q", output)
+			}
+			if strings.Contains(output, "Connection: close") {
+				t.Errorf("Output must keep the ICAP connection reusable, got %q", output)
 			}
 		})
 	}

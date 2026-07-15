@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 
 	metricsinternal "github.com/icap-mock/icap-mock/internal/metrics"
@@ -17,6 +18,32 @@ func (s *ICAPServer) logRequestError(ctx context.Context, req *icap.Request, sta
 		return
 	}
 	s.logger.ErrorContext(ctx, "ICAP request error", s.requestErrorAttrs(ctx, req, stage, errorType, err)...)
+}
+
+func connectionReadCloseReason(err error, keepAliveWait bool) string {
+	if errors.Is(err, io.EOF) {
+		return "client_closed"
+	}
+	if isNetTimeout(err) {
+		if keepAliveWait {
+			return "idle_timeout"
+		}
+		return "read_timeout"
+	}
+	return "read_error"
+}
+
+func parseErrorCloseReason(err error, started, keepAliveWait bool) string {
+	if !started {
+		return connectionReadCloseReason(err, keepAliveWait)
+	}
+	if isNetTimeout(err) {
+		return "read_timeout"
+	}
+	if errors.Is(err, io.EOF) {
+		return "client_closed_mid_request"
+	}
+	return "malformed_request"
 }
 
 func (s *ICAPServer) recordRequestError(ctx context.Context, req *icap.Request, stage, errorType, response string) {

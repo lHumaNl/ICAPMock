@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -429,7 +430,7 @@ func TestLoadV2DefaultsUseFallbackKeepsICAPHeaders(t *testing.T) {
 	}
 
 	req := &icap.Request{Method: icap.MethodREQMOD, URI: "icap://127.0.0.1:1344/unmatched", Header: icap.NewHeader()}
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}

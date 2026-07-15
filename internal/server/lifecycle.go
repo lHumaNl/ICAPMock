@@ -49,6 +49,13 @@ func (r *requestDeadlineReader) Started() bool {
 	return r.started
 }
 
+func (r *requestDeadlineReader) Close() error {
+	if closer, ok := r.reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 func (r *requestDeadlineReader) activateOnce(readErr error) error {
 	r.started = true
 	if r.activated || r.activate == nil {

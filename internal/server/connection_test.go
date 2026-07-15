@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/icap-mock/icap-mock/pkg/icap"
 	"github.com/icap-mock/icap-mock/pkg/pool"
 )
 
@@ -151,6 +152,87 @@ func TestConnectionWrite(t *testing.T) {
 	if received.String() != expectedResponse {
 		t.Errorf("Write() got %q, want %q", received.String(), expectedResponse)
 	}
+}
+
+func TestConnectionAbortInterruptsBlockedGracefulClose(t *testing.T) {
+	serverConn, peerConn := net.Pipe()
+	defer peerConn.Close()
+	conn := newConnection(serverConn, &ConnectionConfig{})
+
+	if _, err := conn.Write([]byte("buffered response")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- conn.Close() }()
+
+	select {
+	case err := <-closeDone:
+		t.Fatalf("graceful Close returned before blocked flush was interrupted: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	abortDone := make(chan error, 1)
+	go func() { abortDone <- conn.Abort() }()
+	select {
+	case <-abortDone:
+	case <-time.After(time.Second):
+		t.Fatal("Abort did not interrupt blocked graceful Close")
+	}
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("graceful Close remained blocked after Abort")
+	}
+}
+
+func TestConnectionAbortWaitsForBlockedReadBeforeReleasingBuffer(t *testing.T) {
+	serverConn, peerConn := net.Pipe()
+	defer peerConn.Close()
+	conn := newConnection(serverConn, &ConnectionConfig{})
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := conn.Reader().Read(make([]byte, 1))
+		readDone <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	abortDone := make(chan error, 1)
+	go func() { abortDone <- conn.Abort() }()
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocked read was not interrupted by Abort")
+	}
+	select {
+	case <-abortDone:
+	case <-time.After(time.Second):
+		t.Fatal("Abort did not finish after blocked read exited")
+	}
+}
+
+func TestProductionChunkedReaderCloseInterruptsNetworkRead(t *testing.T) {
+	serverConn, peerConn := net.Pipe()
+	defer peerConn.Close()
+	conn := newConnection(serverConn, &ConnectionConfig{})
+	reader := newRequestDeadlineReader(conn.Reader(), nil)
+	chunked := icap.NewChunkedReader(reader)
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := chunked.Read(make([]byte, 1))
+		readDone <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := chunked.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("ChunkedReader.Close did not interrupt production reader stack")
+	}
+	_ = conn.Abort()
 }
 
 func TestConnectionSetDeadline(t *testing.T) {
@@ -444,9 +526,9 @@ func TestPooledBuffer_ReturnedOnClose(t *testing.T) {
 		t.Errorf("Close() error: %v", err)
 	}
 
-	// After close, the reader should be nil (buffers returned to pool)
-	if conn.reader != nil {
-		t.Error("Reader should be nil after close (buffers returned to pool)")
+	// Keep the closed wrapper stable for concurrent readers, but release its buffer.
+	if conn.reader == nil || conn.reader.bufPtr != nil || conn.reader.buf != nil || !conn.reader.closed {
+		t.Error("Reader wrapper should remain closed with its buffer returned to the pool")
 	}
 }
 
@@ -762,8 +844,11 @@ func TestBuffersReturnedOnClose(t *testing.T) {
 	err := conn.Close()
 	assert.NoError(t, err, "Close should not return error")
 
-	// After close, reader should be nil (buffers returned to pool)
-	assert.Nil(t, conn.reader, "Reader should be nil after close")
+	// The wrapper remains address-stable for concurrent readers; pooled storage is released.
+	require.NotNil(t, conn.reader)
+	assert.Nil(t, conn.reader.bufPtr)
+	assert.Nil(t, conn.reader.buf)
+	assert.True(t, conn.reader.closed)
 }
 
 // BenchmarkMemoryAllocations_BeforeAfter benchmarks memory usage with pooling.

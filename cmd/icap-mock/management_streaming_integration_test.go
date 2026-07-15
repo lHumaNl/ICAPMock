@@ -272,16 +272,7 @@ func TestRealIntegration_MultipartNoMatchUsesCurrentFallbackSemantics(t *testing
 			rt := startIntegrationRuntime(t, scenariosDir)
 			t.Cleanup(rt.Close)
 
-			var resp string
-			if strings.Contains(tt.name, "raw-file-no-match-errors") {
-				var readErr error
-				resp, readErr = rt.sendAndReadUntilEOF(t, buildREQMODRequestWithHeaders(rt.icapURL("/multipart-no-match"), "/origin/multipart-no-match", body, map[string]string{"Content-Type": contentType}))
-				if !errors.Is(readErr, io.EOF) {
-					t.Fatalf("expected EOF from error response, got %v", readErr)
-				}
-			} else {
-				resp = rt.sendAndReadUntilFinalChunk(t, buildREQMODRequestWithHeaders(rt.icapURL("/multipart-no-match"), "/origin/multipart-no-match", body, map[string]string{"Content-Type": contentType}))
-			}
+			resp := rt.sendAndReadUntilFinalChunk(t, buildREQMODRequestWithHeaders(rt.icapURL("/multipart-no-match"), "/origin/multipart-no-match", body, map[string]string{"Content-Type": contentType}))
 			for _, want := range tt.wantContains {
 				assertContains(t, resp, want)
 			}

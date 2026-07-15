@@ -118,7 +118,7 @@ func TestShutdownTimeout_ActiveRequests(t *testing.T) {
 		conns = append(conns, conn)
 
 		// Send a request to each connection
-		request := "OPTIONS icap://localhost/ ICAP/1.0\r\nHost: localhost\r\n\r\n"
+		request := "OPTIONS icap://localhost/ ICAP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n"
 		_, err = conn.Write([]byte(request))
 		require.NoError(t, err)
 	}
@@ -441,7 +441,7 @@ func TestShutdownTimeout_LongTimeout(t *testing.T) {
 	conn, err := net.Dial("tcp", srv.Addr().String())
 	require.NoError(t, err)
 
-	request := "OPTIONS icap://localhost/ ICAP/1.0\r\nHost: localhost\r\n\r\n"
+	request := "OPTIONS icap://localhost/ ICAP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n"
 	_, err = conn.Write([]byte(request))
 	require.NoError(t, err)
 

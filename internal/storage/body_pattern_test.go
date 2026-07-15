@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"io"
 	"regexp"
@@ -19,7 +20,7 @@ func TestBodyPatternMatchesUsesBoundedRead(t *testing.T) {
 	pattern := regexp.MustCompile("x")
 	options := BodyPatternOptions{Limit: limit, LimitAction: BodyPatternLimitActionNoMatch}
 
-	matched, err := bodyPatternMatches(pattern, msg, options)
+	matched, err := bodyPatternMatches(context.Background(), pattern, msg, options)
 	if err != nil {
 		t.Fatalf("bodyPatternMatches() error = %v", err)
 	}
@@ -37,7 +38,7 @@ func TestBodyPatternMatchesUnlimitedUsesUnboundedRead(t *testing.T) {
 	pattern := regexp.MustCompile("x")
 	options := BodyPatternOptions{Limit: -1, LimitAction: BodyPatternLimitActionNoMatch}
 
-	matched, err := bodyPatternMatches(pattern, msg, options)
+	matched, err := bodyPatternMatches(context.Background(), pattern, msg, options)
 	if err != nil {
 		t.Fatalf("bodyPatternMatches() error = %v", err)
 	}
@@ -54,7 +55,7 @@ func TestScenarioRegistryBodyPatternLimitNoMatch(t *testing.T) {
 	addBodyPatternScenario(t, registry)
 	req := bodyPatternTestRequest(strings.NewReader("malware-payload"))
 
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -68,7 +69,7 @@ func TestScenarioRegistryBodyPatternLimitError(t *testing.T) {
 	addBodyPatternScenario(t, registry)
 	req := bodyPatternTestRequest(strings.NewReader("malware-payload"))
 
-	_, err := registry.Match(req)
+	_, err := registry.Match(context.Background(), req)
 	if !errors.Is(err, ErrBodyPatternLimitExceeded) {
 		t.Fatalf("Match() error = %v, want ErrBodyPatternLimitExceeded", err)
 	}
@@ -83,7 +84,7 @@ func TestRegistriesUseConfiguredBodyPatternLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			reader := &countingBodyPatternReader{remaining: 64}
 			addBodyPatternScenario(t, registry)
-			_, err := registry.Match(bodyPatternTestRequest(reader))
+			_, err := registry.Match(context.Background(), bodyPatternTestRequest(reader))
 			if err != nil {
 				t.Fatalf("Match() error = %v", err)
 			}
@@ -127,7 +128,7 @@ func TestBodyPatternLimitActionNormalizesCase(t *testing.T) {
 	pattern := regexp.MustCompile("malware")
 	options := BodyPatternOptions{Limit: 8, LimitAction: "No_Match"}
 
-	matched, err := bodyPatternMatches(pattern, msg, options)
+	matched, err := bodyPatternMatches(context.Background(), pattern, msg, options)
 	if err != nil {
 		t.Fatalf("bodyPatternMatches() error = %v", err)
 	}
@@ -142,7 +143,7 @@ func TestBodyPatternNoMatchReturnsReadErrors(t *testing.T) {
 	pattern := regexp.MustCompile("malware")
 	options := BodyPatternOptions{Limit: 8, LimitAction: BodyPatternLimitActionNoMatch}
 
-	matched, err := bodyPatternMatches(pattern, msg, options)
+	matched, err := bodyPatternMatches(context.Background(), pattern, msg, options)
 	if err == nil || !errors.Is(err, readErr) {
 		t.Fatalf("error = %v, want read failure", err)
 	}
@@ -198,7 +199,7 @@ func addResponseBodyPatternScenario(t *testing.T, registry ScenarioRegistry) {
 
 func assertMatchedScenario(t *testing.T, registry ScenarioRegistry, req *icap.Request, want string) {
 	t.Helper()
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}

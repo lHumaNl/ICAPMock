@@ -1202,8 +1202,9 @@ func TestPanicRecoveryMiddleware_ConcurrentPanics(t *testing.T) {
 	}
 }
 
-// TestPanicRecoveryMiddleware_ConnectionHeader tests that Connection: close is set.
-func TestPanicRecoveryMiddleware_ConnectionHeader(t *testing.T) {
+// TestPanicRecoveryMiddleware_KeepsConnectionReusable tests that recovered
+// panics use a framed error response without forcing connection closure.
+func TestPanicRecoveryMiddleware_KeepsConnectionReusable(t *testing.T) {
 	t.Parallel()
 
 	var logBuf syncBuffer
@@ -1224,8 +1225,14 @@ func TestPanicRecoveryMiddleware_ConnectionHeader(t *testing.T) {
 		t.Errorf("Handle() returned error: %v", err)
 	}
 
-	if connHeader, ok := resp.GetHeader("Connection"); !ok || connHeader != "close" {
-		t.Errorf("Connection header = %q, want 'close'", connHeader)
+	if connHeader, ok := resp.GetHeader("Connection"); ok {
+		t.Errorf("Connection header = %q, want no Connection header", connHeader)
+	}
+	if resp.HTTPResponse == nil {
+		t.Fatal("panic response must contain an encapsulated HTTP response")
+	}
+	if got := string(resp.HTTPResponse.Body); got != "panic recovered in ICAP mock" {
+		t.Errorf("HTTP error body = %q, want panic diagnostic", got)
 	}
 }
 
@@ -1405,9 +1412,9 @@ func TestPanicRecoveryMiddleware_NoServerCrash(t *testing.T) {
 		t.Errorf("StatusCode = %d, want 500", resp.StatusCode)
 	}
 
-	// Verify connection close header is set (server should close connection)
-	if conn, ok := resp.GetHeader("Connection"); !ok || conn != "close" {
-		t.Errorf("Connection header = %q, want 'close'", conn)
+	// Recovered panics must not make a persistent connection unusable.
+	if conn, ok := resp.GetHeader("Connection"); ok {
+		t.Errorf("Connection header = %q, want no Connection header", conn)
 	}
 }
 
@@ -1601,9 +1608,9 @@ func TestPanicRecoveryMiddleware_ResponseBody(t *testing.T) {
 		t.Errorf("Proto = %q, want 'ICAP/1.0'", resp.Proto)
 	}
 
-	// Verify connection close header
-	if conn, ok := resp.GetHeader("Connection"); !ok || conn != "close" {
-		t.Errorf("Connection header = %q, want 'close'", conn)
+	// Verify the connection remains reusable.
+	if conn, ok := resp.GetHeader("Connection"); ok {
+		t.Errorf("Connection header = %q, want no Connection header", conn)
 	}
 }
 

@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -212,7 +213,7 @@ scenarios:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scenario, err := registry.Match(tt.req)
+			scenario, err := registry.Match(context.Background(), tt.req)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Match() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -255,7 +256,7 @@ scenarios:
 		URI:         "icap://localhost/scan",
 		HTTPRequest: httpMsg,
 	}
-	scenario, err := registry.Match(req1)
+	scenario, err := registry.Match(context.Background(), req1)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -299,7 +300,7 @@ scenarios:
 		Method: icap.MethodREQMOD,
 		URI:    "icap://localhost/reqmod",
 	}
-	scenario, err := registry.Match(reqmodReq)
+	scenario, err := registry.Match(context.Background(), reqmodReq)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -312,7 +313,7 @@ scenarios:
 		Method: icap.MethodRESPMOD,
 		URI:    "icap://localhost/respmod",
 	}
-	scenario, err = registry.Match(respmodReq)
+	scenario, err = registry.Match(context.Background(), respmodReq)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -353,7 +354,7 @@ scenarios:
 	}
 	req.Header.Set("X-Special-Client", "true")
 
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -367,7 +368,7 @@ scenarios:
 		URI:    "icap://localhost/reqmod",
 		Header: icap.NewHeader(),
 	}
-	scenario, err = registry.Match(req2)
+	scenario, err = registry.Match(context.Background(), req2)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -574,7 +575,7 @@ func TestScenarioRegistry_DefaultScenario(t *testing.T) {
 		Method: icap.MethodREQMOD,
 		URI:    "icap://localhost/any",
 	}
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -654,7 +655,7 @@ func TestScenarioRegistry_ThreadSafety(_ *testing.T) {
 				Method: icap.MethodREQMOD,
 				URI:    "icap://localhost/test",
 			}
-			_, _ = registry.Match(req)
+			_, _ = registry.Match(context.Background(), req)
 			done <- true
 		}()
 	}

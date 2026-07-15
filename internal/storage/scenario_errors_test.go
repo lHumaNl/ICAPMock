@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -505,7 +506,7 @@ scenarios:
 func TestScenarioRegistry_Match_DetailedError(t *testing.T) {
 	t.Run("nil request", func(t *testing.T) {
 		registry := NewScenarioRegistry()
-		_, err := registry.Match(nil)
+		_, err := registry.Match(context.Background(), nil)
 
 		if err == nil {
 			t.Fatal("Match() should return error for nil request")
@@ -557,7 +558,7 @@ scenarios:
 			},
 		}
 
-		_, err := registry.Match(req)
+		_, err := registry.Match(context.Background(), req)
 
 		if err == nil {
 			t.Fatal("Match() should return error when no scenario matches")

@@ -4,6 +4,7 @@ package processor
 
 import (
 	"context"
+	"time"
 
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/requestinfo"
@@ -11,6 +12,59 @@ import (
 	"github.com/icap-mock/icap-mock/internal/util"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+func (p *MockProcessor) recordProcessingStageDuration(req *icap.Request, stage string, duration time.Duration) {
+	if p.metrics == nil || req == nil {
+		return
+	}
+	p.metrics.RecordScenarioProcessingStageDuration(p.server, req.Method, stage, duration)
+}
+
+func (p *MockProcessor) logSlowScenarioMatch(
+	ctx context.Context,
+	req *icap.Request,
+	scenario *storage.Scenario,
+	duration time.Duration,
+) {
+	if p.logger == nil || req == nil || duration < slowScenarioMatchThreshold {
+		return
+	}
+	attrs := []any{
+		"server", p.server,
+		"method", req.Method,
+		"duration_ms", float64(duration.Microseconds()) / 1000,
+		"context_expired", ctx.Err() != nil,
+		"uri", req.URI,
+		"icap_uri_length", len(req.URI),
+	}
+	if req.ClientIP != "" {
+		attrs = append(attrs, "client_ip", req.ClientIP)
+	}
+	if req.HTTPRequest != nil {
+		attrs = append(attrs, "http_uri_length", len(req.HTTPRequest.URI))
+	}
+	if scenario != nil {
+		attrs = append(attrs, "scenario", scenario.Name)
+	}
+	p.logger.WarnContext(ctx, "slow scenario match", attrs...)
+}
+
+func (p *MockProcessor) logScenarioMatchStillRunning(ctx context.Context, req *icap.Request, duration time.Duration) {
+	if p.logger == nil || req == nil {
+		return
+	}
+	attrs := []any{
+		"server", p.server,
+		"method", req.Method,
+		"duration_ms", float64(duration.Microseconds()) / 1000,
+		"context_expired", ctx.Err() != nil,
+		"uri", req.URI,
+	}
+	if req.ClientIP != "" {
+		attrs = append(attrs, "client_ip", req.ClientIP)
+	}
+	p.logger.WarnContext(ctx, "scenario match still running", attrs...)
+}
 
 func (p *MockProcessor) logScenarioMatched(
 	ctx context.Context,

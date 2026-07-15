@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
@@ -20,6 +21,8 @@ import (
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+const slowScenarioMatchThreshold = time.Second
 
 // MockProcessor processes requests by matching them against scenarios
 // defined in the ScenarioRegistry. It returns responses based on the
@@ -106,8 +109,40 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 	}
 
 	// Find matching scenario
-	scenario, err := p.registry.Match(req)
+	matchStart := time.Now()
+	scenario, err := func() (*storage.Scenario, error) {
+		var watchdogMu sync.Mutex
+		active := true
+		watchdog := time.AfterFunc(slowScenarioMatchThreshold, func() {
+			watchdogMu.Lock()
+			defer watchdogMu.Unlock()
+			if active {
+				p.logScenarioMatchStillRunning(ctx, req, time.Since(matchStart))
+			}
+		})
+		defer func() {
+			watchdogMu.Lock()
+			active = false
+			watchdogMu.Unlock()
+			watchdog.Stop()
+		}()
+		return p.registry.Match(ctx, req)
+	}()
+	matchDuration := time.Since(matchStart)
+	p.recordProcessingStageDuration(req, "match", matchDuration)
+	p.logSlowScenarioMatch(ctx, req, scenario, matchDuration)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			p.logProcessorError(
+				ctx, req, metrics.RequestErrorStageContext, processorContextErrorType(err),
+				metrics.NoScenarioMetricLabel, metrics.OutcomeError, err,
+			)
+			p.recordRequestError(
+				req, metrics.RequestErrorStageContext, processorContextErrorType(err),
+				metrics.NoScenarioMetricLabel, metrics.OutcomeError,
+			)
+			return nil, err
+		}
 		if errors.Is(err, storage.ErrNoMatch) {
 			p.logProcessorError(
 				ctx, req, metrics.RequestErrorStageProcessorMatch, metrics.RequestErrorTypeNoScenarioMatch,
@@ -263,7 +298,9 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 	// Build response
 	effectiveScenario := *scenario
 	effectiveScenario.Response = *selectedResponse
+	buildStart := time.Now()
 	resp, err := p.buildResponse(&effectiveScenario, req)
+	p.recordProcessingStageDuration(req, "build", time.Since(buildStart))
 	if err != nil {
 		p.logProcessorError(
 			ctx, req, metrics.RequestErrorStageProcessorBuild, metrics.RequestErrorTypeResponseBuildFailed,

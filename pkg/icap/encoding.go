@@ -64,6 +64,7 @@ var crlfPool = sync.Pool{
 type ChunkedReader struct {
 	err      error
 	r        *bufio.Reader
+	closer   io.Closer
 	n        int64
 	finished bool
 }
@@ -72,11 +73,20 @@ type ChunkedReader struct {
 // If r is already a *bufio.Reader with sufficient buffer size, it is reused
 // to avoid double buffering.
 func NewChunkedReader(r io.Reader) *ChunkedReader {
+	closer, _ := r.(io.Closer)
 	br, ok := r.(*bufio.Reader)
 	if !ok || br.Size() < ChunkBufferSize {
 		br = bufio.NewReaderSize(r, ChunkBufferSize)
 	}
-	return &ChunkedReader{r: br}
+	return &ChunkedReader{r: br, closer: closer}
+}
+
+// Close interrupts an in-progress read when the underlying reader is closable.
+func (cr *ChunkedReader) Close() error {
+	if cr.closer == nil {
+		return nil
+	}
+	return cr.closer.Close()
 }
 
 // Read implements io.Reader. It reads from the chunked stream.

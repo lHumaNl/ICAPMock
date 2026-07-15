@@ -434,6 +434,7 @@ func (s *ICAPServer) acceptLoop() {
 				// Connection limit reached, reject
 				if s.metrics != nil {
 					s.metrics.RecordConnectionRejected(s.metricsServerName, "max_connections")
+					s.metrics.RecordConnectionClosed(s.metricsServerName, "max_connections")
 				}
 				_ = netConn.Close()
 				continue
@@ -472,6 +473,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 	// Create connection-scoped context that cancels on server shutdown
 	// This ensures all in-flight requests are canceled during graceful shutdown
 	connCtx, connCancel := context.WithCancel(s.serverCtx)
+	closeReason := "handler_exit"
 
 	// No extra goroutine needed to cancel on server stop:
 	// The main request loop checks stopChan and returns, which triggers
@@ -479,11 +481,19 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 
 	defer func() {
 		if r := recover(); r != nil {
+			closeReason = "panic"
 			s.logger.Error("panic in connection handler",
 				"error", r,
 				"remote_addr", conn.RemoteAddr(),
 			)
 			// connCancel() will be called by the defer below
+		}
+		if closeReason != "panic" {
+			select {
+			case <-s.stopChan:
+				closeReason = "shutdown"
+			default:
+			}
 		}
 		// Cancel connection-scoped context to stop any ongoing operations
 		connCancel()
@@ -491,6 +501,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 		s.pool.Remove(conn)
 		if s.metrics != nil {
 			s.metrics.DecActiveConnectionsForServer(s.metricsServerName)
+			s.metrics.RecordConnectionClosed(s.metricsServerName, closeReason)
 		}
 		<-s.semaphore // Release slot
 		s.wg.Done()
@@ -501,13 +512,16 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 	for {
 		select {
 		case <-s.stopChan:
+			closeReason = "shutdown"
 			return
 		case <-connCtx.Done():
+			closeReason = "shutdown"
 			// Server is shutting down, stop handling
 			return
 		default:
 			keepAliveWait := requestCount > 0
 			if err := s.setWaitReadDeadline(conn, keepAliveWait); err != nil {
+				closeReason = connectionReadCloseReason(err, keepAliveWait)
 				return
 			}
 
@@ -518,6 +532,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			req, err := parseICAPRequest(requestReader)
 			if err != nil {
 				s.handleParseError(conn, err, requestReader.Started(), keepAliveWait)
+				closeReason = parseErrorCloseReason(err, requestReader.Started(), keepAliveWait)
 				return
 			}
 			// Extract client IP from the peer socket only.
@@ -525,6 +540,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			req.ClientIP = extractClientIP(conn.RemoteAddr())
 
 			if receiveErr := s.receiveRequestBodies(conn, req); receiveErr != nil {
+				closeReason = "body_receive_error"
 				errorType := bodyReceiveErrorType(receiveErr)
 				s.logRequestError(context.Background(), req, metrics.RequestErrorStageBodyReceive, errorType, receiveErr)
 				s.recordRequestError(
@@ -581,11 +597,13 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				_ = conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout))
 			}
 			if err := writeResponseFromICAP(conn.Writer(), resp); err != nil {
+				closeReason = "write_error"
 				releaseLifecycleBodies(req, resp)
 				return
 			}
 			if drainAfterResponse {
 				if err := s.drainRequestBodies(conn, req); err != nil {
+					closeReason = "body_drain_error"
 					s.logger.Debug("closing connection after request body drain failed",
 						"remote_addr", conn.RemoteAddr(),
 						"error", err,
@@ -601,11 +619,21 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			releaseLifecycleBodies(req, resp)
 
 			if requestClose {
+				if headerHasToken(req.Header, "Connection", "close") {
+					closeReason = "client_requested"
+				} else {
+					closeReason = "preview_body_unread"
+				}
 				return
 			}
 
 			// Check for explicit or internal response close signal.
 			if shouldCloseAfterResponse(resp) {
+				if resp.CloseAfterWrite() {
+					closeReason = "stream_fin"
+				} else {
+					closeReason = "response_connection_close"
+				}
 				return
 			}
 			requestCount++
@@ -705,9 +733,8 @@ func (s *ICAPServer) forceCloseAllConnections() {
 
 	// Close each connection
 	for _, conn := range conns {
-		// Connection.Close() is safe to call multiple times (uses sync.Once)
-		// It will flush any pending data and close the underlying net.Conn
-		if closeErr := conn.Close(); closeErr != nil {
+		// Abort interrupts any in-progress write before releasing pooled buffers.
+		if closeErr := conn.Abort(); closeErr != nil {
 			// Log error but continue closing other connections
 			s.logger.Debug("error closing connection during force shutdown",
 				"error", closeErr,

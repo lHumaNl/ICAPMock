@@ -53,6 +53,8 @@ type pooledBuffer struct {
 	buf    []byte
 	rpos   int
 	wpos   int
+	mu     sync.Mutex
+	closed bool
 }
 
 // newPooledReadBuffer creates a new pooled buffer for reading.
@@ -72,6 +74,11 @@ func newPooledReadBuffer(rw io.ReadWriter, p *pool.SlicePool) *pooledBuffer {
 // Read reads data into p, using the internal buffer for efficiency.
 // It implements the io.Reader interface.
 func (pb *pooledBuffer) Read(p []byte) (int, error) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if pb.closed {
+		return 0, io.ErrClosedPipe
+	}
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -116,6 +123,15 @@ func (pb *pooledBuffer) Write(p []byte) (int, error) {
 	return pb.rw.Write(p)
 }
 
+// Close interrupts an underlying network read without releasing the pooled
+// buffer; Connection cleanup returns the buffer after active reads exit.
+func (pb *pooledBuffer) Close() error {
+	if closer, ok := pb.rw.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 // Flush flushes any buffered write data.
 func (pb *pooledBuffer) Flush() error {
 	// No buffered writes in current implementation
@@ -124,6 +140,11 @@ func (pb *pooledBuffer) Flush() error {
 
 // ReadByte reads a single byte from the buffer.
 func (pb *pooledBuffer) ReadByte() (byte, error) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if pb.closed {
+		return 0, io.ErrClosedPipe
+	}
 	// Return any saved error from previous read
 	if pb.err != nil {
 		err := pb.err
@@ -155,12 +176,19 @@ func (pb *pooledBuffer) ReadByte() (byte, error) {
 
 // Buffered returns the number of bytes that can be read from the buffer.
 func (pb *pooledBuffer) Buffered() int {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
 	return pb.wpos - pb.rpos
 }
 
 // ReadLine reads until newline, returning the line without the newline.
 // It scans the buffered data for '\n' to avoid per-byte append allocations.
 func (pb *pooledBuffer) ReadLine() ([]byte, error) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if pb.closed {
+		return nil, io.ErrClosedPipe
+	}
 	var line []byte
 	for {
 		// Ensure we have data in the buffer
@@ -218,6 +246,11 @@ func (pb *pooledBuffer) ReadLine() ([]byte, error) {
 // ReadBytes reads until delimiter, returning the bytes including the delimiter.
 // It scans the buffered data for the delimiter to avoid per-byte append allocations.
 func (pb *pooledBuffer) ReadBytes(delim byte) ([]byte, error) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if pb.closed {
+		return nil, io.ErrClosedPipe
+	}
 	var result []byte
 	for {
 		// Ensure we have data in the buffer
@@ -273,6 +306,8 @@ func (pb *pooledBuffer) ReadString(delim byte) (string, error) {
 
 // Reset resets the buffer for reuse.
 func (pb *pooledBuffer) Reset(rw io.ReadWriter) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
 	pb.rpos = 0
 	pb.wpos = 0
 	pb.rw = rw
@@ -280,6 +315,12 @@ func (pb *pooledBuffer) Reset(rw io.ReadWriter) {
 
 // close returns the buffer to the pool.
 func (pb *pooledBuffer) close() {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if pb.closed {
+		return
+	}
+	pb.closed = true
 	if pb.bufPtr != nil && pb.pool != nil {
 		pb.pool.Put(pb.bufPtr)
 		pb.bufPtr = nil
@@ -304,6 +345,8 @@ type bufferedWriter struct {
 	bufPtr *[]byte
 	pool   *pool.SlicePool
 	buf    []byte
+	mu     sync.Mutex
+	closed bool
 }
 
 type activityReader struct {
@@ -325,6 +368,13 @@ func (r activityReader) ReadString(delim byte) (string, error) {
 		r.touch()
 	}
 	return s, err
+}
+
+func (r activityReader) Close() error {
+	if closer, ok := r.reader.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 type activityWriter struct {
@@ -369,6 +419,15 @@ func newBufferedWriter(w io.Writer, p *pool.SlicePool) *bufferedWriter {
 // first and then writes directly to reduce memory copies.
 // This reduces syscall overhead by coalescing small writes.
 func (bw *bufferedWriter) Write(p []byte) (int, error) {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return 0, io.ErrClosedPipe
+	}
+	return bw.writeLocked(p)
+}
+
+func (bw *bufferedWriter) writeLocked(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -380,7 +439,7 @@ func (bw *bufferedWriter) Write(p []byte) (int, error) {
 		// For writes larger than the entire buffer capacity, bypass entirely
 		if len(p) >= cap(bw.buf) {
 			// Flush any existing buffered data first
-			if err := bw.Flush(); err != nil {
+			if err := bw.flushLocked(); err != nil {
 				return 0, err
 			}
 			// Write directly to avoid extra copy
@@ -388,7 +447,7 @@ func (bw *bufferedWriter) Write(p []byte) (int, error) {
 		}
 
 		// Write fits in buffer after flush - flush and then buffer
-		if err := bw.Flush(); err != nil {
+		if err := bw.flushLocked(); err != nil {
 			return 0, err
 		}
 	}
@@ -402,6 +461,11 @@ func (bw *bufferedWriter) Write(p []byte) (int, error) {
 // It implements the io.StringWriter interface.
 // This is more efficient than converting to []byte first.
 func (bw *bufferedWriter) WriteString(s string) (int, error) {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return 0, io.ErrClosedPipe
+	}
 	if s == "" {
 		return 0, nil
 	}
@@ -413,7 +477,7 @@ func (bw *bufferedWriter) WriteString(s string) (int, error) {
 		// For writes larger than the entire buffer capacity, bypass entirely
 		if len(s) >= cap(bw.buf) {
 			// Flush any existing buffered data first
-			if err := bw.Flush(); err != nil {
+			if err := bw.flushLocked(); err != nil {
 				return 0, err
 			}
 			// Write directly to avoid extra copy
@@ -421,7 +485,7 @@ func (bw *bufferedWriter) WriteString(s string) (int, error) {
 		}
 
 		// Write fits in buffer after flush - flush and then buffer
-		if err := bw.Flush(); err != nil {
+		if err := bw.flushLocked(); err != nil {
 			return 0, err
 		}
 	}
@@ -435,6 +499,15 @@ func (bw *bufferedWriter) WriteString(s string) (int, error) {
 // It should be called before response completion to ensure all data is sent.
 // After Flush, the buffer is reset and ready for new writes.
 func (bw *bufferedWriter) Flush() error {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return io.ErrClosedPipe
+	}
+	return bw.flushLocked()
+}
+
+func (bw *bufferedWriter) flushLocked() error {
 	if len(bw.buf) == 0 {
 		return nil
 	}
@@ -447,11 +520,29 @@ func (bw *bufferedWriter) Flush() error {
 
 // close flushes any remaining data and returns the buffer to the pool.
 // After calling close, the bufferedWriter should not be used.
-func (bw *bufferedWriter) close() {
-	// Flush any remaining buffered data
-	_ = bw.Flush() // Ignore error - connection is closing anyway
+func (bw *bufferedWriter) close() error {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return nil
+	}
+	err := bw.flushLocked()
+	bw.closed = true
+	bw.releaseBufferLocked()
+	return err
+}
 
-	// Return buffer to pool
+func (bw *bufferedWriter) closeDiscard() {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	if bw.closed {
+		return
+	}
+	bw.closed = true
+	bw.releaseBufferLocked()
+}
+
+func (bw *bufferedWriter) releaseBufferLocked() {
 	if bw.bufPtr != nil && bw.pool != nil {
 		bw.pool.Put(bw.bufPtr)
 		bw.bufPtr = nil
@@ -497,6 +588,8 @@ type Connection struct {
 	closedMu sync.Mutex
 	// once ensures Close is only called once.
 	once sync.Once
+	// socketOnce lets Abort interrupt a graceful Close that is blocked writing.
+	socketOnce sync.Once
 	// lastActivityNano stores the last activity timestamp as UnixNano using atomic operations.
 	// Used for idle timeout detection without mutex overhead.
 	lastActivityNano atomic.Int64
@@ -579,9 +672,24 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 
 // Close closes the connection.
 // It is safe to call Close multiple times.
-// It flushes any pending data in the write buffer before closing
-// and returns pooled buffers to reduce GC pressure.
+// It flushes pending buffered data before closing the socket.
 func (c *Connection) Close() error {
+	return c.close(false)
+}
+
+// Abort closes the socket before releasing buffers so any concurrent blocked
+// write is interrupted. It is used by forced shutdown paths.
+func (c *Connection) Abort() error {
+	var socketErr error
+	c.socketOnce.Do(func() { socketErr = c.conn.Close() })
+	cleanupErr := c.close(true)
+	if socketErr != nil {
+		return socketErr
+	}
+	return cleanupErr
+}
+
+func (c *Connection) close(abort bool) error {
 	var err error
 	c.once.Do(func() {
 		c.SetState(ConnStateClosed)
@@ -589,28 +697,22 @@ func (c *Connection) Close() error {
 		c.closed = true
 		c.closedMu.Unlock()
 
-		// Flush any remaining data in the write buffer before closing
-		if flushErr := c.writer.Flush(); flushErr != nil {
-			// Log flush error but continue with close
-			// We still want to close the connection even if flush fails
-			err = flushErr
-		}
-
-		if closeErr := c.conn.Close(); closeErr != nil {
-			// Close error takes precedence if no flush error
-			if err == nil {
-				err = closeErr
+		if abort {
+			c.writer.closeDiscard()
+		} else {
+			if writerErr := c.writer.close(); writerErr != nil {
+				err = writerErr
 			}
+			c.socketOnce.Do(func() {
+				if closeErr := c.conn.Close(); closeErr != nil && err == nil {
+					err = closeErr
+				}
+			})
 		}
 
 		// Return pooled buffers to reduce GC pressure
 		if c.reader != nil {
 			c.reader.close()
-			c.reader = nil
-		}
-		if c.writer != nil {
-			c.writer.close()
-			c.writer = nil
 		}
 	})
 	return err
@@ -732,7 +834,7 @@ func (p *ConnectionPool) CloseAll(_ context.Context) {
 
 	// Close all connections
 	for _, conn := range conns {
-		_ = conn.Close()
+		_ = conn.Abort()
 		// Mark as done in wait group
 		p.wg.Done()
 	}

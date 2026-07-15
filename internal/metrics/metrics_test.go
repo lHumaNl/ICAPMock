@@ -515,6 +515,44 @@ func TestCollector_ActiveConnections(t *testing.T) {
 	}
 }
 
+func TestCollector_RecordConnectionClosed(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordConnectionClosed("edge", "stream_fin")
+	collector.RecordConnectionClosed("edge", "unbounded reason")
+	if got := metricValue(t, reg, "icap_connection_closes_total", map[string]string{
+		"server": "edge", "reason": "stream_fin",
+	}); got != 1 {
+		t.Errorf("connection closes = %v, want 1", got)
+	}
+	if got := metricValue(t, reg, "icap_connection_closes_total", map[string]string{
+		"server": "edge", "reason": unknownMetricLabel,
+	}); got != 1 {
+		t.Errorf("unknown connection closes = %v, want 1", got)
+	}
+}
+
+func TestCollector_RecordScenarioProcessingStageDuration(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordScenarioProcessingStageDuration("edge", "REQMOD", "match", 250*time.Millisecond)
+	collector.RecordScenarioProcessingStageDuration("edge", "REQMOD", "unbounded stage", time.Millisecond)
+	assertHistogramCount(t, reg, "icap_scenario_processing_stage_duration_seconds", map[string]string{
+		"server": "edge", "method": "REQMOD", "stage": "match",
+	}, 1)
+	assertHistogramCount(t, reg, "icap_scenario_processing_stage_duration_seconds", map[string]string{
+		"server": "edge", "method": "REQMOD", "stage": unknownMetricLabel,
+	}, 1)
+}
+
 func TestCollector_RecordScenarioRequest(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := NewCollector(reg)

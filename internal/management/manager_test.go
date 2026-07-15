@@ -85,7 +85,7 @@ func TestLoadScenarioDirectoryPreservesConfiguredDefaultFallback(t *testing.T) {
 		t.Fatalf("LoadScenarioDirectory() error = %v", err)
 	}
 
-	scenario, err := registry.Match(&icap.Request{
+	scenario, err := registry.Match(context.Background(), &icap.Request{
 		Method: icap.MethodREQMOD,
 		URI:    "icap://127.0.0.1:1344/unmatched",
 		Header: icap.NewHeader(),

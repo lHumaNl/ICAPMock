@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -94,6 +95,51 @@ func writePersistentICAPRequest(t *testing.T, conn net.Conn, addr string) {
 	request := "OPTIONS icap://" + addr + "/options ICAP/1.0\r\nHost: localhost\r\n\r\n"
 	_, err := conn.Write([]byte(request))
 	require.NoError(t, err)
+}
+
+func TestErrorResponseKeepsConnectionReusable(t *testing.T) {
+	cfg := &config.ServerConfig{
+		Host: "127.0.0.1", Port: 0, ReadTimeout: time.Second, WriteTimeout: time.Second,
+		IdleTimeout: time.Second, MaxConnections: 10, MaxBodySize: 1024, Streaming: true,
+	}
+	srv, err := NewServer(cfg, NewConnectionPool(), nil)
+	require.NoError(t, err)
+	require.NoError(t, srv.Start(context.Background()))
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Stop(stopCtx)
+	})
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	require.NoError(t, conn.SetDeadline(time.Now().Add(2*time.Second)))
+	reader := bufio.NewReader(conn)
+
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	status, headers := readICAPResponseHeaders(t, reader)
+	assert.Contains(t, status, " 500 ")
+	assert.NotContains(t, strings.Join(headers, "\n"), "Connection: close")
+	assert.Contains(t, strings.Join(headers, "\n"), "Encapsulated: res-hdr=0, res-body=")
+
+	assert.Contains(t, readICAPLine(t, reader), "HTTP/1.1 500")
+	for readICAPLine(t, reader) != "" {
+	}
+	chunkSizeLine := readICAPLine(t, reader)
+	chunkSize, err := strconv.ParseInt(chunkSizeLine, 16, 64)
+	require.NoError(t, err)
+	body := make([]byte, chunkSize)
+	_, err = io.ReadFull(reader, body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "No router configured")
+	assert.Equal(t, "", readICAPLine(t, reader))
+	assert.Equal(t, "0", readICAPLine(t, reader))
+	assert.Equal(t, "", readICAPLine(t, reader))
+
+	writePersistentICAPRequest(t, conn, srv.Addr().String())
+	secondStatus, _ := readICAPResponseHeaders(t, reader)
+	assert.Contains(t, secondStatus, "ICAP/1.0 500")
 }
 
 func TestNewServer(t *testing.T) {

@@ -52,12 +52,14 @@ type Collector struct {
 	activeConnections          *prometheus.GaugeVec
 	idleConnectionsClosedTotal *prometheus.CounterVec
 	connectionRejectionsTotal  *prometheus.CounterVec
+	connectionClosesTotal      *prometheus.CounterVec
 
 	// Runtime metrics
 	goroutinesCurrent prometheus.Gauge
 
 	// Mock metrics
 	scenarioResponseDuration *prometheus.HistogramVec
+	scenarioStageDuration    *prometheus.HistogramVec
 	scenariosLoaded          *prometheus.GaugeVec
 	scenariosLoadedLabels    map[string]struct{}
 	scenarioLabels           *scenarioLabelLimiter
@@ -223,6 +225,14 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			},
 			[]string{"server", "reason"},
 		),
+		connectionClosesTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "icap",
+				Name:      "connection_closes_total",
+				Help:      "Total number of closed ICAP connections by server and bounded reason.",
+			},
+			[]string{"server", "reason"},
+		),
 
 		// Runtime metrics
 		goroutinesCurrent: prometheus.NewGauge(
@@ -242,6 +252,15 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 				Buckets:   scenarioResponseDurationBuckets,
 			},
 			[]string{"content_type", "method", "outcome", "server", "response", "scenario"},
+		),
+		scenarioStageDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "icap",
+				Name:      "scenario_processing_stage_duration_seconds",
+				Help:      "Scenario processor stage duration in seconds by server, method, and bounded stage.",
+				Buckets:   scenarioResponseDurationBuckets,
+			},
+			[]string{"server", "method", "stage"},
 		),
 		scenariosLoaded: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -451,8 +470,10 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		c.activeConnections,
 		c.idleConnectionsClosedTotal,
 		c.connectionRejectionsTotal,
+		c.connectionClosesTotal,
 		c.goroutinesCurrent,
 		c.scenarioResponseDuration,
+		c.scenarioStageDuration,
 		c.scenariosLoaded,
 		c.streamingActive,
 		c.streamingBytesTotal,
@@ -533,6 +554,20 @@ func (c *Collector) RecordRequestSizeForServer(server, method string, sizeBytes 
 	c.requestSize.WithLabelValues(normalizedMetricLabel(server), method).Observe(float64(sizeBytes))
 }
 
+// RecordScenarioProcessingStageDuration records a bounded processor stage duration.
+func (c *Collector) RecordScenarioProcessingStageDuration(server, method, stage string, duration time.Duration) {
+	c.scenarioStageDuration.WithLabelValues(normalizedMetricLabel(server), method, normalizedProcessorStage(stage)).Observe(duration.Seconds())
+}
+
+func normalizedProcessorStage(stage string) string {
+	switch stage {
+	case "match", "build":
+		return stage
+	default:
+		return unknownMetricLabel
+	}
+}
+
 // RecordPreviewRequest increments the counter for preview requests.
 //
 // This method is safe for concurrent use.
@@ -601,6 +636,23 @@ func (c *Collector) RecordIdleConnectionClosedForServer(server, reason string) {
 // RecordConnectionRejected increments rejected connection counts for the server.
 func (c *Collector) RecordConnectionRejected(server, reason string) {
 	c.connectionRejectionsTotal.WithLabelValues(normalizedMetricLabel(server), reason).Inc()
+}
+
+// RecordConnectionClosed increments closed connection counts by server and bounded reason.
+func (c *Collector) RecordConnectionClosed(server, reason string) {
+	c.connectionClosesTotal.WithLabelValues(normalizedMetricLabel(server), normalizedConnectionCloseReason(reason)).Inc()
+}
+
+func normalizedConnectionCloseReason(reason string) string {
+	switch reason {
+	case "body_drain_error", "body_receive_error", "client_closed", "client_closed_mid_request",
+		"client_requested", "handler_exit", "idle_timeout", "malformed_request", "max_connections",
+		"panic", "preview_body_unread", "read_error", "read_timeout", "response_connection_close",
+		"shutdown", "stream_fin", "write_error":
+		return reason
+	default:
+		return unknownMetricLabel
+	}
 }
 
 // SetGoroutines sets the gauge tracking the current number of goroutines.

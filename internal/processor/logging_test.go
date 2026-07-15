@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -20,6 +22,66 @@ import (
 	"github.com/icap-mock/icap-mock/internal/util"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+func TestMockProcessorLogsSlowScenarioMatch(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := logger.NewWithWriter(config.LoggingConfig{Level: "info", Format: "json"}, &buf)
+	if err != nil {
+		t.Fatalf("NewWithWriter() error = %v", err)
+	}
+	proc := NewMockProcessor(storage.NewScenarioRegistry(), log)
+	proc.server = "edge"
+	req := loggedRequest()
+	req.HTTPRequest.URI = "/files/sample.exe"
+	scenario := loggedScenario()
+
+	ctx := util.WithRequestID(context.Background(), "must-not-be-logged")
+	proc.logSlowScenarioMatch(ctx, req, scenario, 2*time.Second)
+
+	entry := decodeLogEntry(t, buf.Bytes())
+	assertLogField(t, entry, "level", "WARN")
+	assertLogField(t, entry, "msg", "slow scenario match")
+	assertLogField(t, entry, "server", "edge")
+	assertLogField(t, entry, "scenario", scenario.Name)
+	assertLogField(t, entry, "client_ip", req.ClientIP)
+	assertLogField(t, entry, "uri", req.URI)
+	assertLogFieldAbsent(t, entry, "url")
+	assertLogFieldAbsent(t, entry, "request_id")
+	if got := entry["context_expired"]; got != false {
+		t.Errorf("context_expired = %v, want false", got)
+	}
+	if got := entry["http_uri_length"]; got != float64(len(req.HTTPRequest.URI)) {
+		t.Errorf("http_uri_length = %v, want %d", got, len(req.HTTPRequest.URI))
+	}
+}
+
+func TestMockProcessorWatchdogLogsWhileMatchIsRunningAndTimeoutCancelsIt(t *testing.T) {
+	var buf bytes.Buffer
+	log, err := logger.NewWithWriter(config.LoggingConfig{Level: "info", Format: "json"}, &buf)
+	if err != nil {
+		t.Fatalf("NewWithWriter() error = %v", err)
+	}
+	proc := NewMockProcessor(contextBlockingRegistry{}, log)
+	proc.server = "edge"
+	req := loggedRequest()
+	ctx, cancel := context.WithTimeout(context.Background(), 1100*time.Millisecond)
+	defer cancel()
+
+	_, err = proc.Process(ctx, req)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Process() error = %v, want context.DeadlineExceeded", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, `"msg":"scenario match still running"`) {
+		t.Fatalf("watchdog log missing from %q", output)
+	}
+	if !strings.Contains(output, `"uri":"`+req.URI+`"`) {
+		t.Fatalf("watchdog URI missing from %q", output)
+	}
+	if strings.Contains(output, `"request_id"`) {
+		t.Fatalf("watchdog must not log request_id: %q", output)
+	}
+}
 
 func TestMockProcessorLogsMatchedScenarioAtInfo(t *testing.T) {
 	var buf bytes.Buffer
@@ -205,7 +267,7 @@ type noMatchRegistry struct{}
 
 func (noMatchRegistry) Load(string) error { return nil }
 
-func (noMatchRegistry) Match(*icap.Request) (*storage.Scenario, error) {
+func (noMatchRegistry) Match(context.Context, *icap.Request) (*storage.Scenario, error) {
 	return nil, storage.ErrNoMatch
 }
 
@@ -216,6 +278,18 @@ func (noMatchRegistry) List() []*storage.Scenario { return nil }
 func (noMatchRegistry) Add(*storage.Scenario) error { return nil }
 
 func (noMatchRegistry) Remove(string) error { return nil }
+
+type contextBlockingRegistry struct{}
+
+func (contextBlockingRegistry) Load(string) error { return nil }
+func (contextBlockingRegistry) Match(ctx context.Context, _ *icap.Request) (*storage.Scenario, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (contextBlockingRegistry) Reload() error               { return nil }
+func (contextBlockingRegistry) List() []*storage.Scenario   { return nil }
+func (contextBlockingRegistry) Add(*storage.Scenario) error { return nil }
+func (contextBlockingRegistry) Remove(string) error         { return nil }
 
 func decodeLogEntry(t *testing.T, data []byte) map[string]any {
 	t.Helper()

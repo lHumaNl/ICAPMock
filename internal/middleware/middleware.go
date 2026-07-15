@@ -31,8 +31,7 @@ func PanicRecoveryMiddleware(logger *slog.Logger) handler.Middleware {
 						"method", req.Method,
 						"uri", req.URI,
 					)
-					resp = icap.NewResponse(500)
-					resp.SetHeader("Connection", "close")
+					resp = icap.NewResponseError(icap.StatusInternalServerError, "panic recovered in ICAP mock")
 					err = nil
 				}
 			}()

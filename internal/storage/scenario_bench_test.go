@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -81,7 +82,7 @@ func BenchmarkScenarioMatch_Simple(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, err := reg.Match(req)
+		_, err := reg.Match(context.Background(), req)
 		if err != nil {
 			b.Fatalf("Match() unexpected error: %v", err)
 		}
@@ -108,7 +109,7 @@ func BenchmarkScenarioMatch_Complex(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, err := reg.Match(req)
+		_, err := reg.Match(context.Background(), req)
 		if err != nil {
 			b.Fatalf("Match() unexpected error: %v", err)
 		}
@@ -135,7 +136,7 @@ func BenchmarkShardedScenarioMatch(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, err := reg.Match(req)
+		_, err := reg.Match(context.Background(), req)
 		if err != nil {
 			b.Fatalf("Match() unexpected error: %v", err)
 		}

@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -156,7 +157,7 @@ scenarios:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scenario, err := registry.Match(tt.req)
+			scenario, err := registry.Match(context.Background(), tt.req)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Match() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -197,10 +198,10 @@ scenarios:
 	}
 
 	// Первый запрос - должен быть cache miss
-	_, _ = registry.Match(req)
+	_, _ = registry.Match(context.Background(), req)
 
 	// Второй запрос - должен быть cache hit
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -413,7 +414,7 @@ func TestShardedScenarioRegistry_ThreadSafety(_ *testing.T) {
 				Method: icap.MethodREQMOD,
 				URI:    "icap://localhost/test",
 			}
-			_, _ = registry.Match(req)
+			_, _ = registry.Match(context.Background(), req)
 			done <- true
 		}()
 	}
@@ -454,7 +455,7 @@ scenarios:
 
 	// Делаем несколько запросов
 	for i := 0; i < 10; i++ {
-		_, _ = registry.Match(req)
+		_, _ = registry.Match(context.Background(), req)
 	}
 
 	metrics := registry.(*ShardedScenarioRegistry).GetMetrics()
@@ -582,13 +583,13 @@ func BenchmarkShardedScenarioRegistry_Match(b *testing.B) {
 
 	b.Run("ShardedRegistry", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = shardedReg.Match(req)
+			_, _ = shardedReg.Match(context.Background(), req)
 		}
 	})
 
 	b.Run("NormalRegistry", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = normalReg.Match(req)
+			_, _ = normalReg.Match(context.Background(), req)
 		}
 	})
 }
@@ -623,14 +624,14 @@ scenarios:
 
 	// Предварительно разогреваем кэш
 	for i := 0; i < 10; i++ {
-		_, _ = registry.Match(req)
+		_, _ = registry.Match(context.Background(), req)
 	}
 
 	b.ResetTimer()
 
 	b.Run("WithCache", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = registry.Match(req)
+			_, _ = registry.Match(context.Background(), req)
 		}
 	})
 }
@@ -668,7 +669,7 @@ func BenchmarkShardedScenarioRegistry_Concurrent(b *testing.B) {
 			URI:    "icap://localhost/api/5/test",
 		}
 		for pb.Next() {
-			_, _ = registry.Match(req)
+			_, _ = registry.Match(context.Background(), req)
 		}
 	})
 }
@@ -840,7 +841,7 @@ scenarios:
 		Method: "POST",
 	}
 
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -889,7 +890,7 @@ scenarios:
 
 	// Делаем несколько запросов
 	for i := 0; i < 5; i++ {
-		_, _ = registry.Match(req)
+		_, _ = registry.Match(context.Background(), req)
 	}
 
 	metrics := registry.GetMetrics()
@@ -934,7 +935,7 @@ scenarios:
 				Method: icap.MethodREQMOD,
 				URI:    "icap://localhost/test",
 			}
-			_, err := registry.Match(req)
+			_, err := registry.Match(context.Background(), req)
 			if err != nil {
 				errs <- err
 			}
@@ -1009,7 +1010,7 @@ func TestShardedScenarioRegistry_RaceConditionFallbackMatch(t *testing.T) {
 				Header: icap.NewHeader(),
 			}
 			req.Header.Set("X-Test-Header", "value-"+strconv.Itoa(n))
-			_, _ = registry.Match(req)
+			_, _ = registry.Match(context.Background(), req)
 			done <- true
 		}(i)
 	}
@@ -1291,7 +1292,7 @@ scenarios:
 	}
 	req.HTTPRequest.Header.Set("Content-Type", "application/x-dosexec")
 
-	s, err := registry.Match(req)
+	s, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
@@ -1314,7 +1315,7 @@ scenarios:
 		},
 	}
 	req2.HTTPRequest.Header.Set("Content-Type", "text/plain")
-	s2, err := registry.Match(req2)
+	s2, err := registry.Match(context.Background(), req2)
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
@@ -1357,7 +1358,7 @@ scenarios:
 			Header: icap.NewHeader(),
 		},
 	}
-	s, err := registry.Match(req)
+	s, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
@@ -1397,7 +1398,7 @@ scenarios:
 		Header: icap.NewHeader(),
 	}
 	req.Header.Set("X-Client-IP", "192.0.2.78")
-	s, err := registry.Match(req)
+	s, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
@@ -1438,7 +1439,7 @@ scenarios:
 		Header: icap.NewHeader(),
 		// HTTPRequest intentionally nil
 	}
-	s, err := registry.Match(req)
+	s, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match: %v", err)
 	}
@@ -1473,7 +1474,7 @@ scenarios:
 			URI:    "icap://localhost/scan?t=" + m,
 			Header: icap.NewHeader(),
 		}
-		s, err := registry.Match(req)
+		s, err := registry.Match(context.Background(), req)
 		if err != nil {
 			t.Fatalf("Match %s: %v", m, err)
 		}
@@ -1599,7 +1600,7 @@ func requireScenarioAdd(t *testing.T, registry ScenarioRegistry, scenario *Scena
 
 func requireScenarioName(t *testing.T, registry ScenarioRegistry, req *icap.Request, want string) {
 	t.Helper()
-	scenario, err := registry.Match(req)
+	scenario, err := registry.Match(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}

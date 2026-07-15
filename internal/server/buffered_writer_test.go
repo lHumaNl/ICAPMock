@@ -485,6 +485,44 @@ func TestBufferedWriter_BufferFillAndFlush(t *testing.T) {
 	}
 }
 
+func TestBufferedWriter_CloseWaitsForConcurrentWrite(t *testing.T) {
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	underlying := &mockTrackingWriter{writeFunc: func(p []byte) (int, error) {
+		close(writeStarted)
+		<-releaseWrite
+		return len(p), nil
+	}}
+	bw := newBufferedWriter(underlying, pool.BufferPool)
+
+	writeDone := make(chan error, 1)
+	largeWrite := make([]byte, 1<<20)
+	go func() {
+		_, err := bw.Write(largeWrite)
+		writeDone <- err
+	}()
+	<-writeStarted
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- bw.close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("close returned before active write completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseWrite)
+	if err := <-writeDone; err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("close() error = %v", err)
+	}
+	if _, err := bw.Write([]byte("after close")); err != io.ErrClosedPipe {
+		t.Fatalf("Write() after close error = %v, want io.ErrClosedPipe", err)
+	}
+}
+
 // mockTrackingWriter is a mock io.Writer that tracks write calls.
 type mockTrackingWriter struct {
 	writeFunc func(p []byte) (int, error)

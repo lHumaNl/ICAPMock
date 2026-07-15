@@ -3,8 +3,10 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"regexp"
@@ -87,7 +89,7 @@ type ScenarioRegistry interface {
 	// Match finds the first scenario that matches the given request.
 	// Scenarios are checked in priority order (highest first).
 	// Returns ErrNoMatch if no scenario matches.
-	Match(req *icap.Request) (*Scenario, error)
+	Match(ctx context.Context, req *icap.Request) (*Scenario, error)
 
 	// Reload reloads all scenarios from the last loaded file.
 	// Returns an error if reload fails.
@@ -729,21 +731,28 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 // Match finds the first scenario that matches the given request.
 // Scenarios are checked in priority order (highest first).
 // Returns a detailed error if no scenario matches, including what was checked.
-func (r *scenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
+func (r *scenarioRegistry) Match(ctx context.Context, req *icap.Request) (*Scenario, error) {
 	if req == nil {
 		return nil, NewScenarioMatchError(
 			"cannot match against nil request",
 			nil,
 		)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	scenarios := append([]*Scenario(nil), r.scenarios...)
+	r.mu.RUnlock()
 
 	checkedCount := 0
-	for _, s := range r.scenarios {
+	for _, s := range scenarios {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		checkedCount++
-		matched, err := r.matches(s, req)
+		matched, err := r.matches(ctx, s, req)
 		if err != nil {
 			return nil, err
 		}
@@ -761,7 +770,10 @@ func (r *scenarioRegistry) Match(req *icap.Request) (*Scenario, error) {
 }
 
 // matches checks if a scenario matches the given request.
-func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
+func (r *scenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.Request) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	// Check ICAP method
 	if !methodMatches(s.Match.Methods, req.Method) {
 		return false, nil
@@ -851,14 +863,20 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) (bool, error)
 
 	// Check body pattern - load body only if pattern exists (lazy loading)
 	if s.compiledBody != nil {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		msg := bodyPatternMessage(req)
 		if msg == nil {
 			return false, nil
 		}
-		matched, err := bodyPatternMatches(s.compiledBody, msg, r.bodyPattern)
+		matched, err := bodyPatternMatches(ctx, s.compiledBody, msg, r.bodyPattern)
 		if err != nil || !matched {
 			return false, err
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 
 	// Check client IP (exact match)
@@ -884,8 +902,21 @@ func (r *scenarioRegistry) matches(s *Scenario, req *icap.Request) (bool, error)
 	return true, nil
 }
 
-func bodyPatternMatches(pattern *regexp.Regexp, msg *icap.HTTPMessage, options BodyPatternOptions) (bool, error) {
+func bodyPatternMatches(
+	ctx context.Context,
+	pattern *regexp.Regexp,
+	msg *icap.HTTPMessage,
+	options BodyPatternOptions,
+) (bool, error) {
+	stopCancellation := func() bool { return false }
+	if closer, ok := msg.BodyReader.(io.Closer); ok {
+		stopCancellation = context.AfterFunc(ctx, func() { _ = closer.Close() })
+	}
+	defer stopCancellation()
 	body, err := readBodyForPattern(msg, options.normalized())
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
 	if err != nil {
 		return handleBodyPatternReadError(err, options.normalized())
 	}
