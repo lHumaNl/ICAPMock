@@ -4,6 +4,8 @@ package processor
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/icap-mock/icap-mock/internal/metrics"
@@ -136,9 +138,18 @@ func (p *MockProcessor) processorErrorAttrs(
 		"uri", req.URI,
 		"content_type", requestinfo.ContentTypeLabel(ctx, req),
 		"error", err.Error(),
+		"description", processorErrorDescription(err),
 	}
 	attrs = appendOptionalProcessorErrorAttrs(ctx, attrs, req, scenario, response)
 	return attrs
+}
+
+func processorErrorDescription(err error) string {
+	parts := make([]string, 0, 4)
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		parts = append(parts, current.Error())
+	}
+	return strings.Join(parts, "; caused by: ")
 }
 
 func appendOptionalProcessorErrorAttrs(

@@ -406,7 +406,15 @@ func (s *ICAPServer) acceptLoop() {
 			// The 100ms deadline allows the accept loop to check stopChan frequently
 			// during graceful shutdown, minimizing shutdown latency.
 			if s.tcpListener != nil {
-				_ = s.tcpListener.SetDeadline(time.Now().Add(100 * time.Millisecond))
+				if deadlineErr := wrapDeadlineSetupError(
+					"accept",
+					s.tcpListener.SetDeadline(time.Now().Add(100*time.Millisecond)),
+				); deadlineErr != nil {
+					s.logConnectionError(
+						context.Background(), nil, errorStageSetDeadline,
+						"deadline_setup_failed", "", deadlineErr,
+					)
+				}
 			}
 
 			netConn, err := s.listener.Accept()
@@ -522,6 +530,9 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			keepAliveWait := requestCount > 0
 			if err := s.setWaitReadDeadline(conn, keepAliveWait); err != nil {
 				closeReason = connectionReadCloseReason(err, keepAliveWait)
+				s.logConnectionError(
+					context.Background(), nil, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), err,
+				)
 				return
 			}
 
@@ -542,7 +553,13 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			if receiveErr := s.receiveRequestBodies(conn, req); receiveErr != nil {
 				closeReason = "body_receive_error"
 				errorType := bodyReceiveErrorType(receiveErr)
-				s.logRequestError(context.Background(), req, metrics.RequestErrorStageBodyReceive, errorType, receiveErr)
+				if isDeadlineSetupError(receiveErr) {
+					s.logConnectionError(
+						context.Background(), req, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), receiveErr,
+					)
+				} else {
+					s.logRequestError(context.Background(), req, metrics.RequestErrorStageBodyReceive, errorType, receiveErr)
+				}
 				s.recordRequestError(
 					context.Background(),
 					req,
@@ -594,20 +611,36 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 
 			// Write the response
 			if s.config.WriteTimeout > 0 {
-				_ = conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout))
+				if deadlineErr := wrapDeadlineSetupError(
+					"response write",
+					conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout)),
+				); deadlineErr != nil {
+					closeReason = "write_error"
+					s.logConnectionError(
+						ctx, req, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), deadlineErr,
+					)
+					releaseLifecycleBodies(req, resp)
+					return
+				}
 			}
 			if err := writeResponseFromICAP(conn.Writer(), resp); err != nil {
 				closeReason = "write_error"
+				s.logConnectionError(
+					ctx, req, errorStageWriteResponse, "response_write_failed", conn.RemoteAddr(), err,
+				)
 				releaseLifecycleBodies(req, resp)
 				return
 			}
 			if drainAfterResponse {
 				if err := s.drainRequestBodies(conn, req); err != nil {
 					closeReason = "body_drain_error"
-					s.logger.Debug("closing connection after request body drain failed",
-						"remote_addr", conn.RemoteAddr(),
-						"error", err,
-					)
+					stage := errorStageDrainBody
+					errorType := "body_drain_failed"
+					if isDeadlineSetupError(err) {
+						stage = errorStageSetDeadline
+						errorType = "deadline_setup_failed"
+					}
+					s.logConnectionError(ctx, req, stage, errorType, conn.RemoteAddr(), err)
 					releaseLifecycleBodies(req, resp)
 					return
 				}

@@ -7,10 +7,18 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 
 	metricsinternal "github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/pkg/icap"
+)
+
+const (
+	errorStageSetDeadline   = "set_deadline"
+	errorStageParseRequest  = "parse_request"
+	errorStageWriteResponse = "write_response"
+	errorStageDrainBody     = "drain_body"
 )
 
 func (s *ICAPServer) logRequestError(ctx context.Context, req *icap.Request, stage, errorType string, err error) {
@@ -18,6 +26,54 @@ func (s *ICAPServer) logRequestError(ctx context.Context, req *icap.Request, sta
 		return
 	}
 	s.logger.ErrorContext(ctx, "ICAP request error", s.requestErrorAttrs(ctx, req, stage, errorType, err)...)
+}
+
+func (s *ICAPServer) logConnectionError(
+	ctx context.Context,
+	req *icap.Request,
+	stage string,
+	errorType string,
+	remoteAddr string,
+	err error,
+) {
+	if s.logger == nil || err == nil {
+		return
+	}
+	attrs := []any{
+		"server", s.metricsServerName,
+		"stage", stage,
+		"error_type", errorType,
+		"error", err.Error(),
+		"description", errorDescription(err),
+	}
+	if remoteAddr != "" {
+		attrs = append(attrs, "remote_addr", remoteAddr)
+	}
+	if req != nil {
+		attrs = append(attrs,
+			"method", req.Method,
+			"uri", req.URI,
+			"content_type", s.canonicalContentTypeLabel(req),
+		)
+		if req.ClientIP != "" {
+			attrs = append(attrs, "client_ip", req.ClientIP)
+		}
+	}
+	if requestID := RequestIDFromContext(ctx); requestID != "" {
+		attrs = append(attrs, "request_id", requestID)
+	}
+	s.logger.ErrorContext(ctx, "ICAP connection error", attrs...)
+}
+
+func errorDescription(err error) string {
+	if err == nil {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		parts = append(parts, current.Error())
+	}
+	return strings.Join(parts, "; caused by: ")
 }
 
 func connectionReadCloseReason(err error, keepAliveWait bool) string {
@@ -80,7 +136,7 @@ func (s *ICAPServer) requestErrorAttrs(
 		"content_type", s.canonicalContentTypeLabel(req),
 	}
 	if err != nil {
-		attrs = append(attrs, "error", err.Error())
+		attrs = append(attrs, "error", err.Error(), "description", errorDescription(err))
 	}
 	if requestID := RequestIDFromContext(ctx); requestID != "" {
 		attrs = append(attrs, "request_id", requestID)

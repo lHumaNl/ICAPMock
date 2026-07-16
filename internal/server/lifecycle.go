@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,31 @@ type requestDeadlineReader struct {
 	activate  func() error
 	started   bool
 	activated bool
+}
+
+type deadlineSetupError struct {
+	operation string
+	err       error
+}
+
+func (e *deadlineSetupError) Error() string {
+	return fmt.Sprintf("setting %s deadline: %v", e.operation, e.err)
+}
+
+func (e *deadlineSetupError) Unwrap() error {
+	return e.err
+}
+
+func wrapDeadlineSetupError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &deadlineSetupError{operation: operation, err: err}
+}
+
+func isDeadlineSetupError(err error) bool {
+	var deadlineErr *deadlineSetupError
+	return errors.As(err, &deadlineErr)
 }
 
 func newRequestDeadlineReader(reader BufferedReader, activate func() error) *requestDeadlineReader {
@@ -62,8 +88,11 @@ func (r *requestDeadlineReader) activateOnce(readErr error) error {
 		return readErr
 	}
 	r.activated = true
-	if err := r.activate(); err != nil && readErr == nil {
-		return err
+	if deadlineErr := r.activate(); deadlineErr != nil {
+		if readErr != nil {
+			return errors.Join(readErr, deadlineErr)
+		}
+		return deadlineErr
 	}
 	return readErr
 }
@@ -71,16 +100,16 @@ func (r *requestDeadlineReader) activateOnce(readErr error) error {
 func (s *ICAPServer) setWaitReadDeadline(conn *Connection, keepAliveWait bool) error {
 	timeout := s.waitReadTimeout(keepAliveWait)
 	if timeout <= 0 {
-		return conn.SetReadDeadline(time.Time{})
+		return wrapDeadlineSetupError("wait read", conn.SetReadDeadline(time.Time{}))
 	}
-	return conn.SetReadDeadline(time.Now().Add(timeout))
+	return wrapDeadlineSetupError("wait read", conn.SetReadDeadline(time.Now().Add(timeout)))
 }
 
 func (s *ICAPServer) setActiveReadDeadline(conn *Connection) error {
 	if s.config.ReadTimeout <= 0 {
-		return conn.SetReadDeadline(time.Time{})
+		return wrapDeadlineSetupError("active read", conn.SetReadDeadline(time.Time{}))
 	}
-	return conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout))
+	return wrapDeadlineSetupError("active read", conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout)))
 }
 
 func (s *ICAPServer) waitReadTimeout(keepAliveWait bool) time.Duration {
@@ -94,17 +123,30 @@ func (s *ICAPServer) waitReadTimeout(keepAliveWait bool) time.Duration {
 }
 
 func (s *ICAPServer) handleParseError(conn *Connection, err error, started, keepAliveWait bool) {
-	if !isNetTimeout(err) || started || !keepAliveWait || s.config.IdleTimeout <= 0 {
+	if isDeadlineSetupError(err) {
+		s.logConnectionError(
+			context.Background(), nil, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), err,
+		)
 		return
 	}
-	s.logger.Warn("connection closed due to idle timeout",
-		"remote_addr", conn.RemoteAddr(),
-		"idle_duration", time.Since(conn.LastActivity()),
-		"idle_timeout", conn.config.IdleTimeout,
-	)
-	if s.metrics != nil {
-		s.metrics.RecordIdleConnectionClosedForServer(s.metricsServerName, "idle")
+	if !started && (errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed)) {
+		return
 	}
+	if isNetTimeout(err) && !started && keepAliveWait && s.config.IdleTimeout > 0 {
+		s.logger.Warn("connection closed due to idle timeout",
+			"remote_addr", conn.RemoteAddr(),
+			"idle_duration", time.Since(conn.LastActivity()),
+			"idle_timeout", conn.config.IdleTimeout,
+		)
+		if s.metrics != nil {
+			s.metrics.RecordIdleConnectionClosedForServer(s.metricsServerName, "idle")
+		}
+		return
+	}
+	s.logConnectionError(
+		context.Background(), nil, errorStageParseRequest,
+		parseErrorCloseReason(err, started, keepAliveWait), conn.RemoteAddr(), err,
+	)
 }
 
 func isNetTimeout(err error) bool {
@@ -160,7 +202,7 @@ func (s *ICAPServer) setDrainReadDeadline(conn *Connection) error {
 	if timeout <= 0 {
 		timeout = defaultDrainTimeout
 	}
-	return conn.SetReadDeadline(time.Now().Add(timeout))
+	return wrapDeadlineSetupError("drain read", conn.SetReadDeadline(time.Now().Add(timeout)))
 }
 
 func (s *ICAPServer) drainBodyLimit() int64 {
