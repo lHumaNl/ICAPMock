@@ -124,7 +124,8 @@ func TestErrorResponseKeepsConnectionReusable(t *testing.T) {
 	assert.Contains(t, strings.Join(headers, "\n"), "Encapsulated: res-hdr=0, res-body=")
 
 	assert.Contains(t, readICAPLine(t, reader), "HTTP/1.1 500")
-	for readICAPLine(t, reader) != "" {
+	for line := readICAPLine(t, reader); line != ""; line = readICAPLine(t, reader) {
+		_ = line // Consume encapsulated HTTP response headers.
 	}
 	chunkSizeLine := readICAPLine(t, reader)
 	chunkSize, err := strconv.ParseInt(chunkSizeLine, 16, 64)

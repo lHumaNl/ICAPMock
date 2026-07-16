@@ -35,6 +35,8 @@ const (
 	clientIPKey contextKey = "client_ip"
 )
 
+const closeReasonShutdown = "shutdown"
+
 // RequestIDFromContext retrieves the request ID from the context.
 // Returns an empty string if not found.
 func RequestIDFromContext(ctx context.Context) string {
@@ -355,7 +357,7 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 
 	// Start accepting connections in a goroutine
 	s.wg.Add(1)
-	go s.acceptLoop() //nolint:contextcheck // acceptLoop uses s.serverCtx stored from Start's ctx parameter
+	go s.acceptLoop(ctx)
 
 	// Start goroutine leak monitoring
 	s.wg.Add(1)
@@ -383,12 +385,14 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 }
 
 // acceptLoop accepts incoming connections and handles them.
-func (s *ICAPServer) acceptLoop() {
+func (s *ICAPServer) acceptLoop(ctx context.Context) {
 	defer s.wg.Done()
 
 	for {
 		select {
 		case <-s.stopChan:
+			return
+		case <-ctx.Done():
 			return
 		default:
 			// Set accept deadline to allow checking stopChan periodically.
@@ -411,7 +415,7 @@ func (s *ICAPServer) acceptLoop() {
 					s.tcpListener.SetDeadline(time.Now().Add(100*time.Millisecond)),
 				); deadlineErr != nil {
 					s.logConnectionError(
-						context.Background(), nil, errorStageSetDeadline,
+						ctx, nil, errorStageSetDeadline,
 						"deadline_setup_failed", "", deadlineErr,
 					)
 				}
@@ -466,7 +470,7 @@ func (s *ICAPServer) acceptLoop() {
 
 			// Handle connection in a goroutine
 			s.wg.Add(1)
-			go s.handleConnection(conn)
+			go s.handleConnection(ctx, conn)
 		}
 	}
 }
@@ -477,10 +481,10 @@ func (s *ICAPServer) acceptLoop() {
 //   - The server shuts down (stopChan closed)
 //   - The request timeout is exceeded
 //   - The connection is closed
-func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // connection lifecycle requires sequential checks for parse, route, drain, close
+func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connection) { //nolint:gocyclo // connection lifecycle requires sequential checks for parse, route, drain, close
 	// Create connection-scoped context that cancels on server shutdown
 	// This ensures all in-flight requests are canceled during graceful shutdown
-	connCtx, connCancel := context.WithCancel(s.serverCtx)
+	connCtx, connCancel := context.WithCancel(parentCtx)
 	closeReason := "handler_exit"
 
 	// No extra goroutine needed to cancel on server stop:
@@ -499,7 +503,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 		if closeReason != "panic" {
 			select {
 			case <-s.stopChan:
-				closeReason = "shutdown"
+				closeReason = closeReasonShutdown
 			default:
 			}
 		}
@@ -520,10 +524,10 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 	for {
 		select {
 		case <-s.stopChan:
-			closeReason = "shutdown"
+			closeReason = closeReasonShutdown
 			return
 		case <-connCtx.Done():
-			closeReason = "shutdown"
+			closeReason = closeReasonShutdown
 			// Server is shutting down, stop handling
 			return
 		default:
@@ -531,7 +535,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			if err := s.setWaitReadDeadline(conn, keepAliveWait); err != nil {
 				closeReason = connectionReadCloseReason(err, keepAliveWait)
 				s.logConnectionError(
-					context.Background(), nil, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), err,
+					connCtx, nil, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), err,
 				)
 				return
 			}
@@ -542,7 +546,7 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 			})
 			req, err := parseICAPRequest(requestReader)
 			if err != nil {
-				s.handleParseError(conn, err, requestReader.Started(), keepAliveWait)
+				s.handleParseError(connCtx, conn, err, requestReader.Started(), keepAliveWait)
 				closeReason = parseErrorCloseReason(err, requestReader.Started(), keepAliveWait)
 				return
 			}
@@ -555,19 +559,19 @@ func (s *ICAPServer) handleConnection(conn *Connection) { //nolint:gocyclo // co
 				errorType := bodyReceiveErrorType(receiveErr)
 				if isDeadlineSetupError(receiveErr) {
 					s.logConnectionError(
-						context.Background(), req, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), receiveErr,
+						connCtx, req, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), receiveErr,
 					)
 				} else {
-					s.logRequestError(context.Background(), req, metrics.RequestErrorStageBodyReceive, errorType, receiveErr)
+					s.logRequestError(connCtx, req, metrics.RequestErrorStageBodyReceive, errorType, receiveErr)
 				}
 				s.recordRequestError(
-					context.Background(),
+					connCtx,
 					req,
 					metrics.RequestErrorStageBodyReceive,
 					errorType,
 					metrics.OutcomeError,
 				)
-				s.recordIncomingRequest(context.Background(), req, nil)
+				s.recordIncomingRequest(connCtx, req, nil)
 				releaseLifecycleBodies(req, nil)
 				return
 			}

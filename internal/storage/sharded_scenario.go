@@ -107,10 +107,10 @@ type ScenarioMatchCache struct {
 type cacheEntry struct {
 	timestamp  time.Time
 	scenario   *Scenario
-	generation uint64
 	prev       *cacheEntry
 	next       *cacheEntry
 	key        string
+	generation uint64
 }
 
 // shardingMetrics собирает метрики производительности шардирования (internal, atomic).
@@ -449,8 +449,8 @@ func (r *ShardedScenarioRegistry) Match(ctx context.Context, req *icap.Request) 
 
 	cacheEnabled := r.matchCacheEnabled()
 	if cached, ok := r.cachedMatch(req, cacheEnabled); ok {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
 		return cached, nil
 	}

@@ -84,14 +84,14 @@ func TestHandleParseErrorLogsMalformedRequestButNotCleanEOF(t *testing.T) {
 	defer clientConn.Close()
 	conn := newConnection(serverConn, &ConnectionConfig{})
 
-	srv.handleParseError(conn, errors.New("invalid request line"), true, false)
+	srv.handleParseError(context.Background(), conn, errors.New("invalid request line"), true, false)
 	entry := decodeServerLogEntry(t, output.Bytes())
 	assertServerLogField(t, entry, "level", "ERROR")
 	assertServerLogField(t, entry, "stage", "parse_request")
 	assertServerLogField(t, entry, "error_type", "malformed_request")
 
 	output.Reset()
-	srv.handleParseError(conn, io.EOF, false, false)
+	srv.handleParseError(context.Background(), conn, io.EOF, false, false)
 	if output.Len() == 0 {
 		return
 	}

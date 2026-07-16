@@ -4,6 +4,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -518,7 +519,7 @@ func TestBufferedWriter_CloseWaitsForConcurrentWrite(t *testing.T) {
 	if err := <-closeDone; err != nil {
 		t.Fatalf("close() error = %v", err)
 	}
-	if _, err := bw.Write([]byte("after close")); err != io.ErrClosedPipe {
+	if _, err := bw.WriteString("after close"); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("Write() after close error = %v, want io.ErrClosedPipe", err)
 	}
 }

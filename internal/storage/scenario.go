@@ -918,7 +918,7 @@ func bodyPatternMatches(
 		return false, ctxErr
 	}
 	if err != nil {
-		return handleBodyPatternReadError(err, options.normalized())
+		return false, handleBodyPatternReadError(err, options.normalized())
 	}
 	return pattern.Match(body), nil
 }
@@ -943,14 +943,14 @@ func readBodyForPattern(msg *icap.HTTPMessage, options BodyPatternOptions) ([]by
 	return msg.GetBodyLimited(options.Limit)
 }
 
-func handleBodyPatternReadError(err error, options BodyPatternOptions) (bool, error) {
+func handleBodyPatternReadError(err error, options BodyPatternOptions) error {
 	if errors.Is(err, icap.ErrBodyTooLarge) {
 		if options.LimitAction == BodyPatternLimitActionNoMatch {
-			return false, nil
+			return nil
 		}
-		return false, fmt.Errorf("%w: max %d bytes", ErrBodyPatternLimitExceeded, options.Limit)
+		return fmt.Errorf("%w: max %d bytes", ErrBodyPatternLimitExceeded, options.Limit)
 	}
-	return false, fmt.Errorf("reading body for body_pattern: %w", err)
+	return fmt.Errorf("reading body for body_pattern: %w", err)
 }
 
 // endpointCapturePattern finds "{name}" placeholders in an endpoint string.

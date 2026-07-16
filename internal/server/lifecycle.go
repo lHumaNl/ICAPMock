@@ -27,8 +27,8 @@ type requestDeadlineReader struct {
 }
 
 type deadlineSetupError struct {
-	operation string
 	err       error
+	operation string
 }
 
 func (e *deadlineSetupError) Error() string {
@@ -122,10 +122,10 @@ func (s *ICAPServer) waitReadTimeout(keepAliveWait bool) time.Duration {
 	return s.config.IdleTimeout
 }
 
-func (s *ICAPServer) handleParseError(conn *Connection, err error, started, keepAliveWait bool) {
+func (s *ICAPServer) handleParseError(ctx context.Context, conn *Connection, err error, started, keepAliveWait bool) {
 	if isDeadlineSetupError(err) {
 		s.logConnectionError(
-			context.Background(), nil, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), err,
+			ctx, nil, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), err,
 		)
 		return
 	}
@@ -144,7 +144,7 @@ func (s *ICAPServer) handleParseError(conn *Connection, err error, started, keep
 		return
 	}
 	s.logConnectionError(
-		context.Background(), nil, errorStageParseRequest,
+		ctx, nil, errorStageParseRequest,
 		parseErrorCloseReason(err, started, keepAliveWait), conn.RemoteAddr(), err,
 	)
 }
