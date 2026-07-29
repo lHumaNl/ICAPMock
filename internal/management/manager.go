@@ -516,14 +516,17 @@ func convertInlineScenarioEntry(entry config.InlineScenarioEntry) storage.Scenar
 		Priority:   entry.Priority,
 		Status:     entry.Status,
 		Delay:      entry.Delay,
-		When:       entry.When,
+		When:       storage.NewExactHeaderMatchesV2(entry.When),
 		Body:       entry.Body,
 		Set:        entry.Set,
 	}
 }
 
-func convertInlineResponses(entries []config.InlineWeightedResponse) []storage.WeightedResponseV2 {
-	responses := make([]storage.WeightedResponseV2, len(entries))
+func convertInlineResponses(entries config.InlineWeightedResponses) storage.WeightedResponseListV2 {
+	if entries == nil {
+		return nil
+	}
+	responses := make(storage.WeightedResponseListV2, len(entries))
 	for i, response := range entries {
 		responses[i] = storage.WeightedResponseV2{
 			HTTPStatus: response.HTTPStatus,

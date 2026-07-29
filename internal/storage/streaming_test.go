@@ -173,6 +173,17 @@ func TestScenarioRegistry_Load_StreamCanonicalHTTPBodySources(t *testing.T) {
 	}
 }
 
+func TestScenarioRegistry_Load_StreamAdaptedHTTPBodySourceForBothMethods(t *testing.T) {
+	registry := NewScenarioRegistry()
+	err := registry.Load(writeScenarioFile(t, streamYAMLTopLevelForMethod(
+		"[REQMOD, RESPMOD]",
+		"from: adapted_http_body",
+	)))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
 func TestScenarioRegistry_Load_StreamTopLevelAndParts(t *testing.T) {
 	registry := NewScenarioRegistry()
 	if err := registry.Load(writeScenarioFile(t, streamTopLevelPartsYAML(t))); err != nil {
@@ -218,6 +229,9 @@ func TestScenarioRegistry_Load_InvalidStreamConfigs(t *testing.T) {
 		{"response-body-mixed-methods", streamYAMLForMethod("[REQMOD, RESPMOD]", "from: response_body", "")},
 		{"request-body-options", streamYAMLForMethod("OPTIONS", "from: request_body", "")},
 		{"response-body-options", streamYAMLForMethod("OPTIONS", "from: response_body", "")},
+		{"adapted-body-no-method", streamYAMLWithoutMethod("from: adapted_http_body")},
+		{"adapted-body-wildcard-method", streamYAMLWithICAPMethod(`"*"`, "from: adapted_http_body")},
+		{"adapted-body-options", streamYAMLForMethod("OPTIONS", "from: adapted_http_body", "")},
 		{"body-missing", streamYAMLForMethod("REQMOD", "from: body", "")},
 		{"body-with-body-file", streamYAMLForMethod("REQMOD", "from: body\nbody: data\nbody_file: /unused", "")},
 		{"body-file-missing", streamYAMLForMethod("REQMOD", "from: body_file", "")},
@@ -250,6 +264,9 @@ func TestScenarioRegistry_Load_InvalidStreamConfigs(t *testing.T) {
 	wantErrs := map[string]string{
 		"request-body-wildcard-icap-method":  "source.request_body requires an explicit REQMOD scenario method",
 		"response-body-wildcard-icap-method": "source.response_body requires an explicit RESPMOD scenario method",
+		"adapted-body-no-method":             "source.adapted_http_body requires explicit REQMOD and/or RESPMOD scenario methods",
+		"adapted-body-wildcard-method":       "source.adapted_http_body requires explicit REQMOD and/or RESPMOD scenario methods",
+		"adapted-body-options":               "source.adapted_http_body does not support OPTIONS scenario methods",
 		"fallback-raw-bad-regex":             "fallback.raw_file.filename",
 		"fallback-body-file-missing":         "/missing/fallback/body",
 		"fallback-bad-from":                  "unsupported fallback.from",

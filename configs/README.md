@@ -223,10 +223,15 @@ The two are matched by different blocks:
 
 - `when:` — matches **ICAP** headers.
 - `when_http:` — matches the **encapsulated HTTP** message. Fields:
-  - `headers:` — map of HTTP header → value (exact or `re:`-prefixed regex).
+  - `headers:` — map of HTTP header → scalar or list. A scalar is exact, or a regex when prefixed
+    with `re:`. Generic-header lists are case-insensitive contains-any matchers. `Content-Type`
+    lists use the media-type rules below.
   - `url:` — exact string or `re:` regex matched against the URI of the wrapped HTTP request
     (useful when the filename only appears in the URL, e.g. `http://host/path/file.exe`).
   - `method:` — HTTP method of the wrapped request (`GET`, `POST`, …).
+
+Both `when:` and `when_http.headers:` accept scalar and list values. The same list syntax therefore
+works for custom ICAP-envelope headers as well as encapsulated HTTP headers.
 
 A common foot-gun is putting `Content-Type` under `when:` — Content-Type is an HTTP header, not
 an ICAP one, so the ICAP envelope does not contain it and the scenario never matches. Use
@@ -236,7 +241,9 @@ an ICAP one, so the ICAP envelope does not contain it and the scenario never mat
 block-pe-files:
   when_http:
     headers:
-      Content-Type: "re:(?i)application/x-dosexec"
+      Content-Type:
+        - application/x-dosexec
+        - application/x-executable
   status: 200
   http_status: 403
 
@@ -253,6 +260,15 @@ internal-client-only:
     method: POST
   status: 204
 ```
+
+For a `Content-Type` list item without `;`, ICAPMock compares the normalized media type through a
+prebuilt set and ignores request parameters. Thus `application/pdf` matches
+`Application/PDF; charset=binary`, but not `application/pdfx`. List order does not affect this fast
+path. If a configured item contains `;`, it is parsed as a parameter-aware rule: media type and all
+listed parameters must match, parameter order is irrelevant, and extra request parameters are
+allowed. Parameter names and `charset` values are case-insensitive; other parameter values remain
+case-sensitive. List items are literals (`re:` has no special meaning), and invalid media types,
+empty lists, and empty/non-string items are rejected.
 
 Scenarios that use `when_http:` only match requests that actually carry an encapsulated HTTP
 message — OPTIONS requests fall through to the next scenario.
@@ -331,11 +347,11 @@ defaults:
       http_set: { Content-Type: "text/html" }
       http_body: "<html>blocked</html>"
     flaky-block:
-      - weight: 70
+      - weight: 70.000
         use: blocked
-      - weight: 25
+      - weight: 25.000
         use: clean
-      - weight: 5
+      - weight: 5.000
         status: 500
   use: clean
 
@@ -426,6 +442,8 @@ scenarios:
 
 - `request_http_body` requires an explicit `REQMOD` method.
 - `response_http_body` requires an explicit `RESPMOD` method.
+- `adapted_http_body` supports explicit `REQMOD` and/or `RESPMOD` methods and selects the request
+  body for REQMOD or response body for RESPMOD. It is useful in one shared response template.
 - Preferred controls are `send`, `throttle`, and `end`. `end.mode: complete` sends the full body;
   `end.mode: fin` and `end.mode: term` require partial `send.percent` (`1..99`) plus
   `send.duration` or `throttle.every`. `fin` closes without a terminating chunk; `term` sends the
@@ -456,7 +474,8 @@ scenarios:
 
 ### Multipart selectors and safe fallback
 
-Multipart selectors only work with `request_http_body` / `response_http_body` sources because they
+Multipart selectors only work with `request_http_body`, `response_http_body`, or
+`adapted_http_body` sources because they
 inspect the encapsulated HTTP message body.
 
 ```yaml
@@ -506,22 +525,27 @@ For weighted mode, `complete_percent + fin_percent` must equal `100`. If `fin_pe
 
 ### Weighted responses
 
-Use `responses:` to return different answers with configurable probability. Weights are relative
-integers (they do not need to sum to 100). When `responses:` is present, top-level `status`,
-`set`, `body`, and `delay` are ignored — each variant declares its own values.
+Use `responses:` to return different answers with configurable probability. If every variant
+omits `weight`, selection is uniform. Otherwise every variant must define a weight, each weight
+is rounded to three decimals and must be greater than `0.000` and no greater than `100.000`, and
+the list must total exactly `100.000` after rounding. Mixing weighted and unweighted variants is
+invalid. Scenario/branch response fields are inherited as defaults by every variant.
+
+Rounding uses the conventional half-up rule: for example, `1.2344` becomes `1.234`, while
+`1.2345` becomes `1.235`. The minimum representable probability is `0.001%`.
 
 ```yaml
 scan-file:
   when:
     X-Client-ID: "re:.+"
   responses:
-    - weight: 80
+    - weight: 80.000
       status: 204
       set:
         X-Threat-Level: "CLEAN"
       delay: 50ms-150ms
 
-    - weight: 15
+    - weight: 15.000
       status: 200
       http_status: 200
       set:
@@ -531,7 +555,7 @@ scan-file:
       http_body: "File flagged but allowed."
       delay: 200ms-600ms
 
-    - weight: 5
+    - weight: 5.000
       status: 200
       http_status: 403
       set:

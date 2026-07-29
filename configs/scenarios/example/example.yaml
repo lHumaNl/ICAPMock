@@ -82,9 +82,11 @@
 # WEIGHTED RESPONSES ("responses:" list)
 # ----------------------------------------
 # Use "responses:" to return different answers with configurable probability.
-# Weights are relative integers; they do not need to sum to 100.
-# When a "responses:" list is present, top-level status/body/set/delay are
-# ignored — every variant must declare its own values.
+# If every variant omits weight, selection is uniform. Otherwise every variant
+# must define a weight > 0.000 and <= 100.000, rounded to three decimals, and
+# the responses list must total exactly 100.000 after rounding. Mixed lists are
+# invalid.
+# Scenario/branch response fields act as defaults inherited by each variant.
 #
 # RESPONSE TEMPLATES ("defaults.response_templates" + "use:")
 # -----------------------------------------------------------
@@ -155,11 +157,11 @@ defaults:
       http_body: "<html><body><h1>Blocked</h1></body></html>"
       delay: 300ms-800ms
     flaky-block:                 # a weighted template: each request samples
-      - weight: 70               # 70% → blocked-page
+      - weight: 70.000           # 70% → blocked-page
         use: blocked-page
-      - weight: 25               # 25% → clean
+      - weight: 25.000           # 25% → clean
         use: clean
-      - weight: 5                # 5% → 500 server error
+      - weight: 5.000            # 5% → 500 server error
         status: 500
 
   # File-wide fallback: if no scenario matched the request, serve this
@@ -288,18 +290,18 @@ scenarios:
     when:
       X-Client-ID: "re:.+"    # matches any non-empty X-Client-ID header
 
-    # "responses:" overrides top-level status/set/body/delay for this scenario.
-    # Weights are arbitrary positive integers; probability = weight / sum(weights).
+    # Scenario-level response fields are inherited by every variant. Weights
+    # are percentages rounded to 0.001 and must total exactly 100.000.
     responses:
       # Weight 70 out of 100 total → 70% of the time: clean pass (ICAP 204)
-      - weight: 70
+      - weight: 70.000
         status: 204
         set:
           X-Threat-Level: "CLEAN"
         delay: 50ms-150ms
 
       # Weight 20/100 → 20%: suspicious, allow but tag
-      - weight: 20
+      - weight: 20.000
         status: 200
         http_status: 200
         set:
@@ -310,7 +312,7 @@ scenarios:
         delay: 200ms-600ms
 
       # Weight 10/100 → 10%: block as dangerous
-      - weight: 10
+      - weight: 10.000
         status: 200
         http_status: 403
         set:
@@ -472,7 +474,7 @@ scenarios:
   #   when:
   #     X-Scan-Mode: "deep"
   #   responses:
-  #     - weight: 1
+  #     - weight: 10.000
   #       status: 200
   #       http_status: 403
   #       set:
@@ -481,7 +483,7 @@ scenarios:
   #         Content-Type: "text/html"
   #       http_body: "<html><body>Blocked by deep scan.</body></html>"
   #       delay: 500ms-1500ms
-  #     - weight: 9
+  #     - weight: 90.000
   #       status: 204
   #       set:
   #         X-Verdict: "CLEAN"

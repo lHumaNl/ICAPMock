@@ -23,6 +23,7 @@ const (
 	streamSourceRequestHTTPBody        = "request_http_body"
 	streamSourceResponseBody           = "response_body"
 	streamSourceResponseHTTPBody       = "response_http_body"
+	streamSourceAdaptedHTTPBody        = "adapted_http_body"
 )
 
 var (
@@ -109,7 +110,7 @@ func streamSourcePayload(
 ) (icap.StreamPayload, error) {
 	switch src.From {
 	case streamSourceRequestBody, streamSourceRequestHTTPBody,
-		streamSourceResponseBody, streamSourceResponseHTTPBody:
+		streamSourceResponseBody, streamSourceResponseHTTPBody, streamSourceAdaptedHTTPBody:
 		return rawHTTPBodyStreamPayload(src.From, req, limit)
 	case "body":
 		return inlineStreamPayload(src.Body, limit)
@@ -158,7 +159,7 @@ func streamPartsPayload(
 func rejectRepeatedLiveHTTPBodyParts(parts []storage.StreamPartConfig, req *icap.Request) error {
 	seen := make(map[string]int)
 	for i := range parts {
-		source, ok := canonicalRawHTTPBodySource(parts[i].From)
+		source, ok := canonicalRawHTTPBodySource(parts[i].From, req.Method)
 		if !ok {
 			continue
 		}
@@ -213,8 +214,21 @@ func rawHTTPBodyMessage(from string, req *icap.Request) (*icap.HTTPMessage, erro
 		return requestHTTPMessage(req)
 	case streamSourceResponseBody, streamSourceResponseHTTPBody:
 		return responseHTTPMessage(req)
+	case streamSourceAdaptedHTTPBody:
+		return adaptedHTTPBodyMessage(req)
 	}
 	return nil, fmt.Errorf("unsupported source %q", from)
+}
+
+func adaptedHTTPBodyMessage(req *icap.Request) (*icap.HTTPMessage, error) {
+	switch req.Method {
+	case icap.MethodREQMOD:
+		return requestHTTPMessage(req)
+	case icap.MethodRESPMOD:
+		return responseHTTPMessage(req)
+	default:
+		return nil, fmt.Errorf("adapted_http_body source does not support ICAP method %q", req.Method)
+	}
 }
 
 func requestHTTPMessage(req *icap.Request) (*icap.HTTPMessage, error) {
@@ -233,18 +247,26 @@ func responseHTTPMessage(req *icap.Request) (*icap.HTTPMessage, error) {
 
 func rawHTTPBodySource(from string) bool {
 	switch from {
-	case streamSourceRequestBody, streamSourceRequestHTTPBody, streamSourceResponseBody, streamSourceResponseHTTPBody:
+	case streamSourceRequestBody, streamSourceRequestHTTPBody, streamSourceResponseBody,
+		streamSourceResponseHTTPBody, streamSourceAdaptedHTTPBody:
 		return true
 	}
 	return false
 }
 
-func canonicalRawHTTPBodySource(from string) (string, bool) {
+func canonicalRawHTTPBodySource(from, method string) (string, bool) {
 	switch from {
 	case streamSourceRequestBody, streamSourceRequestHTTPBody:
 		return streamSourceRequestHTTPBody, true
 	case streamSourceResponseBody, streamSourceResponseHTTPBody:
 		return streamSourceResponseHTTPBody, true
+	case streamSourceAdaptedHTTPBody:
+		if method == icap.MethodREQMOD {
+			return streamSourceRequestHTTPBody, true
+		}
+		if method == icap.MethodRESPMOD {
+			return streamSourceResponseHTTPBody, true
+		}
 	}
 	return "", false
 }
@@ -296,6 +318,12 @@ func resolveStreamSourceConfig(src storage.StreamSourceConfig, req *icap.Request
 		return httpRequestBody(req, limit)
 	case streamSourceResponseBody, streamSourceResponseHTTPBody:
 		return httpResponseBody(req, limit)
+	case streamSourceAdaptedHTTPBody:
+		msg, err := adaptedHTTPBodyMessage(req)
+		if err != nil {
+			return nil, err
+		}
+		return httpMessageBody(msg, limit)
 	case "body":
 		return streamBytesWithinLimit([]byte(src.Body), limit)
 	case "body_file":

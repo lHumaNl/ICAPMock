@@ -516,15 +516,18 @@ func convertInlineScenarios(entry serverEntry) ([]*storage.Scenario, error) {
 	orderedNames := sortedInlineScenarioNames(entry.inlineScenarios)
 	for _, name := range orderedNames {
 		e := entry.inlineScenarios[name]
-		responses := make([]storage.WeightedResponseV2, len(e.Responses))
-		for i, r := range e.Responses {
-			responses[i] = storage.WeightedResponseV2{
-				Weight:     r.Weight,
-				Set:        r.Set,
-				Status:     r.Status,
-				HTTPStatus: r.HTTPStatus,
-				Body:       r.Body,
-				Delay:      r.Delay,
+		var responses storage.WeightedResponseListV2
+		if e.Responses != nil {
+			responses = make(storage.WeightedResponseListV2, len(e.Responses))
+			for i, r := range e.Responses {
+				responses[i] = storage.WeightedResponseV2{
+					Weight:     r.Weight,
+					Set:        r.Set,
+					Status:     r.Status,
+					HTTPStatus: r.HTTPStatus,
+					Body:       r.Body,
+					Delay:      r.Delay,
+				}
 			}
 		}
 		storageScenarios[name] = storage.ScenarioEntryV2{
@@ -533,7 +536,7 @@ func convertInlineScenarios(entry serverEntry) ([]*storage.Scenario, error) {
 			Status:     e.Status,
 			HTTPStatus: e.HTTPStatus,
 			Priority:   e.Priority,
-			When:       e.When,
+			When:       storage.NewExactHeaderMatchesV2(e.When),
 			Set:        e.Set,
 			Body:       e.Body,
 			BodyFile:   e.BodyFile,

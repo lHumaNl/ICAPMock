@@ -96,7 +96,7 @@ func v2ScenarioScriptYAML() string {
 }
 
 func v2WeightedScriptYAML() string {
-	return v2ScriptYAML("responses:\n      - weight: 1\n        script: reject.js")
+	return v2ScriptYAML("responses:\n      - weight: 100.000\n        script: reject.js")
 }
 
 func v2BranchScriptYAML() string {
@@ -104,7 +104,7 @@ func v2BranchScriptYAML() string {
 }
 
 func v2BranchWeightedScriptYAML() string {
-	return v2ScriptYAML("branches:\n      - responses:\n          - weight: 1\n            script: reject.js")
+	return v2ScriptYAML("branches:\n      - responses:\n          - weight: 100.000\n            script: reject.js")
 }
 
 func v2InlineTemplateScriptYAML() string {
@@ -127,7 +127,7 @@ func v2WeightedTemplateScriptYAML() string {
   endpoint: /scan
   response_templates:
     block:
-      - weight: 1
+      - weight: 100.000
         script: reject.js
 scenarios:
   block:

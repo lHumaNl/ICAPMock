@@ -19,6 +19,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/logger"
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/storage"
+	"github.com/icap-mock/icap-mock/internal/weight"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -135,6 +136,37 @@ func TestMockProcessor_Process(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSelectWeightedResponseAtUsesThousandthPercentBoundaries(t *testing.T) {
+	responses := []storage.WeightedResponse{
+		{Weight: weight.MustParse("80.125"), ResponseName: "first"},
+		{Weight: weight.MustParse("19.875"), ResponseName: "second"},
+	}
+	tests := map[int]string{
+		0:     "first",
+		80124: "first",
+		80125: "second",
+		99999: "second",
+	}
+	for draw, want := range tests {
+		if got := selectWeightedResponseAt(responses, draw); got.ResponseName != want {
+			t.Fatalf("selectWeightedResponseAt(draw=%d) = %q, want %q", draw, got.ResponseName, want)
+		}
+	}
+}
+
+func TestSelectWeightedResponseAtUsesUniformIndexWithoutWeights(t *testing.T) {
+	responses := []storage.WeightedResponse{
+		{ResponseName: "first"},
+		{ResponseName: "second"},
+		{ResponseName: "third"},
+	}
+	for index, want := range []string{"first", "second", "third"} {
+		if got := selectWeightedResponseAt(responses, index); got.ResponseName != want {
+			t.Fatalf("selectWeightedResponseAt(index=%d) = %q, want %q", index, got.ResponseName, want)
+		}
 	}
 }
 
@@ -258,7 +290,7 @@ func weightedExplicitAllowScenario() *storage.Scenario {
 		WeightedResponses: []storage.WeightedResponse{{
 			ICAPStatus: 500,
 			Block:      processorBoolPtr(false),
-			Weight:     1,
+			Weight:     weight.MustParse("100"),
 		}},
 	}
 }
@@ -275,7 +307,7 @@ func branchWeightedExplicitAllowScenario() *storage.Scenario {
 			WeightedResponses: []storage.WeightedResponse{{
 				ICAPStatus: 500,
 				Block:      processorBoolPtr(false),
-				Weight:     1,
+				Weight:     weight.MustParse("100"),
 			}},
 		}},
 	}
@@ -869,7 +901,7 @@ func weightedErrorScenario() *storage.Scenario {
 	return &storage.Scenario{
 		Name: "weighted-error", Match: storage.MatchRule{Methods: []string{icap.MethodREQMOD}}, Priority: 100,
 		Response:          storage.ResponseTemplate{ICAPStatus: 204},
-		WeightedResponses: []storage.WeightedResponse{{Weight: 1, ICAPStatus: 500, Error: "weighted error"}},
+		WeightedResponses: []storage.WeightedResponse{{Weight: weight.MustParse("100"), ICAPStatus: 500, Error: "weighted error"}},
 	}
 }
 

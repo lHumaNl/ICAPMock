@@ -145,7 +145,7 @@ func TestMockProcessor_UnknownSizeStreamClearsStaleContentLength(t *testing.T) {
 	if got, ok := resp.HTTPResponse.Header.Get("Content-Length"); !ok || got != "4" {
 		t.Fatalf("Content-Length = %q, %v, want 4, true", got, ok)
 	}
-	assertBodyReadDuringProcess(t, reader, 4)
+	assertFourBodyBytesReadDuringProcess(t, reader)
 	assertBodyReaderCleared(t, req.HTTPRequest)
 }
 
@@ -158,7 +158,7 @@ func TestMockProcessor_RequestHTTPBodyStreamReadsDuringProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	assertBodyReadDuringProcess(t, reader, 4)
+	assertFourBodyBytesReadDuringProcess(t, reader)
 	assertBodyReaderCleared(t, req.HTTPRequest)
 	assertStreamOutput(t, procResp, "2\r\nxx\r\n2\r\nxx\r\n0\r\n\r\n")
 }
@@ -172,9 +172,35 @@ func TestMockProcessor_ResponseHTTPBodyStreamReadsDuringProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	assertBodyReadDuringProcess(t, reader, 4)
+	assertFourBodyBytesReadDuringProcess(t, reader)
 	assertBodyReaderCleared(t, req.HTTPResponse)
 	assertStreamOutput(t, procResp, "2\r\nxx\r\n2\r\nxx\r\n0\r\n\r\n")
+}
+
+func TestMockProcessor_AdaptedHTTPBodyStreamSelectsSourceByICAPMethod(t *testing.T) {
+	tests := []struct {
+		request func(*testing.T, io.Reader) *icap.Request
+		method  string
+		name    string
+	}{
+		{name: "REQMOD", method: icap.MethodREQMOD, request: createLazyREQMODRequest},
+		{name: "RESPMOD", method: icap.MethodRESPMOD, request: createLazyRESPMODRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fixedSizeCountingReader{remaining: 4}
+			req := tt.request(t, reader)
+			scenario := rawHTTPBodyStreamScenario(tt.method, "adapted_http_body")
+			proc := processSingleScenario(t, scenario)
+
+			resp, err := proc.Process(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Process() error = %v", err)
+			}
+			assertFourBodyBytesReadDuringProcess(t, reader)
+			assertStreamOutput(t, resp, "2\r\nxx\r\n2\r\nxx\r\n0\r\n\r\n")
+		})
+	}
 }
 
 func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t *testing.T) {
@@ -712,6 +738,41 @@ func TestResolveStreamSource_MultipartNoMatchUsesBodyFileFallback(t *testing.T) 
 	}
 }
 
+func TestResolveStreamSource_MultipartNoMatchUsesAdaptedBodyFallback(t *testing.T) {
+	body, contentType := multipartTestBody(t)
+	tests := []struct {
+		prepare func(*testing.T) *icap.Request
+		name    string
+	}{
+		{name: "REQMOD", prepare: func(t *testing.T) *icap.Request {
+			req := createTestREQMODRequest(t)
+			req.HTTPRequest = httpMessageWithBody(contentType, body)
+			return req
+		}},
+		{name: "RESPMOD", prepare: func(t *testing.T) *icap.Request {
+			req := createTestRESPMODRequest(t)
+			req.HTTPResponse = httpMessageWithBody(contentType, body)
+			return req
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := &storage.StreamConfig{
+				Source:    storage.StreamSourceConfig{From: "adapted_http_body"},
+				Multipart: noMatchMultipart(),
+				Fallback:  storage.StreamFallbackConfig{From: "adapted_http_body"},
+			}
+			got, err := resolveStreamSource(stream, tt.prepare(t))
+			if err != nil {
+				t.Fatalf("resolveStreamSource() error = %v", err)
+			}
+			if !bytes.Equal(got, body) {
+				t.Fatalf("body = %q, want original multipart body", got)
+			}
+		})
+	}
+}
+
 func TestResolveStreamSource_MultipartNoMatchModes(t *testing.T) {
 	body, contentType := multipartTestBody(t)
 	for _, tt := range multipartNoMatchCases() {
@@ -982,10 +1043,10 @@ func assertNoBodyReadBeforeWrite(t *testing.T, reader *fixedSizeCountingReader) 
 	}
 }
 
-func assertBodyReadDuringProcess(t *testing.T, reader *fixedSizeCountingReader, want int64) {
+func assertFourBodyBytesReadDuringProcess(t *testing.T, reader *fixedSizeCountingReader) {
 	t.Helper()
-	if reader.read != want {
-		t.Fatalf("read %d bytes during Process, want %d", reader.read, want)
+	if reader.read != 4 {
+		t.Fatalf("read %d bytes during Process, want 4", reader.read)
 	}
 }
 

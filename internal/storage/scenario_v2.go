@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/icap-mock/icap-mock/internal/weight"
 )
 
 // stringList decodes a YAML field that accepts either a single scalar string
@@ -108,6 +111,124 @@ type MatchValue struct {
 	IsRegex  bool
 }
 
+// HeaderMatchesV2 maps header names to either a scalar exact/regex matcher or
+// a sequence. Generic-header sequences use case-insensitive contains-any;
+// Content-Type sequences use media-type-aware matching.
+type HeaderMatchesV2 map[string]HeaderMatchValueV2
+
+// HeaderMatchValueV2 preserves whether a header matcher was declared as a
+// scalar or a sequence in YAML/JSON.
+type HeaderMatchValueV2 struct {
+	Scalar   string
+	Contains []string
+	IsList   bool
+}
+
+// NewExactHeaderMatchesV2 converts legacy scalar header maps used by inline
+// configuration and programmatic callers.
+func NewExactHeaderMatchesV2(headers map[string]string) HeaderMatchesV2 {
+	if len(headers) == 0 {
+		return nil
+	}
+	matches := make(HeaderMatchesV2, len(headers))
+	for key, value := range headers {
+		matches[key] = HeaderMatchValueV2{Scalar: value}
+	}
+	return matches
+}
+
+// UnmarshalYAML accepts either one scalar string or a non-empty sequence of
+// strings. Sequence values are normalized later during scenario validation.
+func (m *HeaderMatchValueV2) UnmarshalYAML(node *yaml.Node) error {
+	return m.decodeYAML(node)
+}
+
+func (m *HeaderMatchValueV2) decodeYAML(node *yaml.Node) error {
+	switch node.Kind { //nolint:exhaustive // only scalar and sequence are valid matcher shapes.
+	case yaml.ScalarNode:
+		m.Scalar = node.Value
+		m.Contains = nil
+		m.IsList = false
+		return nil
+	case yaml.SequenceNode:
+		if len(node.Content) == 0 {
+			return fmt.Errorf("header match list must not be empty")
+		}
+		values := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+				return fmt.Errorf("header match list item must be a string, got %v", item.Kind)
+			}
+			if strings.TrimSpace(item.Value) == "" {
+				return fmt.Errorf("header match list item must not be empty")
+			}
+			values = append(values, item.Value)
+		}
+		m.Scalar = ""
+		m.Contains = values
+		m.IsList = true
+		return nil
+	default:
+		return fmt.Errorf("header match must be a string or a list of strings, got %v", node.Kind)
+	}
+}
+
+// UnmarshalJSON mirrors the YAML scalar-or-sequence contract.
+func (m *HeaderMatchValueV2) UnmarshalJSON(data []byte) error {
+	var scalar string
+	if err := json.Unmarshal(data, &scalar); err == nil {
+		*m = HeaderMatchValueV2{Scalar: scalar}
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return fmt.Errorf("header match must be a string or a list of strings: %w", err)
+	}
+	if len(values) == 0 {
+		return fmt.Errorf("header match list must not be empty")
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("header match list item must not be empty")
+		}
+	}
+	*m = HeaderMatchValueV2{Contains: values, IsList: true}
+	return nil
+}
+
+// MarshalYAML preserves the concise scalar/list scenario syntax.
+func (m HeaderMatchValueV2) MarshalYAML() (interface{}, error) {
+	if m.IsList {
+		return m.Contains, nil
+	}
+	return m.Scalar, nil
+}
+
+// MarshalJSON preserves the scalar/list JSON shape.
+func (m HeaderMatchValueV2) MarshalJSON() ([]byte, error) {
+	if m.IsList {
+		return json.Marshal(m.Contains)
+	}
+	return json.Marshal(m.Scalar)
+}
+
+func splitHeaderMatches(matches HeaderMatchesV2) (scalar map[string]string, contains map[string][]string) {
+	for key, match := range matches {
+		if match.IsList {
+			if contains == nil {
+				contains = make(map[string][]string)
+			}
+			contains[key] = append([]string(nil), match.Contains...)
+			continue
+		}
+		if scalar == nil {
+			scalar = make(map[string]string)
+		}
+		scalar[key] = match.Scalar
+	}
+	return scalar, contains
+}
+
 // Matches checks if the given value matches this condition.
 func (m *MatchValue) Matches(value string) bool {
 	if m.IsRegex {
@@ -150,48 +271,124 @@ type ScenarioDefaultsV2 struct {
 //     "http_status" is non-zero (the mock then returns a synthesized HTTP
 //     response instead of letting the original request/response pass).
 type ScenarioEntryV2 struct {
-	When         map[string]string    `yaml:"when,omitempty"`
-	WhenHTTP     *WhenHTTPV2          `yaml:"when_http,omitempty"`
-	Set          map[string]string    `yaml:"set,omitempty"`
-	HTTPSet      map[string]string    `yaml:"http_set,omitempty"`
-	Stream       *StreamConfig        `yaml:"stream,omitempty"`
-	Block        *bool                `yaml:"block,omitempty"`
-	Method       MethodList           `yaml:"method,omitempty"`
-	Endpoint     EndpointList         `yaml:"endpoint,omitempty"`
-	Use          string               `yaml:"use,omitempty"`
-	Body         string               `yaml:"body,omitempty"`
-	BodyFile     string               `yaml:"body_file,omitempty"`
-	HTTPBody     string               `yaml:"http_body,omitempty"`
-	HTTPBodyFile string               `yaml:"http_body_file,omitempty"`
-	Error        string               `yaml:"error,omitempty"`
-	Delay        string               `yaml:"delay,omitempty"`
-	Responses    []WeightedResponseV2 `yaml:"responses,omitempty"`
-	Branches     []BranchV2           `yaml:"branches,omitempty"`
-	Status       int                  `yaml:"status,omitempty"`
-	HTTPStatus   int                  `yaml:"http_status,omitempty"`
-	Priority     int                  `yaml:"priority,omitempty"`
+	When         HeaderMatchesV2        `yaml:"when,omitempty"`
+	WhenHTTP     *WhenHTTPV2            `yaml:"when_http,omitempty"`
+	Set          map[string]string      `yaml:"set,omitempty"`
+	HTTPSet      map[string]string      `yaml:"http_set,omitempty"`
+	Stream       *StreamConfig          `yaml:"stream,omitempty"`
+	Block        *bool                  `yaml:"block,omitempty"`
+	Method       MethodList             `yaml:"method,omitempty"`
+	Endpoint     EndpointList           `yaml:"endpoint,omitempty"`
+	Use          string                 `yaml:"use,omitempty"`
+	Body         string                 `yaml:"body,omitempty"`
+	BodyFile     string                 `yaml:"body_file,omitempty"`
+	HTTPBody     string                 `yaml:"http_body,omitempty"`
+	HTTPBodyFile string                 `yaml:"http_body_file,omitempty"`
+	Error        string                 `yaml:"error,omitempty"`
+	Delay        string                 `yaml:"delay,omitempty"`
+	Responses    WeightedResponseListV2 `yaml:"responses,omitempty" json:"responses,omitempty"`
+	Branches     []BranchV2             `yaml:"branches,omitempty"`
+	Status       int                    `yaml:"status,omitempty"`
+	HTTPStatus   int                    `yaml:"http_status,omitempty"`
+	Priority     int                    `yaml:"priority,omitempty"`
+}
+
+// UnmarshalYAML preserves an explicitly null responses field as a present empty list.
+func (s *ScenarioEntryV2) UnmarshalYAML(node *yaml.Node) error {
+	type plain ScenarioEntryV2
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = ScenarioEntryV2(decoded)
+	if mappingContainsKey(node, "responses") && s.Responses == nil {
+		s.Responses = make(WeightedResponseListV2, 0)
+	}
+	return nil
+}
+
+// UnmarshalJSON preserves an explicitly null responses field as a present empty list.
+func (s *ScenarioEntryV2) UnmarshalJSON(data []byte) error {
+	type plain ScenarioEntryV2
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = ScenarioEntryV2(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["responses"]; present && s.Responses == nil {
+		s.Responses = make(WeightedResponseListV2, 0)
+	}
+	return nil
 }
 
 // BranchV2 is one conditional branch inside a scenario. Branches are matched
 // top-to-bottom; the first one whose conditions pass produces the response.
 // A branch without any "when"/"when_http" conditions acts as a catch-all.
 type BranchV2 struct {
-	When         map[string]string    `yaml:"when,omitempty"`
-	WhenHTTP     *WhenHTTPV2          `yaml:"when_http,omitempty"`
-	Set          map[string]string    `yaml:"set,omitempty"`
-	HTTPSet      map[string]string    `yaml:"http_set,omitempty"`
-	Stream       *StreamConfig        `yaml:"stream,omitempty"`
-	Block        *bool                `yaml:"block,omitempty"`
-	Use          string               `yaml:"use,omitempty"`
-	Body         string               `yaml:"body,omitempty"`
-	BodyFile     string               `yaml:"body_file,omitempty"`
-	HTTPBody     string               `yaml:"http_body,omitempty"`
-	HTTPBodyFile string               `yaml:"http_body_file,omitempty"`
-	Error        string               `yaml:"error,omitempty"`
-	Delay        string               `yaml:"delay,omitempty"`
-	Responses    []WeightedResponseV2 `yaml:"responses,omitempty"`
-	Status       int                  `yaml:"status,omitempty"`
-	HTTPStatus   int                  `yaml:"http_status,omitempty"`
+	When         HeaderMatchesV2        `yaml:"when,omitempty"`
+	WhenHTTP     *WhenHTTPV2            `yaml:"when_http,omitempty"`
+	Set          map[string]string      `yaml:"set,omitempty"`
+	HTTPSet      map[string]string      `yaml:"http_set,omitempty"`
+	Stream       *StreamConfig          `yaml:"stream,omitempty"`
+	Block        *bool                  `yaml:"block,omitempty"`
+	Use          string                 `yaml:"use,omitempty"`
+	Body         string                 `yaml:"body,omitempty"`
+	BodyFile     string                 `yaml:"body_file,omitempty"`
+	HTTPBody     string                 `yaml:"http_body,omitempty"`
+	HTTPBodyFile string                 `yaml:"http_body_file,omitempty"`
+	Error        string                 `yaml:"error,omitempty"`
+	Delay        string                 `yaml:"delay,omitempty"`
+	Responses    WeightedResponseListV2 `yaml:"responses,omitempty" json:"responses,omitempty"`
+	Status       int                    `yaml:"status,omitempty"`
+	HTTPStatus   int                    `yaml:"http_status,omitempty"`
+}
+
+// UnmarshalYAML preserves an explicitly null responses field as a present empty list.
+func (b *BranchV2) UnmarshalYAML(node *yaml.Node) error {
+	type plain BranchV2
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*b = BranchV2(decoded)
+	if mappingContainsKey(node, "responses") && b.Responses == nil {
+		b.Responses = make(WeightedResponseListV2, 0)
+	}
+	return nil
+}
+
+// UnmarshalJSON preserves an explicitly null responses field as a present empty list.
+func (b *BranchV2) UnmarshalJSON(data []byte) error {
+	type plain BranchV2
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*b = BranchV2(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["responses"]; present && b.Responses == nil {
+		b.Responses = make(WeightedResponseListV2, 0)
+	}
+	return nil
+}
+
+func mappingContainsKey(node *yaml.Node, key string) bool {
+	if node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // ResponseTemplateV2 is a named entry in defaults.response_templates. It can be
@@ -199,7 +396,39 @@ type BranchV2 struct {
 // unmarshaler distinguishes the two by YAML shape (mapping vs. sequence).
 type ResponseTemplateV2 struct {
 	Inline   *InlineResponseV2
-	Weighted []WeightedResponseV2
+	Weighted WeightedResponseListV2
+}
+
+// WeightedResponseListV2 preserves the distinction between an absent list and
+// an explicitly empty/null list so invalid policies cannot fail open.
+type WeightedResponseListV2 []WeightedResponseV2
+
+// UnmarshalYAML decodes a weighted list while preserving explicit presence.
+func (w *WeightedResponseListV2) UnmarshalYAML(node *yaml.Node) error {
+	if node.Tag == "!!null" {
+		*w = make(WeightedResponseListV2, 0)
+		return nil
+	}
+	var decoded []WeightedResponseV2
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*w = WeightedResponseListV2(decoded)
+	return nil
+}
+
+// UnmarshalJSON decodes a weighted list while preserving explicit presence.
+func (w *WeightedResponseListV2) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*w = make(WeightedResponseListV2, 0)
+		return nil
+	}
+	var decoded []WeightedResponseV2
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*w = WeightedResponseListV2(decoded)
+	return nil
 }
 
 // InlineResponseV2 is a single non-weighted response definition.
@@ -231,7 +460,7 @@ func (r *ResponseTemplateV2) UnmarshalYAML(node *yaml.Node) error {
 		r.Inline = &inline
 		return nil
 	case yaml.SequenceNode:
-		var ws []WeightedResponseV2
+		var ws WeightedResponseListV2
 		if err := node.Decode(&ws); err != nil {
 			return err
 		}
@@ -246,9 +475,9 @@ func (r *ResponseTemplateV2) UnmarshalYAML(node *yaml.Node) error {
 // message. All specified fields must match (logical AND). Combine with the
 // top-level "when" block to also match ICAP headers.
 type WhenHTTPV2 struct {
-	// Headers matches encapsulated HTTP headers. Values may be exact strings or
-	// "re:"-prefixed regex patterns (e.g. "re:(?i)application/x-dosexec").
-	Headers map[string]string `yaml:"headers,omitempty"`
+	// Headers matches encapsulated HTTP headers. Scalar values may be exact or
+	// "re:"-prefixed regex patterns; lists are case-insensitive contains-any.
+	Headers HeaderMatchesV2 `yaml:"headers,omitempty"`
 	// URL matches the URI of the encapsulated HTTP request. Exact string or
 	// "re:"-prefixed regex. Useful for matching filenames from the request URL.
 	URL string `yaml:"url,omitempty"`
@@ -269,7 +498,7 @@ type WeightedResponseV2 struct {
 	Error        string            `yaml:"error,omitempty"`
 	Delay        string            `yaml:"delay,omitempty"`
 	Use          string            `yaml:"use,omitempty"`
-	Weight       int               `yaml:"weight,omitempty"`
+	Weight       weight.Percentage `yaml:"weight" json:"weight"`
 	Status       int               `yaml:"status,omitempty"`
 	HTTPStatus   int               `yaml:"http_status,omitempty"`
 }
@@ -352,6 +581,14 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 			return nil, fmt.Errorf("defaults.use: template %q is not defined in defaults.response_templates", file.Defaults.Use)
 		}
 	}
+	for name, template := range file.Defaults.ResponseTemplates {
+		if template.Weighted == nil {
+			continue
+		}
+		if err := validateV2WeightTotal("response template "+name, template.Weighted); err != nil {
+			return nil, err
+		}
+	}
 
 	scenarios := make([]*Scenario, 0, len(orderedNames))
 	basePriority := 1000
@@ -388,7 +625,7 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 
 		// Validate mutual exclusion: branches vs scenario-level response.
 		hasBranches := len(entry.Branches) > 0
-		hasInline := entry.Status != 0 || entry.HTTPStatus != 0 || entry.Body != "" || entry.BodyFile != "" || entry.Error != "" || entry.Delay != "" || len(entry.Responses) > 0 || entry.Use != "" || entry.Stream != nil || entry.Block != nil
+		hasInline := entry.Status != 0 || entry.HTTPStatus != 0 || entry.Body != "" || entry.BodyFile != "" || entry.Error != "" || entry.Delay != "" || entry.Responses != nil || entry.Use != "" || entry.Stream != nil || entry.Block != nil
 		if hasBranches && hasInline {
 			return nil, fmt.Errorf("scenario %q: branches cannot be combined with scenario-level response fields (status/body/use/responses/...) on the same level — move the fallback into an explicit catch-all branch", name)
 		}
@@ -400,13 +637,15 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 		}
 
 		// Build MatchRule.
+		headers, headerContains := splitHeaderMatches(entry.When)
 		matchRule := MatchRule{
-			Methods: []string(methods),
-			Paths:   []string(endpoints),
-			Headers: entry.When,
+			Methods:        []string(methods),
+			Paths:          []string(endpoints),
+			Headers:        headers,
+			HeaderContains: headerContains,
 		}
 		if entry.WhenHTTP != nil {
-			matchRule.HTTPHeaders = entry.WhenHTTP.Headers
+			matchRule.HTTPHeaders, matchRule.HTTPHeaderContains = splitHeaderMatches(entry.WhenHTTP.Headers)
 			matchRule.HTTPURL = entry.WhenHTTP.URL
 			matchRule.HTTPMethod = entry.WhenHTTP.Method
 		}
@@ -505,9 +744,10 @@ func buildBranches(scenarioName string, in []BranchV2, file *ScenarioFileV2) ([]
 	out := make([]Branch, 0, len(in))
 	for i, b := range in {
 		where := fmt.Sprintf("scenario %q, branch #%d", scenarioName, i+1)
-		match := MatchRule{Headers: b.When}
+		headers, headerContains := splitHeaderMatches(b.When)
+		match := MatchRule{Headers: headers, HeaderContains: headerContains}
 		if b.WhenHTTP != nil {
-			match.HTTPHeaders = b.WhenHTTP.Headers
+			match.HTTPHeaders, match.HTTPHeaderContains = splitHeaderMatches(b.WhenHTTP.Headers)
 			match.HTTPURL = b.WhenHTTP.URL
 			match.HTTPMethod = b.WhenHTTP.Method
 		}
@@ -547,14 +787,17 @@ func buildBranches(scenarioName string, in []BranchV2, file *ScenarioFileV2) ([]
 // weighted is nil and ResponseTemplate carries the full response.
 //
 // where is a human-readable location used in error messages.
-func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedResponseV2, file *ScenarioFileV2) (ResponseTemplate, []WeightedResponse, error) { //nolint:gocyclo // resolution covers several orthogonal shapes
+func resolveResponse(where string, inline InlineResponseV2, weighted WeightedResponseListV2, file *ScenarioFileV2) (ResponseTemplate, []WeightedResponse, error) { //nolint:gocyclo // resolution covers several orthogonal shapes
 	tpls := file.Defaults.ResponseTemplates
 
 	// If a weighted list is provided, we're building a weighted response.
 	// Scenario/branch-level inline fields (status, body, set, delay, …) act as
 	// defaults that each variant inherits; the variant can override any field.
 	// "use:" on the same level is ambiguous with "responses:" and is rejected.
-	if len(weighted) > 0 {
+	if weighted != nil {
+		if len(weighted) == 0 {
+			return ResponseTemplate{}, nil, fmt.Errorf("%s: responses must contain at least one weighted variant", where)
+		}
 		if inline.Use != "" {
 			return ResponseTemplate{}, nil, fmt.Errorf("%s: responses cannot be combined with use: on the same level", where)
 		}
@@ -569,7 +812,7 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 	// inline fields. Also inherit defaults headers and file-wide fallback.
 	var (
 		base   InlineResponseV2
-		baseWt []WeightedResponseV2
+		baseWt WeightedResponseListV2
 	)
 	useRef := inline.Use
 	if useRef == "" && file.Defaults.Use != "" && isEmptyInline(inline) {
@@ -587,7 +830,7 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 			if base.Use != "" {
 				return ResponseTemplate{}, nil, fmt.Errorf("%s: template %q itself contains use: — templates cannot reference other templates", where, useRef)
 			}
-		case len(t.Weighted) > 0:
+		case t.Weighted != nil:
 			// Template is a weighted set — only allowed when no inline overlays.
 			if !isEmptyInlineExceptUse(inline) {
 				return ResponseTemplate{}, nil, fmt.Errorf("%s: use %q points to a weighted template; inline overrides on the same level are not allowed", where, useRef)
@@ -596,7 +839,7 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 		}
 	}
 
-	if len(baseWt) > 0 {
+	if baseWt != nil {
 		out, err := buildWeightedList(where, baseWt, InlineResponseV2{}, file, useRef)
 		if err != nil {
 			return ResponseTemplate{}, nil, err
@@ -617,11 +860,14 @@ func resolveResponse(where string, inline InlineResponseV2, weighted []WeightedR
 // variants inherit; each variant can override any field.
 func buildWeightedList(
 	where string,
-	variants []WeightedResponseV2,
+	variants WeightedResponseListV2,
 	base InlineResponseV2,
 	file *ScenarioFileV2,
 	baseName string,
 ) ([]WeightedResponse, error) {
+	if err := validateV2WeightTotal(where, variants); err != nil {
+		return nil, err
+	}
 	out := make([]WeightedResponse, 0, len(variants))
 	for i, wr := range variants {
 		inl := InlineResponseV2{
@@ -667,15 +913,48 @@ func buildWeightedList(
 			HTTPBodyFile: tpl.HTTPBodyFile,
 			Error:        tpl.Error,
 		}
-		if w.Weight == 0 {
-			w.Weight = 1
-		}
 		if tpl.DelayRange != nil {
 			w.Delay = *tpl.DelayRange
 		}
 		out = append(out, w)
 	}
 	return out, nil
+}
+
+func validateV2WeightTotal(where string, variants WeightedResponseListV2) error {
+	if len(variants) == 0 {
+		return fmt.Errorf("%s: responses must contain at least one variant", where)
+	}
+	total := 0
+	weightedCount := 0
+	for _, variant := range variants {
+		units := variant.Weight.Units()
+		if units != 0 {
+			weightedCount++
+		}
+		total += units
+	}
+	if weightedCount == 0 {
+		return nil
+	}
+	if weightedCount != len(variants) {
+		return fmt.Errorf("%s: either all response variants must define weight or none of them", where)
+	}
+	for i, variant := range variants {
+		units := variant.Weight.Units()
+		if units < 0 || units > weight.TotalUnits {
+			return fmt.Errorf("%s variant #%d: weight must be greater than 0.000 and no greater than 100.000", where, i+1)
+		}
+	}
+	if total != weight.TotalUnits {
+		return fmt.Errorf(
+			"%s: response weights total %d.%03d, want exactly 100.000",
+			where,
+			total/weight.Scale,
+			total%weight.Scale,
+		)
+	}
+	return nil
 }
 
 func selectedResponseName(variantName, baseName string) string {

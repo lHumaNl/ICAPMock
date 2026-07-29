@@ -19,6 +19,7 @@ import (
 	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/internal/storage"
+	"github.com/icap-mock/icap-mock/internal/weight"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -695,25 +696,23 @@ func responseStatusCode(response *storage.ResponseTemplate) int {
 
 // selectWeightedResponse picks a response variant based on weights.
 func selectWeightedResponse(responses []storage.WeightedResponse) *storage.WeightedResponse {
-	totalWeight := 0
-	for _, r := range responses {
-		w := r.Weight
-		if w <= 0 {
-			w = 1
-		}
-		totalWeight += w
+	if len(responses) == 0 {
+		return nil
 	}
-	if totalWeight == 0 {
-		return &responses[0]
+	if responses[0].Weight == 0 {
+		return selectWeightedResponseAt(responses, rand.Intn(len(responses))) //nolint:gosec // crypto not needed here
 	}
-	n := rand.Intn(totalWeight) //nolint:gosec // crypto not needed here
+	n := rand.Intn(weight.TotalUnits) //nolint:gosec // crypto not needed here
+	return selectWeightedResponseAt(responses, n)
+}
+
+func selectWeightedResponseAt(responses []storage.WeightedResponse, n int) *storage.WeightedResponse {
+	if responses[0].Weight == 0 {
+		return &responses[n]
+	}
 	cumulative := 0
 	for i := range responses {
-		w := responses[i].Weight
-		if w <= 0 {
-			w = 1
-		}
-		cumulative += w
+		cumulative += responses[i].Weight.Units()
 		if n < cumulative {
 			return &responses[i]
 		}

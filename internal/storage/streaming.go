@@ -20,6 +20,7 @@ const (
 	streamSourceResponseBody     = "response_body"
 	streamSourceRequestHTTPBody  = "request_http_body"
 	streamSourceResponseHTTPBody = "response_http_body"
+	streamSourceAdaptedHTTPBody  = "adapted_http_body"
 	streamSourceBody             = "body"
 	streamSourceBodyFile         = "body_file"
 	streamFinishComplete         = "complete"
@@ -222,7 +223,7 @@ func validateStreamSourceWithMethods(src StreamSourceConfig, methods MethodList)
 func validateStreamSource(src StreamSourceConfig) error {
 	switch src.From {
 	case streamSourceRequestBody, streamSourceResponseBody,
-		streamSourceRequestHTTPBody, streamSourceResponseHTTPBody:
+		streamSourceRequestHTTPBody, streamSourceResponseHTTPBody, streamSourceAdaptedHTTPBody:
 		if src.Body != "" || src.BodyFile != "" {
 			return fmt.Errorf("source.%s cannot be combined with source.body or source.body_file", src.From)
 		}
@@ -255,12 +256,26 @@ func validateStreamSourceMethods(source string, methods MethodList) error {
 		return validateBodyStreamMethods(methods, icap.MethodREQMOD, source)
 	case streamSourceResponseBody, streamSourceResponseHTTPBody:
 		return validateBodyStreamMethods(methods, icap.MethodRESPMOD, source)
+	case streamSourceAdaptedHTTPBody:
+		return validateAdaptedHTTPBodyMethods(methods)
 	}
 	if hasImplicitAnyMethod(methods) {
 		return nil
 	}
 	if !methodSetAllows(methods, icap.MethodREQMOD) && !methodSetAllows(methods, icap.MethodRESPMOD) {
 		return fmt.Errorf("stream requires a REQMOD or RESPMOD scenario")
+	}
+	return nil
+}
+
+func validateAdaptedHTTPBodyMethods(methods MethodList) error {
+	if hasImplicitAnyMethod(methods) {
+		return fmt.Errorf("source.%s requires explicit REQMOD and/or RESPMOD scenario methods", streamSourceAdaptedHTTPBody)
+	}
+	for _, method := range methods {
+		if !strings.EqualFold(method, icap.MethodREQMOD) && !strings.EqualFold(method, icap.MethodRESPMOD) {
+			return fmt.Errorf("source.%s does not support %s scenario methods", streamSourceAdaptedHTTPBody, method)
+		}
 	}
 	return nil
 }
@@ -302,7 +317,7 @@ func validateStreamMultipart(s *StreamConfig) error {
 		return nil
 	}
 	if len(s.Parts) > 0 || !streamSourceSupportsMultipart(s.Source.From) {
-		return fmt.Errorf("multipart is only allowed with request_http_body or response_http_body")
+		return fmt.Errorf("multipart is only allowed with request_http_body, response_http_body, or adapted_http_body")
 	}
 	return validateRegexList("multipart.files.filename", s.Multipart.Files.Filename)
 }

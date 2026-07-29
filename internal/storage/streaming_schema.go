@@ -274,12 +274,14 @@ func validateFallbackShape(f StreamFallbackConfig) error {
 }
 
 func streamSourceSupportsMultipart(source string) bool {
-	return source == streamSourceRequestHTTPBody || source == streamSourceResponseHTTPBody
+	return source == streamSourceRequestHTTPBody || source == streamSourceResponseHTTPBody ||
+		source == streamSourceAdaptedHTTPBody
 }
 
 func streamSourceCanFallbackFrom(source string) bool {
 	return source == streamSourceRequestBody || source == streamSourceResponseBody ||
-		source == streamSourceRequestHTTPBody || source == streamSourceResponseHTTPBody
+		source == streamSourceRequestHTTPBody || source == streamSourceResponseHTTPBody ||
+		source == streamSourceAdaptedHTTPBody
 }
 
 func (f StreamFallbackConfig) IsSet() bool {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"os"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/icap-mock/icap-mock/internal/weight"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -109,7 +111,9 @@ type ScenarioRegistry interface {
 type Scenario struct {
 	compiledBody        *regexp.Regexp
 	compiledHeaders     map[string]*regexp.Regexp
+	compiledHeaderLists map[string]compiledHeaderListMatcher
 	compiledHTTPHeaders map[string]*regexp.Regexp
+	compiledHTTPLists   map[string]compiledHeaderListMatcher
 	compiledHTTPURL     *regexp.Regexp
 	Name                string             `yaml:"name" json:"name"`
 	Match               MatchRule          `yaml:"match" json:"match"`
@@ -129,12 +133,26 @@ type compiledEndpoint struct {
 	captures []string
 }
 
+type compiledHeaderListMatcher struct {
+	mediaTypes    map[string]struct{}
+	parameterized []contentTypeMatcher
+	contains      []string
+	isContentType bool
+}
+
+type contentTypeMatcher struct {
+	parameters map[string]string
+	mediaType  string
+}
+
 // Branch is one conditional response branch inside a scenario. Branches are
 // evaluated in order; the first whose conditions match produces the response.
 // A Branch with no conditions acts as a catch-all inside its scenario.
 type Branch struct {
 	compiledHeaders     map[string]*regexp.Regexp
+	compiledHeaderLists map[string]compiledHeaderListMatcher
 	compiledHTTPHeaders map[string]*regexp.Regexp
+	compiledHTTPLists   map[string]compiledHeaderListMatcher
 	compiledHTTPURL     *regexp.Regexp
 	WeightedResponses   []WeightedResponse
 	Match               MatchRule
@@ -154,7 +172,7 @@ type WeightedResponse struct {
 	HTTPBodyFile string            `yaml:"http_body_file,omitempty" json:"http_body_file,omitempty"`
 	Error        string            `yaml:"error,omitempty" json:"error,omitempty"`
 	Delay        DelayConfig       `yaml:"-" json:"-"`
-	Weight       int               `yaml:"weight" json:"weight"`
+	Weight       weight.Percentage `yaml:"weight" json:"weight"`
 	ICAPStatus   int               `yaml:"icap_status,omitempty" json:"icap_status,omitempty"`
 	HTTPStatus   int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
 }
@@ -176,40 +194,22 @@ func (s *Scenario) SelectBranch(req *icap.Request) int {
 // branchMatches mirrors the header/HTTP checks done in the main matcher but
 // against a Branch's MatchRule and its pre-compiled regexps.
 func branchMatches(b *Branch, req *icap.Request) bool { //nolint:gocyclo // mirrors scenario-level checks which are themselves a list of AND clauses
-	for key, value := range b.Match.Headers {
-		h, ok := req.Header.Get(key)
-		if !ok {
-			return false
-		}
-		if compiled, hasRegex := b.compiledHeaders[key]; hasRegex {
-			if !compiled.MatchString(h) {
-				return false
-			}
-		} else if h != value {
-			return false
-		}
+	if !headerRulesMatch(b.Match.Headers, b.compiledHeaders, b.compiledHeaderLists, req.Header.Get) {
+		return false
 	}
 	if b.Match.HTTPMethod != "" {
 		if req.HTTPRequest == nil || req.HTTPRequest.Method != b.Match.HTTPMethod {
 			return false
 		}
 	}
-	if len(b.Match.HTTPHeaders) > 0 {
+	if len(b.Match.HTTPHeaders) > 0 || len(b.Match.HTTPHeaderContains) > 0 {
 		if !hasEncapsulatedHTTP(req) {
 			return false
 		}
-		for key, value := range b.Match.HTTPHeaders {
-			h, ok := httpHeaderLookup(req, key)
-			if !ok {
-				return false
-			}
-			if compiled, hasRegex := b.compiledHTTPHeaders[key]; hasRegex {
-				if !compiled.MatchString(h) {
-					return false
-				}
-			} else if h != value {
-				return false
-			}
+		if !headerRulesMatch(b.Match.HTTPHeaders, b.compiledHTTPHeaders, b.compiledHTTPLists, func(key string) (string, bool) {
+			return httpHeaderLookup(req, key)
+		}) {
+			return false
 		}
 	}
 	if b.Match.HTTPURL != "" {
@@ -282,15 +282,22 @@ type MatchRule struct {
 	// Empty string matches any URL.
 	HTTPURL string `yaml:"http_url,omitempty" json:"http_url,omitempty"`
 
-	// Headers contains exact match criteria for ICAP headers.
+	// Headers contains scalar exact/regex criteria for ICAP headers.
 	// All specified headers must match for the scenario to match.
 	// Values may be exact strings or "re:"-prefixed regex patterns.
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 
-	// HTTPHeaders contains match criteria for headers of the encapsulated HTTP
+	// HeaderContains contains list alternatives. Generic headers use
+	// case-insensitive substrings; Content-Type uses media-type-aware matching.
+	HeaderContains map[string][]string `yaml:"header_contains,omitempty" json:"header_contains,omitempty"`
+
+	// HTTPHeaders contains scalar match criteria for headers of the encapsulated HTTP
 	// request (REQMOD) or response (RESPMOD). All specified headers must match.
 	// Values may be exact strings or "re:"-prefixed regex patterns.
 	HTTPHeaders map[string]string `yaml:"http_headers,omitempty" json:"http_headers,omitempty"`
+
+	// HTTPHeaderContains is the encapsulated-HTTP counterpart of HeaderContains.
+	HTTPHeaderContains map[string][]string `yaml:"http_header_contains,omitempty" json:"http_header_contains,omitempty"`
 
 	// BodyPattern is a regex pattern to match the HTTP body.
 	// Empty string matches any body (including no body).
@@ -612,9 +619,28 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 	if err := validateResponseStreaming(s.Name+" response", &s.Response, s.Match.Methods); err != nil {
 		return err
 	}
+	if err := validateRuntimeWeightTotal(s.Name, s.WeightedResponses); err != nil {
+		return err
+	}
 	if err := validateWeightedStreaming(s.Name, s.WeightedResponses, s.Match.Methods); err != nil {
 		return err
 	}
+	if err := normalizeHeaderContainsRules(s.Name+" match.headers", s.Match.Headers, s.Match.HeaderContains); err != nil {
+		return err
+	}
+	if err := normalizeHeaderContainsRules(s.Name+" match.http_headers", s.Match.HTTPHeaders, s.Match.HTTPHeaderContains); err != nil {
+		return err
+	}
+	compiledHeaderLists, compileErr := compileHeaderListMatchers(s.Name+" match.headers", s.Match.HeaderContains)
+	if compileErr != nil {
+		return compileErr
+	}
+	s.compiledHeaderLists = compiledHeaderLists
+	compiledHTTPLists, compileErr := compileHeaderListMatchers(s.Name+" match.http_headers", s.Match.HTTPHeaderContains)
+	if compileErr != nil {
+		return compileErr
+	}
+	s.compiledHTTPLists = compiledHTTPLists
 
 	// Compile header patterns with re: prefix
 	for key, value := range s.Match.Headers {
@@ -681,10 +707,29 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 	for idx := range s.Branches {
 		b := &s.Branches[idx]
 		where := fmt.Sprintf("%s branch #%d", s.Name, idx+1)
+		if err := normalizeHeaderContainsRules(where+" when", b.Match.Headers, b.Match.HeaderContains); err != nil {
+			return err
+		}
+		if err := normalizeHeaderContainsRules(where+" when_http.headers", b.Match.HTTPHeaders, b.Match.HTTPHeaderContains); err != nil {
+			return err
+		}
+		compiledHeaderLists, compileErr := compileHeaderListMatchers(where+" when", b.Match.HeaderContains)
+		if compileErr != nil {
+			return compileErr
+		}
+		b.compiledHeaderLists = compiledHeaderLists
+		compiledHTTPLists, compileErr := compileHeaderListMatchers(where+" when_http.headers", b.Match.HTTPHeaderContains)
+		if compileErr != nil {
+			return compileErr
+		}
+		b.compiledHTTPLists = compiledHTTPLists
 		if b.Response.ICAPStatus == 0 && b.Response.Status != 0 {
 			b.Response.ICAPStatus = b.Response.Status
 		}
 		if err := validateResponseStreaming(where, &b.Response, s.Match.Methods); err != nil {
+			return err
+		}
+		if err := validateRuntimeWeightTotal(where, b.WeightedResponses); err != nil {
 			return err
 		}
 		if err := validateWeightedStreaming(where, b.WeightedResponses, s.Match.Methods); err != nil {
@@ -725,6 +770,45 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 		}
 	}
 
+	return nil
+}
+
+func validateRuntimeWeightTotal(where string, variants []WeightedResponse) error {
+	if variants == nil {
+		return nil
+	}
+	if len(variants) == 0 {
+		return fmt.Errorf("%s: responses must contain at least one weighted variant", where)
+	}
+	total := 0
+	weightedCount := 0
+	for _, variant := range variants {
+		units := variant.Weight.Units()
+		if units != 0 {
+			weightedCount++
+		}
+		total += units
+	}
+	if weightedCount == 0 {
+		return nil
+	}
+	if weightedCount != len(variants) {
+		return fmt.Errorf("%s: either all response variants must define weight or none of them", where)
+	}
+	for i, variant := range variants {
+		units := variant.Weight.Units()
+		if units < 0 || units > weight.TotalUnits {
+			return fmt.Errorf("%s variant #%d: weight must be greater than 0.000 and no greater than 100.000", where, i+1)
+		}
+	}
+	if total != weight.TotalUnits {
+		return fmt.Errorf(
+			"%s: response weights total %d.%03d, want exactly 100.000",
+			where,
+			total/weight.Scale,
+			total%weight.Scale,
+		)
+	}
 	return nil
 }
 
@@ -770,7 +854,11 @@ func (r *scenarioRegistry) Match(ctx context.Context, req *icap.Request) (*Scena
 }
 
 // matches checks if a scenario matches the given request.
-func (r *scenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.Request) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
+func (r *scenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.Request) (bool, error) {
+	return matchesScenario(ctx, s, req, r.bodyPattern)
+}
+
+func matchesScenario(ctx context.Context, s *Scenario, req *icap.Request, bodyPattern BodyPatternOptions) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -797,21 +885,9 @@ func (r *scenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.R
 		}
 	}
 
-	// Check headers (all must match — exact or regex)
-	for key, value := range s.Match.Headers {
-		h, ok := req.Header.Get(key)
-		if !ok {
-			return false, nil
-		}
-		if compiled, hasRegex := s.compiledHeaders[key]; hasRegex {
-			if !compiled.MatchString(h) {
-				return false, nil
-			}
-		} else {
-			if h != value {
-				return false, nil
-			}
-		}
+	// Check headers (all must match — exact, regex, or contains-any list).
+	if !headerRulesMatch(s.Match.Headers, s.compiledHeaders, s.compiledHeaderLists, req.Header.Get) {
+		return false, nil
 	}
 
 	// Check HTTP method - if scenario specifies HTTP method, request must have HTTP request
@@ -827,22 +903,14 @@ func (r *scenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.R
 	// Check encapsulated HTTP headers. For RESPMOD the scanned headers live in
 	// req.HTTPResponse (Content-Type, Content-Length, …); httpHeaderLookup picks
 	// the right side by ICAP method and falls back to the other side.
-	if len(s.Match.HTTPHeaders) > 0 {
+	if len(s.Match.HTTPHeaders) > 0 || len(s.Match.HTTPHeaderContains) > 0 {
 		if !hasEncapsulatedHTTP(req) {
 			return false, nil
 		}
-		for key, value := range s.Match.HTTPHeaders {
-			h, ok := httpHeaderLookup(req, key)
-			if !ok {
-				return false, nil
-			}
-			if compiled, hasRegex := s.compiledHTTPHeaders[key]; hasRegex {
-				if !compiled.MatchString(h) {
-					return false, nil
-				}
-			} else if h != value {
-				return false, nil
-			}
+		if !headerRulesMatch(s.Match.HTTPHeaders, s.compiledHTTPHeaders, s.compiledHTTPLists, func(key string) (string, bool) {
+			return httpHeaderLookup(req, key)
+		}) {
+			return false, nil
 		}
 	}
 
@@ -870,7 +938,7 @@ func (r *scenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.R
 		if msg == nil {
 			return false, nil
 		}
-		matched, err := bodyPatternMatches(ctx, s.compiledBody, msg, r.bodyPattern)
+		matched, err := bodyPatternMatches(ctx, s.compiledBody, msg, bodyPattern)
 		if err != nil || !matched {
 			return false, err
 		}
@@ -1039,6 +1107,160 @@ func matchEndpoint(paths []compiledEndpoint, reqPath string) (map[string]string,
 		return caps, true
 	}
 	return nil, false
+}
+
+func normalizeHeaderContainsRules(where string, exact map[string]string, rules map[string][]string) error {
+	for key, values := range rules {
+		if _, conflict := exact[key]; conflict {
+			return fmt.Errorf("%s.%s cannot use both scalar and list matchers", where, key)
+		}
+		if len(values) == 0 {
+			return fmt.Errorf("%s.%s list must not be empty", where, key)
+		}
+		for i, value := range values {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("%s.%s list item #%d must not be empty", where, key, i+1)
+			}
+			if isContentTypeHeader(key) {
+				values[i] = strings.TrimSpace(value)
+			} else {
+				values[i] = strings.ToLower(value)
+			}
+		}
+		rules[key] = values
+	}
+	return nil
+}
+
+func compileHeaderListMatchers(where string, rules map[string][]string) (map[string]compiledHeaderListMatcher, error) {
+	if len(rules) == 0 {
+		return nil, nil //nolint:nilnil // no compiled matchers is a valid result
+	}
+	compiled := make(map[string]compiledHeaderListMatcher, len(rules))
+	for key, values := range rules {
+		matcher := compiledHeaderListMatcher{contains: values}
+		if isContentTypeHeader(key) {
+			var err error
+			matcher, err = compileContentTypeListMatcher(values)
+			if err != nil {
+				return nil, fmt.Errorf("%s.%s: %w", where, key, err)
+			}
+		}
+		compiled[key] = matcher
+	}
+	return compiled, nil
+}
+
+func compileContentTypeListMatcher(values []string) (compiledHeaderListMatcher, error) {
+	matcher := compiledHeaderListMatcher{isContentType: true}
+	for i, value := range values {
+		mediaType, parameters, err := mime.ParseMediaType(value)
+		if err != nil {
+			return compiledHeaderListMatcher{}, fmt.Errorf("list item #%d %q is not a valid media type: %w", i+1, value, err)
+		}
+		mediaTypeName, mediaSubtype, hasSubtype := strings.Cut(mediaType, "/")
+		if !hasSubtype || mediaTypeName == "" || mediaSubtype == "" {
+			return compiledHeaderListMatcher{}, fmt.Errorf("list item #%d %q must use type/subtype media type syntax", i+1, value)
+		}
+		if strings.Contains(value, ";") {
+			matcher.parameterized = append(matcher.parameterized, contentTypeMatcher{
+				mediaType:  mediaType,
+				parameters: parameters,
+			})
+			continue
+		}
+		if matcher.mediaTypes == nil {
+			matcher.mediaTypes = make(map[string]struct{})
+		}
+		matcher.mediaTypes[mediaType] = struct{}{}
+	}
+	return matcher, nil
+}
+
+func isContentTypeHeader(key string) bool {
+	return strings.EqualFold(key, "Content-Type")
+}
+
+func headerRulesMatch(
+	exact map[string]string,
+	compiledRegex map[string]*regexp.Regexp,
+	compiledLists map[string]compiledHeaderListMatcher,
+	lookup func(string) (string, bool),
+) bool {
+	for key, value := range exact {
+		header, ok := lookup(key)
+		if !ok {
+			return false
+		}
+		if pattern, isRegex := compiledRegex[key]; isRegex {
+			if !pattern.MatchString(header) {
+				return false
+			}
+		} else if header != value {
+			return false
+		}
+	}
+	for key, matcher := range compiledLists {
+		header, ok := lookup(key)
+		if !ok || !matcher.matches(header) {
+			return false
+		}
+	}
+	return true
+}
+
+func (m compiledHeaderListMatcher) matches(value string) bool {
+	if !m.isContentType {
+		return containsAnyLower(strings.ToLower(value), m.contains)
+	}
+	return m.matchesContentType(value)
+}
+
+func (m compiledHeaderListMatcher) matchesContentType(value string) bool {
+	mediaTypePrefix, _, _ := strings.Cut(value, ";")
+	mediaTypePrefix = strings.ToLower(strings.TrimSpace(mediaTypePrefix))
+	if _, ok := m.mediaTypes[mediaTypePrefix]; ok {
+		return true
+	}
+	if len(m.parameterized) == 0 {
+		return false
+	}
+	mediaType, parameters, err := mime.ParseMediaType(value)
+	if err != nil {
+		return false
+	}
+	for _, expected := range m.parameterized {
+		if mediaType == expected.mediaType && contentTypeParametersMatch(parameters, expected.parameters) {
+			return true
+		}
+	}
+	return false
+}
+
+func contentTypeParametersMatch(actual, expected map[string]string) bool {
+	for key, expectedValue := range expected {
+		actualValue, ok := actual[key]
+		if !ok {
+			return false
+		}
+		if key == "charset" {
+			if !strings.EqualFold(actualValue, expectedValue) {
+				return false
+			}
+		} else if actualValue != expectedValue {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAnyLower(value string, alternatives []string) bool {
+	for _, alternative := range alternatives {
+		if strings.Contains(value, alternative) {
+			return true
+		}
+	}
+	return false
 }
 
 // httpHeaderLookup returns the value of the given header from the appropriate

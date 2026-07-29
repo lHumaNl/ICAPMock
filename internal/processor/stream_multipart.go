@@ -87,6 +87,8 @@ func streamHTTPMessage(from string, req *icap.Request) (*icap.HTTPMessage, error
 			return req.HTTPResponse, nil
 		}
 		return nil, fmt.Errorf("response_http_body source requires an encapsulated HTTP response")
+	case streamSourceAdaptedHTTPBody:
+		return adaptedHTTPBodyMessage(req)
 	}
 	return nil, fmt.Errorf("multipart source %q is unsupported", from)
 }

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/icap-mock/icap-mock/internal/weight"
 )
 
 const (
@@ -97,25 +99,100 @@ type InlineWeightedResponse struct {
 	Set        map[string]string `yaml:"set,omitempty" json:"set,omitempty"`
 	Body       string            `yaml:"body,omitempty" json:"body,omitempty"`
 	Delay      string            `yaml:"delay,omitempty" json:"delay,omitempty"`
-	Weight     int               `yaml:"weight,omitempty" json:"weight,omitempty"`
+	Weight     weight.Percentage `yaml:"weight" json:"weight"`
 	Status     int               `yaml:"status,omitempty" json:"status,omitempty"`
 	HTTPStatus int               `yaml:"http_status,omitempty" json:"http_status,omitempty"`
+}
+
+// InlineWeightedResponses preserves explicit empty/null lists for validation.
+type InlineWeightedResponses []InlineWeightedResponse
+
+// UnmarshalYAML decodes an inline weighted list while preserving presence.
+func (w *InlineWeightedResponses) UnmarshalYAML(node *yaml.Node) error {
+	if node.Tag == "!!null" {
+		*w = make(InlineWeightedResponses, 0)
+		return nil
+	}
+	var decoded []InlineWeightedResponse
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*w = InlineWeightedResponses(decoded)
+	return nil
+}
+
+// UnmarshalJSON decodes an inline weighted list while preserving presence.
+func (w *InlineWeightedResponses) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*w = make(InlineWeightedResponses, 0)
+		return nil
+	}
+	var decoded []InlineWeightedResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*w = InlineWeightedResponses(decoded)
+	return nil
 }
 
 // InlineScenarioEntry mirrors storage.ScenarioEntryV2 for inline scenario definitions.
 // Defined here to avoid a circular import between config and storage packages.
 type InlineScenarioEntry struct {
-	When       map[string]string        `yaml:"when,omitempty" json:"when,omitempty"`
-	Set        map[string]string        `yaml:"set,omitempty" json:"set,omitempty"`
-	Method     MethodList               `yaml:"method,omitempty" json:"method,omitempty"`
-	Endpoint   EndpointList             `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
-	Body       string                   `yaml:"body,omitempty" json:"body,omitempty"`
-	BodyFile   string                   `yaml:"body_file,omitempty" json:"body_file,omitempty"`
-	Delay      string                   `yaml:"delay,omitempty" json:"delay,omitempty"`
-	Responses  []InlineWeightedResponse `yaml:"responses,omitempty" json:"responses,omitempty"`
-	Status     int                      `yaml:"status,omitempty" json:"status,omitempty"`
-	HTTPStatus int                      `yaml:"http_status,omitempty" json:"http_status,omitempty"`
-	Priority   int                      `yaml:"priority,omitempty" json:"priority,omitempty"`
+	When       map[string]string       `yaml:"when,omitempty" json:"when,omitempty"`
+	Set        map[string]string       `yaml:"set,omitempty" json:"set,omitempty"`
+	Method     MethodList              `yaml:"method,omitempty" json:"method,omitempty"`
+	Endpoint   EndpointList            `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	Body       string                  `yaml:"body,omitempty" json:"body,omitempty"`
+	BodyFile   string                  `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	Delay      string                  `yaml:"delay,omitempty" json:"delay,omitempty"`
+	Responses  InlineWeightedResponses `yaml:"responses,omitempty" json:"responses,omitempty"`
+	Status     int                     `yaml:"status,omitempty" json:"status,omitempty"`
+	HTTPStatus int                     `yaml:"http_status,omitempty" json:"http_status,omitempty"`
+	Priority   int                     `yaml:"priority,omitempty" json:"priority,omitempty"`
+}
+
+// UnmarshalYAML preserves an explicitly null responses field for validation.
+func (e *InlineScenarioEntry) UnmarshalYAML(node *yaml.Node) error {
+	type plain InlineScenarioEntry
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*e = InlineScenarioEntry(decoded)
+	if yamlMappingContainsKey(node, "responses") && e.Responses == nil {
+		e.Responses = make(InlineWeightedResponses, 0)
+	}
+	return nil
+}
+
+// UnmarshalJSON preserves an explicitly null responses field for validation.
+func (e *InlineScenarioEntry) UnmarshalJSON(data []byte) error {
+	type plain InlineScenarioEntry
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*e = InlineScenarioEntry(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["responses"]; present && e.Responses == nil {
+		e.Responses = make(InlineWeightedResponses, 0)
+	}
+	return nil
+}
+
+func yamlMappingContainsKey(node *yaml.Node, key string) bool {
+	if node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // ServerEntryConfig defines an ICAP server instance with its own port and scenarios.

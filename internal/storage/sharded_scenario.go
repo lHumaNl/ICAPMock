@@ -697,7 +697,9 @@ func scenarioDisablesMatchCache(s *Scenario) bool {
 
 func hasDynamicMatchRule(s *Scenario) bool {
 	return len(s.Match.Headers) > 0 ||
+		len(s.Match.HeaderContains) > 0 ||
 		len(s.Match.HTTPHeaders) > 0 ||
+		len(s.Match.HTTPHeaderContains) > 0 ||
 		s.Match.ClientIP != "" ||
 		len(s.Match.CIDRRanges) > 0 ||
 		s.Match.BodyPattern != ""
@@ -754,133 +756,8 @@ func (r *ShardedScenarioRegistry) fallbackMatch(ctx context.Context, req *icap.R
 }
 
 // matches проверяет соответствует ли сценарий запросу.
-func (r *ShardedScenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.Request) (bool, error) { //nolint:gocyclo // scenario matching checks each rule field sequentially
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	// Check ICAP method
-	if !methodMatches(s.Match.Methods, req.Method) {
-		return false, nil
-	}
-
-	// Check endpoint(s). Any one match is enough; capture names from the
-	// matched endpoint are merged onto req.Captures for use in response
-	// substitution.
-	if len(s.compiledPaths) > 0 {
-		caps, ok := matchEndpoint(s.compiledPaths, extractPath(req.URI))
-		if !ok {
-			return false, nil
-		}
-		if len(caps) > 0 {
-			if req.Captures == nil {
-				req.Captures = make(map[string]string, len(caps))
-			}
-			for k, v := range caps {
-				req.Captures[k] = v
-			}
-		}
-	}
-
-	// Check headers (all must match — exact or regex via re: prefix)
-	for key, value := range s.Match.Headers {
-		h, ok := req.Header.Get(key)
-		if !ok {
-			return false, nil
-		}
-		if compiled, hasRegex := s.compiledHeaders[key]; hasRegex {
-			if !compiled.MatchString(h) {
-				return false, nil
-			}
-		} else if h != value {
-			return false, nil
-		}
-	}
-
-	// Check HTTP method
-	if s.Match.HTTPMethod != "" {
-		if req.HTTPRequest == nil {
-			return false, nil
-		}
-		if req.HTTPRequest.Method != s.Match.HTTPMethod {
-			return false, nil
-		}
-	}
-
-	// Check encapsulated HTTP headers. For RESPMOD the scanned headers live in
-	// req.HTTPResponse (Content-Type, Content-Length, …); httpHeaderLookup
-	// picks the right side by ICAP method and falls back to the other side.
-	if len(s.Match.HTTPHeaders) > 0 {
-		if !hasEncapsulatedHTTP(req) {
-			return false, nil
-		}
-		for key, value := range s.Match.HTTPHeaders {
-			h, ok := httpHeaderLookup(req, key)
-			if !ok {
-				return false, nil
-			}
-			if compiled, hasRegex := s.compiledHTTPHeaders[key]; hasRegex {
-				if !compiled.MatchString(h) {
-					return false, nil
-				}
-			} else if h != value {
-				return false, nil
-			}
-		}
-	}
-
-	// Check encapsulated HTTP URL. The URL lives on the original HTTP request
-	// even for RESPMOD (req-hdr part of Encapsulated).
-	if s.Match.HTTPURL != "" {
-		if req.HTTPRequest == nil {
-			return false, nil
-		}
-		if s.compiledHTTPURL != nil {
-			if !s.compiledHTTPURL.MatchString(req.HTTPRequest.URI) {
-				return false, nil
-			}
-		} else if req.HTTPRequest.URI != s.Match.HTTPURL {
-			return false, nil
-		}
-	}
-
-	// Check body pattern
-	if s.compiledBody != nil {
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		msg := bodyPatternMessage(req)
-		if msg == nil {
-			return false, nil
-		}
-		matched, err := bodyPatternMatches(ctx, s.compiledBody, msg, r.bodyPattern)
-		if err != nil || !matched {
-			return false, err
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-
-	// Check client IP
-	if s.Match.ClientIP != "" {
-		if !matchClientIP(s.Match.ClientIP, req.ClientIP) {
-			return false, nil
-		}
-	}
-
-	// Check CIDR ranges
-	if len(s.compiledCIDRs) > 0 {
-		if !matchByCIDR(s.compiledCIDRs, req.ClientIP) {
-			return false, nil
-		}
-	}
-
-	// If the scenario has branches, require at least one branch to match.
-	if len(s.Branches) > 0 && s.SelectBranch(req) < 0 {
-		return false, nil
-	}
-
-	return true, nil
+func (r *ShardedScenarioRegistry) matches(ctx context.Context, s *Scenario, req *icap.Request) (bool, error) {
+	return matchesScenario(ctx, s, req, r.bodyPattern)
 }
 
 // Reload перезагружает сценарии из последнего загруженного файла.

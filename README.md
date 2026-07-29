@@ -19,7 +19,8 @@
 - **Branches** — `branches:` list inside a scenario for OR-style dispatch with per-branch response (inline, `use:`, or weighted); first match wins; falls through to the next scenario if none match
 - **Path captures** — endpoints like `/env/{id}/status` extract `{id}` from the URI; captured values are available as `${id}` in body/set/http_headers
 - **Multi-method / multi-endpoint per port** — `method:` and `endpoint:` accept a scalar or a list; a single ICAP listener serves them all
-- **Regex matching** — match headers, URLs, and other fields against regular expressions (`re:` prefix)
+- **Flexible header matching** — exact values, regular expressions (`re:` prefix), generic
+  contains-any lists, and fast media-type sets for `Content-Type`
 - **Prometheus metrics** — expose request counts, latencies, and error rates at `/metrics`
 - **Health checks** — HTTP `/health` and `/ready` endpoints for readiness probing
 - **Hot-reload** — scenario files are watched and reloaded without restarting the server
@@ -33,8 +34,8 @@
 Requires Go 1.25+.
 
 ```bash
-git clone https://github.com/lHumaNl/ICAPMock.git
-cd icapmock
+git clone https://github.com/icap-mock/icap-mock.git
+cd icap-mock
 make build
 ./bin/icap-mock server --config configs/example.yaml
 ```
@@ -188,11 +189,11 @@ scenarios:
   # Weighted responses (probabilistic)
   flaky-service:
     responses:
-      - weight: 80
+      - weight: 80.000
         status: 204
         set:
           x-verdict: "CLEAN"
-      - weight: 20
+      - weight: 20.000
         status: 500
     delay: 100ms-300ms
 
@@ -207,6 +208,11 @@ Scenarios are evaluated in priority order (file order by default); the first mat
 wins. `when:` matches ICAP-envelope headers, `when_http:` matches the encapsulated HTTP message
 (its `headers`, `url`, and `method`) — combine them freely with AND semantics. A scenario without
 a `when`/`when_http` block acts as a catch-all.
+
+If every response variant omits `weight`, selection is uniform. Otherwise all variants must
+define percentages rounded half-up to three decimals. Every value must be greater than `0.000`
+and no greater than `100.000`, and the list must total exactly `100.000` after rounding. Mixing
+weighted and unweighted variants is invalid.
 
 ### Response templates, branches, path captures
 
@@ -230,9 +236,9 @@ defaults:
         Content-Type: "text/html"
       http_body: "<html>blocked in ${env}</html>"   # wrapped HTTP body; ${env} from matched endpoint
     flaky:                                     # weighted template
-      - { weight: 70, use: blocked }
-      - { weight: 25, use: clean }
-      - { weight: 5,  status: 500 }
+      - { weight: 70.000, use: blocked }
+      - { weight: 25.000, use: clean }
+      - { weight: 5.000,  status: 500 }
 
   use: clean                                   # file-wide fallback (no scenario → 204)
 
@@ -305,6 +311,8 @@ scenarios:
 Notes:
 
 - `request_http_body` is valid for REQMOD scenarios; `response_http_body` is valid for RESPMOD.
+- `adapted_http_body` works with explicit REQMOD and/or RESPMOD methods, selecting the request body
+  for REQMOD and response body for RESPMOD so one response template can serve both methods.
 - `stream.parts` concatenates multiple sources in order.
 - `multipart.fields` matches part names exactly; `multipart.files.filename` uses regex patterns.
 - `fallback.raw_file` is for non-multipart raw source bodies only. For multipart selector misses,

@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/icap-mock/icap-mock/internal/weight"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -296,7 +297,7 @@ func TestConvertV2ToScenarios_Basic(t *testing.T) {
 		},
 		Scenarios: map[string]ScenarioEntryV2{
 			"scenario-a": {
-				When: map[string]string{"X-Header": "value"},
+				When: NewExactHeaderMatchesV2(map[string]string{"X-Header": "value"}),
 				Set:  map[string]string{"x-custom": "custom-value"},
 			},
 		},
@@ -542,10 +543,10 @@ func TestConvertV2ToScenarios_WhenHeaders(t *testing.T) {
 		Defaults: ScenarioDefaultsV2{Method: MethodList{"REQMOD"}, Endpoint: EndpointList{"/x"}},
 		Scenarios: map[string]ScenarioEntryV2{
 			"with-when": {
-				When: map[string]string{
+				When: NewExactHeaderMatchesV2(map[string]string{
 					"X-Filename": "synthetic-block.exe",
 					"X-Other":    "re:^value.*",
-				},
+				}),
 			},
 		},
 	}
@@ -689,9 +690,9 @@ func TestConvertV2ToScenarios_WhenHTTP(t *testing.T) {
 		Scenarios: map[string]ScenarioEntryV2{
 			"http-match": {
 				WhenHTTP: &WhenHTTPV2{
-					Headers: map[string]string{
+					Headers: NewExactHeaderMatchesV2(map[string]string{
 						"Content-Type": "re:(?i)application/x-dosexec",
-					},
+					}),
 					URL:    "re:(?i)\\.(exe|dll)$",
 					Method: "GET",
 				},
@@ -908,7 +909,7 @@ func TestConvertV2_BranchesWithTemplates(t *testing.T) {
 		Scenarios: map[string]ScenarioEntryV2{
 			"s": {
 				Branches: []BranchV2{
-					{When: map[string]string{"X-Tag": "bad"}, Use: "blocked"},
+					{When: NewExactHeaderMatchesV2(map[string]string{"X-Tag": "bad"}), Use: "blocked"},
 					{Use: "clean"},
 				},
 			},
@@ -942,7 +943,7 @@ func TestConvertV2_BlockIsNullableAndInherited(t *testing.T) {
 		Scenarios: map[string]ScenarioEntryV2{
 			"explicit-false": {Use: "base", Block: boolPtr(false)},
 			"weighted": {
-				Responses: []WeightedResponseV2{{Weight: 1, Use: "base", Block: boolPtr(false)}},
+				Responses: []WeightedResponseV2{{Weight: weight.MustParse("100"), Use: "base", Block: boolPtr(false)}},
 			},
 		},
 	}
