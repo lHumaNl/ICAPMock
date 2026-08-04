@@ -478,6 +478,30 @@ func TestCollector_RecordRequestError(t *testing.T) {
 	}
 }
 
+func TestCollector_RecordResponseWriteError(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+
+	collector.RecordRequestErrorForServer(
+		"edge",
+		"REQMOD",
+		RequestErrorStageWriteResponse,
+		RequestErrorTypeResponseWriteFailed,
+		"scan",
+		"clean",
+	)
+
+	labels := requestErrorMetricLabels(
+		"edge", "REQMOD", RequestErrorStageWriteResponse, RequestErrorTypeResponseWriteFailed, "scan", "clean",
+	)
+	if got := metricValue(t, reg, "icap_request_errors_total", labels); got != 1 {
+		t.Errorf("response write errors = %v, want 1", got)
+	}
+}
+
 func requestErrorMetricLabels(server, method, stage, errorType, scenario, response string) map[string]string {
 	return map[string]string{
 		"server":     server,

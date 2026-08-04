@@ -15,6 +15,8 @@ const (
 	RequestErrorStageProcessorBuild = "processor_build"
 	// RequestErrorStageProcessorResponse labels configured scenario response errors.
 	RequestErrorStageProcessorResponse = "processor_response"
+	// RequestErrorStageWriteResponse labels failures while delivering the ICAP response.
+	RequestErrorStageWriteResponse = "write_response"
 
 	// RequestErrorTypeContextCanceled labels context.Canceled errors.
 	RequestErrorTypeContextCanceled = "context_canceled"
@@ -36,6 +38,8 @@ const (
 	RequestErrorTypeScenarioResponseError = "scenario_response_error"
 	// RequestErrorTypeNilProcessor labels missing processor configuration.
 	RequestErrorTypeNilProcessor = "nil_processor"
+	// RequestErrorTypeResponseWriteFailed labels response serialization or flush failures.
+	RequestErrorTypeResponseWriteFailed = "response_write_failed"
 )
 
 var knownRequestErrorStages = map[string]struct{}{
@@ -45,6 +49,7 @@ var knownRequestErrorStages = map[string]struct{}{
 	RequestErrorStageProcessorMatch:    {},
 	RequestErrorStageProcessorBuild:    {},
 	RequestErrorStageProcessorResponse: {},
+	RequestErrorStageWriteResponse:     {},
 }
 
 var knownRequestErrorTypes = map[string]struct{}{
@@ -58,6 +63,7 @@ var knownRequestErrorTypes = map[string]struct{}{
 	RequestErrorTypeResponseBuildFailed:   {},
 	RequestErrorTypeScenarioResponseError: {},
 	RequestErrorTypeNilProcessor:          {},
+	RequestErrorTypeResponseWriteFailed:   {},
 }
 
 // RecordRequestError records a bounded ICAP request error metric.

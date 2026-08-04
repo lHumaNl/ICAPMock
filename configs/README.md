@@ -72,7 +72,9 @@ See `example.yaml` for the complete list of available fields with defaults and d
 ### Request metrics labels
 
 Prometheus metrics are enabled by default. The canonical request counter is
-`icap_requests_total{content_type,method,outcome,server,response,scenario}`. The `content_type` label is parsed from
+`icap_requests_total{content_type,method,outcome,server,response,scenario}`. It is recorded once at the request's
+terminal outcome. Successful `allowed` or `blocked` outcomes are recorded only after response delivery; response
+write or flush failures use `outcome="error"`. The `content_type` label is parsed from
 the encapsulated HTTP `Content-Type` header, lowercased, stripped of parameters, truncated to 120
 characters, and bounded to known or safely admitted media types. REQMOD uses the HTTP request
 header, RESPMOD uses the HTTP response header, and OPTIONS or missing HTTP headers use
@@ -82,12 +84,13 @@ Outcome values are `allowed`, `blocked`, and `error`.
 
 Request error observability uses
 `icap_request_errors_total{server,method,stage,error_type,scenario,response}`. Stages are bounded to
-`context`, `body_receive`, `routing`, `processor_match`, `processor_response`, and
-`processor_build`; error types are likewise bounded (for example `context_canceled`,
-`deadline_exceeded`, `route_not_found`, `no_scenario_match`, and `response_build_failed`). Raw error
+`context`, `body_receive`, `routing`, `processor_match`, `processor_response`, `processor_build`, and
+`write_response`; error types are likewise bounded (for example `context_canceled`,
+`deadline_exceeded`, `route_not_found`, `no_scenario_match`, `response_build_failed`, and
+`response_write_failed`). Raw error
 descriptions are emitted only in structured ERROR logs.
 The aggregate `icap_errors_total{server,type}` counter also includes routing failures such as
-`route_not_found`.
+`route_not_found` and response delivery failures such as `response_write_failed`.
 
 Scenario response latency uses the classic histogram
 `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` with

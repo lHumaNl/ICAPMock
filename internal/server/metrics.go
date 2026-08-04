@@ -12,6 +12,15 @@ import (
 )
 
 func (s *ICAPServer) recordIncomingRequest(ctx context.Context, req *icap.Request, resp *icap.Response) {
+	s.recordIncomingRequestOutcome(ctx, req, resp, requestOutcome(resp))
+}
+
+func (s *ICAPServer) recordIncomingRequestOutcome(
+	ctx context.Context,
+	req *icap.Request,
+	resp *icap.Response,
+	outcome string,
+) {
 	if s.metrics == nil || req == nil {
 		return
 	}
@@ -20,13 +29,13 @@ func (s *ICAPServer) recordIncomingRequest(ctx context.Context, req *icap.Reques
 		contentTypeLabel = s.canonicalContentTypeLabel(req)
 	}
 	metadata := requestMetricMetadata(ctx, resp)
-	s.recordIncomingRequestWithLabel(req, resp, contentTypeLabel, metadata)
+	s.recordIncomingRequestWithLabel(req, contentTypeLabel, outcome, metadata)
 }
 
 func (s *ICAPServer) recordIncomingRequestWithLabel(
 	req *icap.Request,
-	resp *icap.Response,
 	contentTypeLabel string,
+	outcome string,
 	metadata requestMetricLabels,
 ) {
 	if s.metrics == nil || req == nil {
@@ -36,7 +45,7 @@ func (s *ICAPServer) recordIncomingRequestWithLabel(
 		s.metricsServerName,
 		req.Method,
 		contentTypeLabel,
-		requestOutcome(resp),
+		outcome,
 		metadata.response,
 		metadata.scenario,
 	)

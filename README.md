@@ -357,9 +357,9 @@ Prometheus metrics are served at `http://localhost:9090/metrics` by default.
 
 Available metrics include:
 
-- `icap_requests_total{content_type,method,outcome,server,response,scenario}` — canonical ICAP request count; `content_type` is normalized from encapsulated HTTP headers and truncated to 120 characters, `outcome` is `allowed`, `blocked`, or `error`, and matched requests include scenario/response labels
-- `icap_request_errors_total{server,method,stage,error_type,scenario,response}` — bounded request error count for context cancellation, body receive, routing, scenario match, processor response, and response-build failures; raw error text is logged but never used as a metric label
-- `icap_errors_total{server,type}` — aggregate ICAP error count, including routing failures such as `route_not_found`
+- `icap_requests_total{content_type,method,outcome,server,response,scenario}` — canonical ICAP request count, recorded once at the request's terminal outcome; successful `allowed`/`blocked` outcomes are recorded only after response delivery, while response write/flush failures use `outcome="error"`; `content_type` is normalized from encapsulated HTTP headers and truncated to 120 characters, and matched requests include scenario/response labels
+- `icap_request_errors_total{server,method,stage,error_type,scenario,response}` — bounded request error count for context cancellation, body receive, routing, scenario match, processor response/build, and response write failures; raw error text is logged but never used as a metric label
+- `icap_errors_total{server,type}` — aggregate ICAP error count, including routing failures such as `route_not_found` and response delivery failures such as `response_write_failed`
 - `icap_active_connections{server}` — current open connections per configured server
 - `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` — scenario response latency classic histogram
 - `icap_scenarios_loaded{server}` — currently loaded scenario count

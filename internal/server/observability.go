@@ -17,7 +17,7 @@ import (
 const (
 	errorStageSetDeadline   = "set_deadline"
 	errorStageParseRequest  = "parse_request"
-	errorStageWriteResponse = "write_response"
+	errorStageWriteResponse = metricsinternal.RequestErrorStageWriteResponse
 	errorStageDrainBody     = "drain_body"
 )
 

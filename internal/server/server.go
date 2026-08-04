@@ -72,18 +72,16 @@ type Server interface {
 	Addr() net.Addr
 }
 
-// GoroutineMonitorConfig holds configuration for goroutine leak detection.
+// GoroutineMonitorConfig holds configuration for goroutine health statistics.
 type GoroutineMonitorConfig struct {
 	// CheckInterval is the interval between goroutine count checks.
 	CheckInterval time.Duration
-	// WarningThreshold is the multiplier for warning level alerts.
-	// A warning is logged when current count exceeds baseline * WarningThreshold.
+	// WarningThreshold is the multiplier for the warning level reported by GetGoroutineStats.
 	WarningThreshold float64
-	// CriticalThreshold is the multiplier for critical level alerts.
-	// A critical warning is logged when current count exceeds baseline * CriticalThreshold.
+	// CriticalThreshold is the multiplier for the critical level reported by GetGoroutineStats.
 	CriticalThreshold float64
 	// SustainedGrowthChecks is the number of consecutive checks with growth
-	// before alerting on sustained growth.
+	// retained in goroutine statistics.
 	SustainedGrowthChecks int
 }
 
@@ -193,7 +191,7 @@ func (s *ICAPServer) SetRouter(r *router.Router) {
 }
 
 // SetMetrics sets the metrics collector for the server.
-// This is optional - if not set, goroutine monitoring will only log warnings.
+// This is optional. When set, goroutine monitoring updates the Prometheus gauge.
 func (s *ICAPServer) SetMetrics(m *metrics.Collector) {
 	s.metrics = m
 }
@@ -256,9 +254,6 @@ func (s *ICAPServer) ResetGoroutineBaseline() {
 	s.goroutinePeak = current
 	s.goroutineConsecutiveGrowth = 0
 
-	s.logger.Info("goroutine baseline reset",
-		"new_baseline", current,
-	)
 }
 
 // Start starts the ICAP server and begins accepting connections.
@@ -378,10 +373,6 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 	s.goroutineConsecutiveGrowth = 0
 	s.goroutineMu.Unlock()
 
-	s.logger.Info("goroutine monitoring initialized",
-		"baseline", s.goroutineBaseline,
-		"check_interval", s.goroutineConfig.CheckInterval,
-	)
 	close(monitorStart)
 
 	return nil
@@ -489,6 +480,10 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 	// This ensures all in-flight requests are canceled during graceful shutdown
 	connCtx, connCancel := context.WithCancel(parentCtx)
 	closeReason := "handler_exit"
+	var currentRequest *icap.Request
+	var currentResponse *icap.Response
+	currentRequestCtx := connCtx
+	requestOutcomeRecorded := false
 
 	// No extra goroutine needed to cancel on server stop:
 	// The main request loop checks stopChan and returns, which triggers
@@ -497,6 +492,15 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 	defer func() {
 		if r := recover(); r != nil {
 			closeReason = "panic"
+			if currentRequest != nil && !requestOutcomeRecorded {
+				requestOutcomeRecorded = true
+				s.recordIncomingRequestOutcome(
+					currentRequestCtx,
+					currentRequest,
+					currentResponse,
+					metrics.OutcomeError,
+				)
+			}
 			s.logger.Error("panic in connection handler",
 				"error", r,
 				"remote_addr", extractPeerIP(conn.RemoteAddr()),
@@ -534,6 +538,10 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			// Server is shutting down, stop handling
 			return
 		default:
+			currentRequest = nil
+			currentResponse = nil
+			currentRequestCtx = connCtx
+			requestOutcomeRecorded = false
 			keepAliveWait := requestCount > 0
 			if err := s.setWaitReadDeadline(conn, keepAliveWait); err != nil {
 				closeReason = connectionReadCloseReason(err, keepAliveWait)
@@ -553,6 +561,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 				closeReason = parseErrorCloseReason(err, requestReader.Started(), keepAliveWait)
 				return
 			}
+			currentRequest = req
 			// Extract client IP from the peer socket only.
 			req.RemoteAddr = conn.RemoteAddr()
 			req.ClientIP = extractClientIP(conn.RemoteAddr())
@@ -574,6 +583,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 					errorType,
 					metrics.OutcomeError,
 				)
+				requestOutcomeRecorded = true
 				s.recordIncomingRequest(connCtx, req, nil)
 				releaseLifecycleBodies(req, nil)
 				return
@@ -595,6 +605,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			ctx = context.WithValue(ctx, clientIPKey, req.ClientIP)
 			ctx = requestinfo.WithContentTypeLabel(ctx, s.canonicalContentTypeLabel(req))
 			ctx = requestinfo.WithScenarioMetadata(ctx)
+			currentRequestCtx = ctx
 
 			// Route and handle the request with request-scoped context
 			var resp *icap.Response
@@ -611,8 +622,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			if err != nil {
 				resp = icap.NewResponseError(icap.StatusInternalServerError, err.Error())
 			}
-			s.recordIncomingRequest(ctx, req, resp)
-
+			currentResponse = resp
 			drainAfterResponse := shouldDrainAfterResponse(req)
 			requestClose := headerHasToken(req.Header, "Connection", "close") || !drainAfterResponse
 
@@ -626,6 +636,8 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 					s.logConnectionError(
 						ctx, req, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), deadlineErr,
 					)
+					requestOutcomeRecorded = true
+					s.recordIncomingRequestOutcome(ctx, req, resp, metrics.OutcomeError)
 					releaseLifecycleBodies(req, resp)
 					return
 				}
@@ -633,11 +645,30 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			if err := writeResponseFromICAP(conn.Writer(), resp); err != nil {
 				closeReason = "write_error"
 				s.logConnectionError(
-					ctx, req, errorStageWriteResponse, "response_write_failed", conn.RemoteAddr(), err,
+					ctx,
+					req,
+					errorStageWriteResponse,
+					metrics.RequestErrorTypeResponseWriteFailed,
+					conn.RemoteAddr(),
+					err,
 				)
+				requestOutcomeRecorded = true
+				s.recordIncomingRequestOutcome(ctx, req, resp, metrics.OutcomeError)
+				s.recordRequestError(
+					ctx,
+					req,
+					metrics.RequestErrorStageWriteResponse,
+					metrics.RequestErrorTypeResponseWriteFailed,
+					"",
+				)
+				if s.metrics != nil {
+					s.metrics.RecordErrorForServer(s.metricsServerName, metrics.RequestErrorTypeResponseWriteFailed)
+				}
 				releaseLifecycleBodies(req, resp)
 				return
 			}
+			requestOutcomeRecorded = true
+			s.recordIncomingRequest(ctx, req, resp)
 			if drainAfterResponse {
 				if err := s.drainRequestBodies(conn, req); err != nil {
 					closeReason = "body_drain_error"
@@ -806,13 +837,8 @@ func (s *ICAPServer) ConnectionCount() int {
 	return s.pool.Count()
 }
 
-// monitorGoroutines periodically checks for potential goroutine leaks.
-// It implements a multi-level alerting system based on growth from baseline:
-//   - Warning: goroutine count exceeds baseline * WarningThreshold
-//   - Critical: goroutine count exceeds baseline * CriticalThreshold
-//   - Sustained Growth: consecutive checks show growth exceeding SustainedGrowthChecks
-//
-// The function also tracks peak goroutine count and updates Prometheus metrics.
+// monitorGoroutines tracks goroutine statistics and updates Prometheus metrics.
+// It intentionally emits no logs: dashboards and alerts consume the metric.
 func (s *ICAPServer) monitorGoroutines() {
 	ticker := time.NewTicker(s.goroutineConfig.CheckInterval)
 	defer ticker.Stop()
@@ -838,55 +864,7 @@ func (s *ICAPServer) monitorGoroutines() {
 				s.goroutineConsecutiveGrowth = 0
 			}
 
-			baseline := s.goroutineBaseline
-			peak := s.goroutinePeak
-			consecutiveGrowth := s.goroutineConsecutiveGrowth
-			cfg := s.goroutineConfig
 			s.goroutineMu.Unlock()
-
-			// Calculate growth rate
-			var growthRate float64
-			if baseline > 0 {
-				growthRate = float64(current-baseline) / float64(baseline) * 100
-			}
-
-			// Check for critical threshold
-			if float64(current) > float64(baseline)*cfg.CriticalThreshold {
-				s.logger.Warn("critical goroutine count detected",
-					"current", current,
-					"baseline", baseline,
-					"peak", peak,
-					"growth_rate", fmt.Sprintf("%.1f%%", growthRate),
-					"threshold", cfg.CriticalThreshold,
-				)
-			} else if float64(current) > float64(baseline)*cfg.WarningThreshold {
-				// Check for warning threshold
-				s.logger.Warn("elevated goroutine count detected",
-					"current", current,
-					"baseline", baseline,
-					"peak", peak,
-					"growth_rate", fmt.Sprintf("%.1f%%", growthRate),
-					"threshold", cfg.WarningThreshold,
-				)
-			}
-
-			// Check for sustained growth pattern
-			if consecutiveGrowth >= cfg.SustainedGrowthChecks {
-				s.logger.Warn("sustained goroutine growth detected",
-					"current", current,
-					"baseline", baseline,
-					"consecutive_checks", consecutiveGrowth,
-					"growth_rate", fmt.Sprintf("%.1f%%", growthRate),
-				)
-			}
-
-			// Log periodic status at debug level
-			s.logger.Debug("goroutine monitor check",
-				"current", current,
-				"baseline", baseline,
-				"peak", peak,
-				"growth_rate", fmt.Sprintf("%.1f%%", growthRate),
-			)
 
 			lastCount = current
 

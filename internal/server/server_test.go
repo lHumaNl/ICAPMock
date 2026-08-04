@@ -161,7 +161,6 @@ func TestNewServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
-
 	if srv == nil {
 		t.Fatal("NewServer() returned nil")
 	}
@@ -983,6 +982,13 @@ func TestHandleConnectionPanicRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
+	reg := prometheus.NewRegistry()
+	collector, err := metricsinternal.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error: %v", err)
+	}
+	srv.SetMetrics(collector)
+	srv.SetMetricsServerName("edge")
 
 	// Create a router with a panic-inducing handler
 	r := router.NewRouter()
@@ -1020,6 +1026,13 @@ func TestHandleConnectionPanicRecovery(t *testing.T) {
 	// Verify server is still running (didn't crash)
 	if !srv.IsRunning() {
 		t.Error("Server should still be running after panic recovery")
+	}
+	errorLabels := map[string]string{
+		"server": "edge", "method": "OPTIONS", "content_type": "none", "outcome": "error",
+		"response": metricsinternal.OutcomeError, "scenario": metricsinternal.NoScenarioMetricLabel,
+	}
+	if got := gatheredCounterValue(t, reg, requestsTotalMetricName, errorLabels); got != 1 {
+		t.Errorf("panic request errors = %v, want 1", got)
 	}
 
 	// Clean shutdown should still work
@@ -2088,9 +2101,7 @@ func TestGoroutineMonitoring_RunsDuringServerLifetime(t *testing.T) {
 
 	// Server should have stopped cleanly
 	assert.False(t, srv.IsRunning(), "Server should not be running after Stop")
-	assert.NotContains(t, logs.String(), "elevated goroutine count detected")
-	assert.NotContains(t, logs.String(), "critical goroutine count detected")
-	assert.NotContains(t, logs.String(), "sustained goroutine growth detected")
+	assert.NotContains(t, logs.String(), "goroutine", "goroutine monitoring should use metrics without emitting logs")
 
 	metricFamilies, err := reg.Gather()
 	require.NoError(t, err)
