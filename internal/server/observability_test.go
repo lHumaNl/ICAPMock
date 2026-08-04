@@ -123,7 +123,18 @@ func (r *stubBufferedReader) Read(p []byte) (int, error) {
 	return copy(p, r.data), r.err
 }
 
+func (r *stubBufferedReader) ReadByte() (byte, error) {
+	if r.data == "" {
+		return 0, r.err
+	}
+	return r.data[0], r.err
+}
+
 func (r *stubBufferedReader) ReadString(_ byte) (string, error) {
+	return r.data, r.err
+}
+
+func (r *stubBufferedReader) ReadBoundedLine(_ int) (string, error) {
 	return r.data, r.err
 }
 

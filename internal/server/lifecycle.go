@@ -63,6 +63,54 @@ func (r *requestDeadlineReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+func (r *requestDeadlineReader) ReadByte() (byte, error) {
+	b, err := r.reader.ReadByte()
+	if err == nil {
+		return b, r.activateOnce(nil)
+	}
+	return b, err
+}
+
+func (r *requestDeadlineReader) Buffered() int {
+	return r.reader.Buffered()
+}
+
+func (r *requestDeadlineReader) ReadBoundedLine(limit int) (string, error) {
+	reader, ok := r.reader.(interface {
+		ReadBoundedLine(int) (string, error)
+	})
+	if !ok {
+		line, err := readBoundedLineBytes(r.reader, limit)
+		if line != "" {
+			return line, r.activateOnce(err)
+		}
+		return line, err
+	}
+	line, err := reader.ReadBoundedLine(limit)
+	if line != "" {
+		return line, r.activateOnce(err)
+	}
+	return line, err
+}
+
+func readBoundedLineBytes(reader io.ByteReader, limit int) (string, error) {
+	if limit <= 0 {
+		return "", io.ErrShortBuffer
+	}
+	line := make([]byte, 0, min(limit, 128))
+	for len(line) < limit {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return string(line), err
+		}
+		line = append(line, b)
+		if b == '\n' {
+			return string(line), nil
+		}
+	}
+	return string(line), io.ErrShortBuffer
+}
+
 func (r *requestDeadlineReader) ReadString(delim byte) (string, error) {
 	s, err := r.reader.ReadString(delim)
 	if s != "" {

@@ -82,13 +82,13 @@ func NewChunkedReader(r io.Reader) *ChunkedReader {
 }
 
 type singleByteReader struct {
-	r io.Reader
+	r   io.Reader
+	buf [1]byte
 }
 
 func (r *singleByteReader) ReadByte() (byte, error) {
-	var b [1]byte
-	_, err := io.ReadFull(r.r, b[:])
-	return b[0], err
+	_, err := io.ReadFull(r.r, r.buf[:])
+	return r.buf[0], err
 }
 
 // Close interrupts an in-progress read when the underlying reader is closable.
@@ -171,6 +171,19 @@ func (cr *ChunkedReader) readChunkHeader() (int64, error) {
 }
 
 func (cr *ChunkedReader) readBoundedLine(limit int, limitErr error) (string, error) {
+	if reader, ok := cr.r.(interface {
+		ReadBoundedLine(int) (string, error)
+	}); ok {
+		line, err := reader.ReadBoundedLine(limit)
+		if errors.Is(err, io.ErrShortBuffer) || len(line) > limit {
+			return "", limitErr
+		}
+		if err != nil {
+			return "", err
+		}
+		return line, nil
+	}
+
 	line := make([]byte, 0, limit)
 	for len(line) < limit {
 		b, err := cr.byteReader.ReadByte()

@@ -142,3 +142,29 @@ func BenchmarkShardedScenarioMatch(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkScenarioMatch_ExactRoutes(b *testing.B) {
+	reg := NewScenarioRegistry()
+	for i := 0; i < 100; i++ {
+		scenario := &Scenario{
+			Name:     fmt.Sprintf("exact-route-%d", i),
+			Priority: i,
+			Match: MatchRule{Routes: RouteMap{
+				icap.MethodREQMOD: {fmt.Sprintf("/api/v%d/scan", i)},
+			}},
+			Response: ResponseTemplate{ICAPStatus: 204},
+		}
+		if err := reg.Add(scenario); err != nil {
+			b.Fatalf("Add(%s) error: %v", scenario.Name, err)
+		}
+	}
+	req := buildRequest("/unmatched/path")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := reg.Match(context.Background(), req); err != nil {
+			b.Fatalf("Match() error: %v", err)
+		}
+	}
+}

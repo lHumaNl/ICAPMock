@@ -17,6 +17,8 @@ import (
 // Both *bufio.Reader and *pooledBuffer satisfy this interface.
 type BufferedReader interface {
 	io.Reader
+	io.ByteReader
+	Buffered() int
 	ReadString(delim byte) (string, error)
 }
 

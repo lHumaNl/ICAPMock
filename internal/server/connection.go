@@ -83,14 +83,14 @@ func (pb *pooledBuffer) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 
-	// Return any saved error from previous read
-	if pb.err != nil {
-		err := pb.err
-		pb.err = nil
-		return 0, err
-	}
-
 	if pb.rpos >= pb.wpos {
+		// A reader may legally return buffered data and an error together. Do
+		// not surface that saved error until all of the data has been consumed.
+		if pb.err != nil {
+			err := pb.err
+			pb.err = nil
+			return 0, err
+		}
 		// Buffer is empty, refill from underlying reader
 		n, err := pb.rw.Read(pb.buf)
 		if n > 0 {
@@ -145,14 +145,12 @@ func (pb *pooledBuffer) ReadByte() (byte, error) {
 	if pb.closed {
 		return 0, io.ErrClosedPipe
 	}
-	// Return any saved error from previous read
-	if pb.err != nil {
-		err := pb.err
-		pb.err = nil
-		return 0, err
-	}
-
 	if pb.rpos >= pb.wpos {
+		if pb.err != nil {
+			err := pb.err
+			pb.err = nil
+			return 0, err
+		}
 		// Refill buffer
 		n, err := pb.rw.Read(pb.buf)
 		if n > 0 {
@@ -240,6 +238,63 @@ func (pb *pooledBuffer) ReadLine() ([]byte, error) {
 		// No newline found — append all buffered data and refill
 		line = append(line, buffered...)
 		pb.rpos = pb.wpos // consumed all buffered data
+	}
+}
+
+// ReadBoundedLine reads through a newline without consuming more than limit
+// bytes. It keeps read-ahead in the connection-level buffer, where subsequent
+// persistent requests can still access it.
+func (pb *pooledBuffer) ReadBoundedLine(limit int) (string, error) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if pb.closed {
+		return "", io.ErrClosedPipe
+	}
+	if limit <= 0 {
+		return "", io.ErrShortBuffer
+	}
+	line := make([]byte, 0, min(limit, 128))
+	for {
+		if pb.rpos >= pb.wpos {
+			if pb.err != nil {
+				err := pb.err
+				pb.err = nil
+				return string(line), err
+			}
+			n, err := pb.rw.Read(pb.buf)
+			if n > 0 {
+				pb.wpos = n
+				pb.rpos = 0
+			}
+			if err != nil {
+				if n == 0 {
+					return string(line), err
+				}
+				pb.err = err
+			} else if n == 0 {
+				return string(line), io.EOF
+			}
+		}
+
+		buffered := pb.buf[pb.rpos:pb.wpos]
+		segmentLen := len(buffered)
+		if newline := bytes.IndexByte(buffered, '\n'); newline >= 0 {
+			segmentLen = newline + 1
+		}
+		remaining := limit - len(line)
+		if segmentLen > remaining {
+			line = append(line, buffered[:remaining]...)
+			pb.rpos += remaining
+			return string(line), io.ErrShortBuffer
+		}
+		line = append(line, buffered[:segmentLen]...)
+		pb.rpos += segmentLen
+		if segmentLen < len(buffered) || buffered[segmentLen-1] == '\n' {
+			return string(line), nil
+		}
+		if len(line) == limit {
+			return string(line), io.ErrShortBuffer
+		}
 	}
 }
 
@@ -360,6 +415,34 @@ func (r activityReader) Read(p []byte) (int, error) {
 		r.touch()
 	}
 	return n, err
+}
+
+func (r activityReader) ReadByte() (byte, error) {
+	buffered := r.reader.Buffered()
+	b, err := r.reader.ReadByte()
+	if err == nil && buffered == 0 {
+		r.touch()
+	}
+	return b, err
+}
+
+func (r activityReader) Buffered() int {
+	return r.reader.Buffered()
+}
+
+func (r activityReader) ReadBoundedLine(limit int) (string, error) {
+	reader, ok := r.reader.(interface {
+		ReadBoundedLine(int) (string, error)
+	})
+	if !ok {
+		return readBoundedLineBytes(r, limit)
+	}
+	buffered := r.reader.Buffered()
+	line, err := reader.ReadBoundedLine(limit)
+	if line != "" && (buffered == 0 || len(line) > buffered) {
+		r.touch()
+	}
+	return line, err
 }
 
 func (r activityReader) ReadString(delim byte) (string, error) {

@@ -621,3 +621,49 @@ func TestUniqueScenarioPointersDeduplicatesCandidates(t *testing.T) {
 		t.Fatalf("uniqueScenarioPointers() = %v, want one original pointer", got)
 	}
 }
+
+func TestScenarioRevalidationClearsCompiledExactRoutes(t *testing.T) {
+	registry := NewScenarioRegistry()
+	scenario := &Scenario{
+		Name: "mutable",
+		Match: MatchRule{Routes: RouteMap{
+			icap.MethodREQMOD: {"/exact"},
+		}},
+		Response: ResponseTemplate{ICAPStatus: 204},
+	}
+	if err := registry.Add(scenario); err != nil {
+		t.Fatalf("Add(exact) error = %v", err)
+	}
+
+	scenario.Match = MatchRule{
+		Methods: []string{icap.MethodREQMOD},
+		Paths:   []string{"/legacy"},
+	}
+	if err := registry.Add(scenario); err != nil {
+		t.Fatalf("Add(legacy) error = %v", err)
+	}
+
+	legacyRequest, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/legacy")
+	if err != nil {
+		t.Fatalf("NewRequest(legacy) error = %v", err)
+	}
+	matched, err := registry.Match(context.Background(), legacyRequest)
+	if err != nil {
+		t.Fatalf("Match(legacy) error = %v", err)
+	}
+	if matched != scenario {
+		t.Fatalf("legacy match = %q, want mutable", matched.Name)
+	}
+
+	exactRequest, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/exact")
+	if err != nil {
+		t.Fatalf("NewRequest(exact) error = %v", err)
+	}
+	matched, err = registry.Match(context.Background(), exactRequest)
+	if err != nil {
+		t.Fatalf("Match(exact) error = %v", err)
+	}
+	if matched == scenario {
+		t.Fatal("old exact route remained active after legacy revalidation")
+	}
+}

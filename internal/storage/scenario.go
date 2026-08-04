@@ -633,6 +633,9 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 		)
 	}
 
+	// Scenarios can be revalidated after an in-memory update. Never retain
+	// compiled exact routes after switching back to legacy method/path fields.
+	s.compiledRoutes = nil
 	if len(s.Match.Routes) > 0 {
 		if err := validateRouteMap("scenario "+s.Name+" routes", s.Match.Routes); err != nil {
 			return err
@@ -954,7 +957,7 @@ func matchesScenario(ctx context.Context, s *Scenario, req *icap.Request, bodyPa
 		return false, err
 	}
 	var routePaths []compiledEndpoint
-	if len(s.Match.Routes) > 0 {
+	if s.compiledRoutes != nil {
 		var ok bool
 		routePaths, ok = s.compiledRoutes[req.Method]
 		if !ok {
