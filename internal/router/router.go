@@ -222,6 +222,7 @@ func (r *Router) Serve(ctx context.Context, req *icap.Request) (*icap.Response, 
 				metricsinternal.NoScenarioMetricLabel,
 				strconv.Itoa(status),
 			)
+			r.metrics.RecordErrorForServer(r.server, metricsinternal.RequestErrorTypeRouteNotFound)
 		}
 		return icap.NewResponseError(icap.StatusNotFound, "ICAP service not found"), nil
 	}

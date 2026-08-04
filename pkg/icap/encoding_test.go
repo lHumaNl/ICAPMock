@@ -72,6 +72,39 @@ func TestChunkedReader(t *testing.T) {
 	}
 }
 
+func TestChunkedReaderDoesNotConsumeBytesAfterTerminator(t *testing.T) {
+	const nextRequest = "RESPMOD icap://localhost/next ICAP/1.0\r\n"
+	input := bytes.NewBufferString("1\r\na\r\n0\r\n\r\n" + nextRequest)
+
+	body, err := io.ReadAll(icap.NewChunkedReader(input))
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(body) != "a" {
+		t.Fatalf("ReadAll() = %q, want %q", body, "a")
+	}
+	if got := input.String(); got != nextRequest {
+		t.Fatalf("remaining input = %q, want %q", got, nextRequest)
+	}
+}
+
+func TestChunkedReaderFallbackDoesNotConsumeBytesAfterTerminator(t *testing.T) {
+	const nextRequest = "OPTIONS icap://localhost/next ICAP/1.0\r\n"
+	input := bytes.NewBufferString("1\r\na\r\n0\r\n\r\n" + nextRequest)
+	reader := struct{ io.Reader }{Reader: input}
+
+	body, err := io.ReadAll(icap.NewChunkedReader(reader))
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(body) != "a" {
+		t.Fatalf("ReadAll() = %q, want %q", body, "a")
+	}
+	if got := input.String(); got != nextRequest {
+		t.Fatalf("remaining input = %q, want %q", got, nextRequest)
+	}
+}
+
 // TestChunkedWriter tests writing chunked encoded data.
 func TestChunkedWriter(t *testing.T) {
 	tests := []struct {

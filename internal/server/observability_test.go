@@ -67,7 +67,7 @@ func TestLogConnectionErrorIncludesRequestContextAndDescription(t *testing.T) {
 	assertServerLogField(t, entry, "error_type", "response_write_failed")
 	assertServerLogField(t, entry, "request_id", "request-1")
 	assertServerLogField(t, entry, "method", icap.MethodREQMOD)
-	assertServerLogField(t, entry, "remote_addr", "192.0.2.10:12345")
+	assertServerLogField(t, entry, "remote_addr", "192.0.2.10")
 	if description, _ := entry["description"].(string); !strings.Contains(description, "broken pipe") {
 		t.Fatalf("description = %v, want wrapped root cause", entry["description"])
 	}

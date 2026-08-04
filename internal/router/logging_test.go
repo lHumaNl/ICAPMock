@@ -81,6 +81,7 @@ func TestRouterLogsAndCountsRouteNotFoundAtError(t *testing.T) {
 	assertRouterLogField(t, entry, "error_type", metrics.RequestErrorTypeRouteNotFound)
 	assertRouterLogField(t, entry, "content_type", "application/json")
 	assertRouteNotFoundMetric(t, reg)
+	assertLegacyRouteNotFoundMetric(t, reg)
 }
 
 func loggedRouterRequest() *icap.Request {
@@ -130,4 +131,28 @@ func assertRouteNotFoundMetric(t *testing.T, reg prometheus.Gatherer) {
 		}
 	}
 	t.Fatal("icap_request_errors_total route-not-found metric not found")
+}
+
+func assertLegacyRouteNotFoundMetric(t *testing.T, reg prometheus.Gatherer) {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != "icap_errors_total" {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			labels := make(map[string]string, len(metric.GetLabel()))
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["server"] == "edge" && labels["type"] == metrics.RequestErrorTypeRouteNotFound &&
+				metric.GetCounter().GetValue() == 1 {
+				return
+			}
+		}
+	}
+	t.Fatal("icap_errors_total route-not-found metric not found")
 }

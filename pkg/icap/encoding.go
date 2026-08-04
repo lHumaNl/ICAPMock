@@ -3,7 +3,6 @@
 package icap
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -62,23 +61,34 @@ var crlfPool = sync.Pool{
 // ChunkedReader implements io.Reader for chunked transfer encoding.
 // It reads chunked data and provides O(1) memory usage for streaming.
 type ChunkedReader struct {
-	err      error
-	r        *bufio.Reader
-	closer   io.Closer
-	n        int64
-	finished bool
+	err        error
+	r          io.Reader
+	byteReader io.ByteReader
+	closer     io.Closer
+	n          int64
+	finished   bool
 }
 
 // NewChunkedReader creates a new ChunkedReader that reads from r.
-// If r is already a *bufio.Reader with sufficient buffer size, it is reused
-// to avoid double buffering.
+// It never adds another buffered reader because read-ahead would consume bytes
+// belonging to the next request on a persistent connection.
 func NewChunkedReader(r io.Reader) *ChunkedReader {
 	closer, _ := r.(io.Closer)
-	br, ok := r.(*bufio.Reader)
-	if !ok || br.Size() < ChunkBufferSize {
-		br = bufio.NewReaderSize(r, ChunkBufferSize)
+	byteReader, ok := r.(io.ByteReader)
+	if !ok {
+		byteReader = &singleByteReader{r: r}
 	}
-	return &ChunkedReader{r: br, closer: closer}
+	return &ChunkedReader{r: r, byteReader: byteReader, closer: closer}
+}
+
+type singleByteReader struct {
+	r io.Reader
+}
+
+func (r *singleByteReader) ReadByte() (byte, error) {
+	var b [1]byte
+	_, err := io.ReadFull(r.r, b[:])
+	return b[0], err
 }
 
 // Close interrupts an in-progress read when the underlying reader is closable.
@@ -163,7 +173,7 @@ func (cr *ChunkedReader) readChunkHeader() (int64, error) {
 func (cr *ChunkedReader) readBoundedLine(limit int, limitErr error) (string, error) {
 	line := make([]byte, 0, limit)
 	for len(line) < limit {
-		b, err := cr.r.ReadByte()
+		b, err := cr.byteReader.ReadByte()
 		if err != nil {
 			return "", err
 		}

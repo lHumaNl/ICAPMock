@@ -47,7 +47,7 @@ func (s *ICAPServer) logConnectionError(
 		"description", errorDescription(err),
 	}
 	if remoteAddr != "" {
-		attrs = append(attrs, "remote_addr", remoteAddr)
+		attrs = append(attrs, "remote_addr", extractPeerIP(remoteAddr))
 	}
 	if req != nil {
 		attrs = append(attrs,

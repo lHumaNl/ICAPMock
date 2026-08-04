@@ -134,7 +134,7 @@ func (s *ICAPServer) handleParseError(ctx context.Context, conn *Connection, err
 	}
 	if isNetTimeout(err) && !started && keepAliveWait && s.config.IdleTimeout > 0 {
 		s.logger.Warn("connection closed due to idle timeout",
-			"remote_addr", conn.RemoteAddr(),
+			"remote_addr", extractPeerIP(conn.RemoteAddr()),
 			"idle_duration", time.Since(conn.LastActivity()),
 			"idle_timeout", conn.config.IdleTimeout,
 		)

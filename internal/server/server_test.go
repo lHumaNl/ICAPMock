@@ -4,10 +4,12 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"runtime"
 	"strconv"
@@ -579,6 +581,43 @@ func TestServerDrainsUnreadRESPMODChunkedBodyBeforeKeepAlive(t *testing.T) {
 
 	writePersistentICAPRequest(t, conn, srv.Addr().String())
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	require.Contains(t, readICAPResponseStatus(t, reader), "200")
+}
+
+func TestServerPreservesPipelinedRequestAfterUnreadRESPMODBody(t *testing.T) {
+	srv := newConnectionLifecycleTestServer(t, time.Second, time.Second)
+	defer srv.Stop(context.Background())
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+
+	firstRequest := strings.Replace(
+		respmodChunkedRequest(srv.Addr().String(), ""),
+		"/respmod ICAP/1.0",
+		"/missing ICAP/1.0",
+		1,
+	)
+	secondRequest := "OPTIONS icap://" + srv.Addr().String() + "/options ICAP/1.0\r\nHost: localhost\r\n\r\n"
+	_, err = conn.Write([]byte(firstRequest + secondRequest))
+	require.NoError(t, err)
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+
+	require.Contains(t, readICAPResponseStatus(t, reader), "404")
+	require.Equal(t, "HTTP/1.1 404 Not Found", readICAPLine(t, reader))
+	var httpHeaders []string
+	for {
+		line := readICAPLine(t, reader)
+		if line == "" {
+			break
+		}
+		httpHeaders = append(httpHeaders, line)
+	}
+	require.NotEmpty(t, httpHeaders)
+	errorBody, err := io.ReadAll(icap.NewChunkedReader(reader))
+	require.NoError(t, err)
+	require.Equal(t, "ICAP service not found", string(errorBody))
 	require.Contains(t, readICAPResponseStatus(t, reader), "200")
 }
 
@@ -2021,12 +2060,18 @@ func TestGoroutineMonitoring_RunsDuringServerLifetime(t *testing.T) {
 	pool := NewConnectionPool()
 	srv, err := NewServer(cfg, pool, nil)
 	require.NoError(t, err)
+	var logs bytes.Buffer
+	srv.SetLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
+	reg := prometheus.NewRegistry()
+	collector, err := metricsinternal.NewCollector(reg)
+	require.NoError(t, err)
+	srv.SetMetrics(collector)
 
 	// Set a short check interval for testing
 	srv.SetGoroutineMonitorConfig(GoroutineMonitorConfig{
-		CheckInterval:         100 * time.Millisecond,
-		WarningThreshold:      1.5,
-		CriticalThreshold:     2.0,
+		CheckInterval:         20 * time.Millisecond,
+		WarningThreshold:      1.2,
+		CriticalThreshold:     1.5,
 		SustainedGrowthChecks: 3,
 	})
 
@@ -2035,7 +2080,7 @@ func TestGoroutineMonitoring_RunsDuringServerLifetime(t *testing.T) {
 	require.NoError(t, err)
 
 	// Let monitoring run for a bit
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(80 * time.Millisecond)
 
 	// Stop server
 	err = srv.Stop(ctx)
@@ -2043,6 +2088,19 @@ func TestGoroutineMonitoring_RunsDuringServerLifetime(t *testing.T) {
 
 	// Server should have stopped cleanly
 	assert.False(t, srv.IsRunning(), "Server should not be running after Stop")
+	assert.NotContains(t, logs.String(), "elevated goroutine count detected")
+	assert.NotContains(t, logs.String(), "critical goroutine count detected")
+	assert.NotContains(t, logs.String(), "sustained goroutine growth detected")
+
+	metricFamilies, err := reg.Gather()
+	require.NoError(t, err)
+	for _, family := range metricFamilies {
+		if family.GetName() == "icap_goroutines_current" {
+			require.Positive(t, family.GetMetric()[0].GetGauge().GetValue())
+			return
+		}
+	}
+	t.Fatal("icap_goroutines_current metric not found")
 }
 
 // TestGoroutineStats_ThreadSafe tests that GetGoroutineStats is thread-safe.

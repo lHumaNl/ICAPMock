@@ -343,28 +343,9 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 
 	s.addr = s.listener.Addr()
 
-	// Initialize goroutine baseline at startup
-	s.goroutineMu.Lock()
-	s.goroutineBaseline = runtime.NumGoroutine()
-	s.goroutinePeak = s.goroutineBaseline
-	s.goroutineConsecutiveGrowth = 0
-	s.goroutineMu.Unlock()
-
-	s.logger.Info("goroutine monitoring initialized",
-		"baseline", s.goroutineBaseline,
-		"check_interval", s.goroutineConfig.CheckInterval,
-	)
-
 	// Start accepting connections in a goroutine
 	s.wg.Add(1)
 	go s.acceptLoop(ctx)
-
-	// Start goroutine leak monitoring
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.monitorGoroutines()
-	}()
 
 	// Start TLS certificate monitoring
 	s.tlsMonitor = NewTLSCertificateMonitor(&s.config.TLS, s.logger, s.metrics)
@@ -380,6 +361,28 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 			"warning_days", s.config.TLS.ExpiryWarningDays,
 		)
 	}
+
+	// Include all server-owned background goroutines in the baseline. The start
+	// barrier prevents the monitor from observing the previous baseline first.
+	monitorStart := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		<-monitorStart
+		s.monitorGoroutines()
+	}()
+
+	s.goroutineMu.Lock()
+	s.goroutineBaseline = runtime.NumGoroutine()
+	s.goroutinePeak = s.goroutineBaseline
+	s.goroutineConsecutiveGrowth = 0
+	s.goroutineMu.Unlock()
+
+	s.logger.Info("goroutine monitoring initialized",
+		"baseline", s.goroutineBaseline,
+		"check_interval", s.goroutineConfig.CheckInterval,
+	)
+	close(monitorStart)
 
 	return nil
 }
@@ -496,7 +499,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			closeReason = "panic"
 			s.logger.Error("panic in connection handler",
 				"error", r,
-				"remote_addr", conn.RemoteAddr(),
+				"remote_addr", extractPeerIP(conn.RemoteAddr()),
 			)
 			// connCancel() will be called by the defer below
 		}
@@ -650,7 +653,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 				}
 			} else {
 				s.logger.Debug("closing connection with deferred preview body unread",
-					"remote_addr", conn.RemoteAddr(),
+					"remote_addr", extractPeerIP(conn.RemoteAddr()),
 				)
 			}
 			releaseLifecycleBodies(req, resp)
@@ -775,7 +778,7 @@ func (s *ICAPServer) forceCloseAllConnections() {
 			// Log error but continue closing other connections
 			s.logger.Debug("error closing connection during force shutdown",
 				"error", closeErr,
-				"remote_addr", conn.RemoteAddr(),
+				"remote_addr", extractPeerIP(conn.RemoteAddr()),
 			)
 		}
 	}

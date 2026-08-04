@@ -184,6 +184,47 @@ func TestScenarioRegistry_Load_StreamAdaptedHTTPBodySourceForBothMethods(t *test
 	}
 }
 
+func TestScenarioRegistry_Load_ReusedStreamTemplateWithTopLevelSource(t *testing.T) {
+	registry := NewScenarioRegistry()
+	err := registry.Load(writeScenarioFile(t, `
+defaults:
+  method: [REQMOD, RESPMOD]
+  endpoint: [/av/reqmod, /av/respmod]
+  response_templates:
+    streamed:
+      status: 200
+      stream:
+        from: adapted_http_body
+        send:
+          duration: 10s-20s
+        end:
+          mode: complete
+scenarios:
+  first:
+    when_http:
+      url: "re:(?i)/first_.*"
+    use: streamed
+  second:
+    when_http:
+      url: "re:(?i)/second_.*"
+    use: streamed
+`))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, scenario := range registry.List() {
+		if scenario.Response.Stream == nil {
+			continue
+		}
+		if scenario.Response.Stream.Source.From != "adapted_http_body" {
+			t.Fatalf("scenario %q source.from = %q, want adapted_http_body", scenario.Name, scenario.Response.Stream.Source.From)
+		}
+		if scenario.Response.Stream.From != "" {
+			t.Fatalf("scenario %q retained top-level stream.from %q after normalization", scenario.Name, scenario.Response.Stream.From)
+		}
+	}
+}
+
 func TestScenarioRegistry_Load_StreamTopLevelAndParts(t *testing.T) {
 	registry := NewScenarioRegistry()
 	if err := registry.Load(writeScenarioFile(t, streamTopLevelPartsYAML(t))); err != nil {

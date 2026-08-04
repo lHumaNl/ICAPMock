@@ -210,7 +210,16 @@ func normalizeStreamConfig(s *StreamConfig) error {
 	if s.PartsSet && (!streamSourceEmpty(s.Source) || hasTopLevelStreamSource(s)) {
 		return fmt.Errorf("stream.from and stream.parts are mutually exclusive")
 	}
-	return normalizeStreamSourceShape(s)
+	if err := normalizeStreamSourceShape(s); err != nil {
+		return err
+	}
+	// Canonicalize the shorthand into Source. Response templates may share the
+	// same StreamConfig pointer and validation can therefore run more than once;
+	// retaining both forms would make the second pass report a false conflict.
+	s.From = ""
+	s.Body = ""
+	s.BodyFile = ""
+	return nil
 }
 
 func normalizeStreamSourceShape(s *StreamConfig) error {
