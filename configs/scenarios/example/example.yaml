@@ -133,6 +133,12 @@ defaults:
   # ICAP service endpoint path (matched against the request URI).
   endpoint: /example
 
+  # For exact method-to-endpoint pairing, replace both fields above with:
+  # routes:
+  #   REQMOD: /av/reqmod
+  #   RESPMOD: [/av/respmod, /av/scanfile]
+  # `routes` may also be set on a scenario, where it replaces defaults.routes.
+
   # Default ICAP response status code sent when a scenario matches.
   # 200 — modified response follows (with encapsulated HTTP response/body)
   # 204 — no modification, client should use the original content

@@ -34,6 +34,10 @@ var (
 	// ErrInvalidScenario is returned when a scenario definition is invalid.
 	ErrInvalidScenario = errors.New("invalid scenario definition")
 
+	// ErrEndpointTopologyChange indicates that live reload would require router
+	// endpoint registration changes and therefore needs a process restart.
+	ErrEndpointTopologyChange = errors.New("scenario endpoint topology changed; restart required")
+
 	// ErrInvalidRegex is returned when a regex pattern is invalid.
 	ErrInvalidRegex = errors.New("invalid regex pattern")
 
@@ -46,6 +50,66 @@ var (
 	// ErrBodyPatternLimitExceeded is returned when body_pattern matching hits its configured limit.
 	ErrBodyPatternLimitExceeded = errors.New("body_pattern limit exceeded")
 )
+
+// HasExactRoutes reports whether any scenario uses route-aware method/path pairs.
+func HasExactRoutes(scenarios []*Scenario) bool {
+	for _, scenario := range scenarios {
+		if scenario != nil && len(scenario.Match.Routes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ScenarioEndpointTopology returns the sorted declaration-level endpoint set.
+func ScenarioEndpointTopology(scenarios []*Scenario) []string {
+	unique := make(map[string]struct{})
+	for _, scenario := range scenarios {
+		if scenario == nil {
+			continue
+		}
+		for _, path := range scenario.Match.Paths {
+			if path != "" {
+				unique[path] = struct{}{}
+			}
+		}
+		if scenario.Match.Path != "" {
+			unique[scenario.Match.Path] = struct{}{}
+		}
+	}
+	paths := make([]string, 0, len(unique))
+	for path := range unique {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// ValidateExactRouteTopology rejects live endpoint-set changes when either
+// registry uses exact routes. Method remapping on the same endpoint set is safe.
+func ValidateExactRouteTopology(current, next []*Scenario) error {
+	if !HasExactRoutes(current) && !HasExactRoutes(next) {
+		return nil
+	}
+	currentPaths := ScenarioEndpointTopology(current)
+	nextPaths := ScenarioEndpointTopology(next)
+	if stringSlicesEqual(currentPaths, nextPaths) {
+		return nil
+	}
+	return fmt.Errorf("%w: from %v to %v", ErrEndpointTopologyChange, currentPaths, nextPaths)
+}
+
+func stringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
 
 const defaultBodyPatternLimit int64 = 10 * 1024 * 1024
 
@@ -115,6 +179,7 @@ type Scenario struct {
 	compiledHTTPHeaders map[string]*regexp.Regexp
 	compiledHTTPLists   map[string]compiledHeaderListMatcher
 	compiledHTTPURL     *regexp.Regexp
+	compiledRoutes      map[string][]compiledEndpoint
 	Name                string             `yaml:"name" json:"name"`
 	Match               MatchRule          `yaml:"match" json:"match"`
 	WeightedResponses   []WeightedResponse `yaml:"-" json:"-"`
@@ -123,6 +188,7 @@ type Scenario struct {
 	compiledPaths       []compiledEndpoint
 	Response            ResponseTemplate `yaml:"response" json:"response"`
 	Priority            int              `yaml:"priority" json:"priority"`
+	order               int
 }
 
 // compiledEndpoint holds a compiled endpoint pattern plus the names of any
@@ -253,6 +319,11 @@ func (s *Scenario) CompiledBody() *regexp.Regexp { return s.compiledBody }
 
 // MatchRule defines criteria for matching ICAP requests.
 type MatchRule struct {
+	// Routes binds methods to their exact endpoint sets for v2 route-aware
+	// scenarios. When non-empty, Routes is the method/path matching source of
+	// truth; Methods and Paths contain deterministic compatibility unions.
+	Routes RouteMap `yaml:"routes,omitempty" json:"routes,omitempty"`
+
 	// Path is a single regex pattern to match the ICAP URI path. Kept for v1
 	// scenario files; v2 files use Paths (set from the "endpoint:" YAML key).
 	// Empty string matches all paths.
@@ -424,6 +495,9 @@ func (r *scenarioRegistry) Load(path string) error {
 	if !hasDefault {
 		scenarios = append(scenarios, *DefaultScenario())
 	}
+	for i := range scenarios {
+		scenarios[i].order = i
+	}
 
 	// Convert to pointers for storage
 	r.scenarios = make([]*Scenario, len(scenarios))
@@ -433,9 +507,7 @@ func (r *scenarioRegistry) Load(path string) error {
 	r.filePath = path
 
 	// Sort by priority (descending)
-	sort.Slice(r.scenarios, func(i, j int) bool {
-		return r.scenarios[i].Priority > r.scenarios[j].Priority
-	})
+	sortScenariosByPriority(r.scenarios)
 
 	return nil
 }
@@ -559,6 +631,25 @@ func (r *scenarioRegistry) validateAndCompile(s *Scenario) error { //nolint:gocy
 			"scenario name is required",
 			"add a 'name' field to your scenario, e.g., 'name: my-scenario'",
 		)
+	}
+
+	if len(s.Match.Routes) > 0 {
+		if err := validateRouteMap("scenario "+s.Name+" routes", s.Match.Routes); err != nil {
+			return err
+		}
+		s.compiledRoutes = make(map[string][]compiledEndpoint, len(s.Match.Routes))
+		for _, method := range orderedRouteMethods(s.Match.Routes) {
+			for _, endpoint := range s.Match.Routes[method] {
+				compiled, err := compileEndpoint(endpoint)
+				if err != nil {
+					return NewScenarioRegexError("", s.Name, "match.routes."+method, endpoint, err)
+				}
+				if err := validateReservedExactRoute(method, endpoint, compiled); err != nil {
+					return fmt.Errorf("scenario %q: %w", s.Name, err)
+				}
+				s.compiledRoutes[method] = append(s.compiledRoutes[method], compiled)
+			}
+		}
 	}
 
 	// Compile endpoint list (v2 semantics, with "{name}" captures). If Paths is
@@ -862,16 +953,25 @@ func matchesScenario(ctx context.Context, s *Scenario, req *icap.Request, bodyPa
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	// Check ICAP method
-	if !methodMatches(s.Match.Methods, req.Method) {
-		return false, nil
+	var routePaths []compiledEndpoint
+	if len(s.Match.Routes) > 0 {
+		var ok bool
+		routePaths, ok = s.compiledRoutes[req.Method]
+		if !ok {
+			return false, nil
+		}
+	} else {
+		if !methodMatches(s.Match.Methods, req.Method) {
+			return false, nil
+		}
+		routePaths = s.compiledPaths
 	}
 
 	// Check endpoint(s). Any one match is enough; capture names from the
 	// matched endpoint are merged onto req.Captures for use in response
 	// substitution.
-	if len(s.compiledPaths) > 0 {
-		caps, ok := matchEndpoint(s.compiledPaths, extractPath(req.URI))
+	if len(routePaths) > 0 {
+		caps, ok := matchEndpoint(routePaths, extractPath(req.URI))
 		if !ok {
 			return false, nil
 		}
@@ -1023,6 +1123,31 @@ func handleBodyPatternReadError(err error, options BodyPatternOptions) error {
 
 // endpointCapturePattern finds "{name}" placeholders in an endpoint string.
 var endpointCapturePattern = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+var reservedICAPServicePaths = map[string]string{
+	"/reqmod":  icap.MethodREQMOD,
+	"/respmod": icap.MethodRESPMOD,
+	"/options": icap.MethodOPTIONS,
+}
+
+func validateReservedExactRoute(method, raw string, compiled compiledEndpoint) error {
+	isPattern := strings.HasPrefix(raw, "re:") || strings.Contains(raw, "{")
+	for path, reservedMethod := range reservedICAPServicePaths {
+		if isPattern {
+			if compiled.re != nil && compiled.re.MatchString(path) {
+				return fmt.Errorf("route pattern %q matches reserved service path %q", raw, path)
+			}
+			continue
+		}
+		if raw != path {
+			continue
+		}
+		if reservedMethod == icap.MethodOPTIONS || method != reservedMethod {
+			return fmt.Errorf("route %s -> %s conflicts with reserved service path", method, raw)
+		}
+	}
+	return nil
+}
 
 // CompileEndpointRegex exposes the endpoint-pattern compiler for callers that
 // need the raw regex (router pattern registration). The returned regex is
@@ -1373,7 +1498,18 @@ func (r *scenarioRegistry) Reload() error {
 		return nil
 	}
 
-	return r.Load(path)
+	next := &scenarioRegistry{bodyPattern: r.bodyPattern}
+	if err := next.Load(path); err != nil {
+		return err
+	}
+	if err := ValidateExactRouteTopology(r.List(), next.List()); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.scenarios = next.List()
+	r.filePath = path
+	r.mu.Unlock()
+	return nil
 }
 
 // List returns all registered scenarios sorted by priority.
@@ -1416,8 +1552,10 @@ func (r *scenarioRegistry) Add(scenario *Scenario) error {
 	defer r.mu.Unlock()
 
 	// Remove existing scenario with same name
+	scenario.order = nextScenarioOrder(r.scenarios)
 	for i, s := range r.scenarios {
 		if s.Name == scenario.Name {
+			scenario.order = s.order
 			r.scenarios = append(r.scenarios[:i], r.scenarios[i+1:]...)
 			break
 		}
@@ -1426,9 +1564,7 @@ func (r *scenarioRegistry) Add(scenario *Scenario) error {
 	r.scenarios = append(r.scenarios, scenario)
 
 	// Re-sort by priority
-	sort.Slice(r.scenarios, func(i, j int) bool {
-		return r.scenarios[i].Priority > r.scenarios[j].Priority
-	})
+	sortScenariosByPriority(r.scenarios)
 
 	return nil
 }

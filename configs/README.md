@@ -86,6 +86,8 @@ Request error observability uses
 `processor_build`; error types are likewise bounded (for example `context_canceled`,
 `deadline_exceeded`, `route_not_found`, `no_scenario_match`, and `response_build_failed`). Raw error
 descriptions are emitted only in structured ERROR logs.
+The aggregate `icap_errors_total{server,type}` counter also includes routing failures such as
+`route_not_found`.
 
 Scenario response latency uses the classic histogram
 `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` with
@@ -155,13 +157,42 @@ defaults:
     ISTag: '"mock-2026"'
 ```
 
+For exact method-to-endpoint pairing, use `routes` instead of independent `method` and `endpoint`
+lists:
+
+```yaml
+defaults:
+  routes:
+    REQMOD: /av/reqmod
+    RESPMOD: [/av/respmod, /av/scanfile]
+```
+
+This declares exactly three pairs; it does not allow `REQMOD /av/respmod` or
+`RESPMOD /av/reqmod`. `routes` is also valid inside an individual scenario. Scenario-level
+`routes` replaces `defaults.routes` completely; it is never merged.
+
+When `defaults.routes` is present, scenario routing overrides resolve as follows:
+
+| Scenario routing fields | Effective routing |
+|---|---|
+| none | inherit all `defaults.routes` |
+| `routes` | replace the complete default route map |
+| only `method` | select those methods and their endpoints from `defaults.routes` |
+| only `endpoint` | replace endpoints for every method in `defaults.routes` |
+| `method` + `endpoint` | explicit legacy Cartesian product |
+
+Do not combine `routes` with `method` or `endpoint` on the same YAML level. `routes` accepts only
+`REQMOD` and `RESPMOD`; OPTIONS continues to use the legacy configuration because OPTIONS
+responses are produced by the capability handler rather than scenario processing.
+
 ### `scenarios` map
 
 Each key is a scenario name. A scenario activates when all conditions in its `when:` / `when_http:`
 blocks match the incoming request. If multiple scenarios match, the one with the highest `priority:`
 wins (default priority is `0`; higher numbers win; file order is used as a tiebreaker).
 
-`method` and `endpoint` are required — either in `defaults:` or on the scenario itself.
+Either `routes`, or the resolved legacy `method` and `endpoint`, is required in `defaults:` or on
+the scenario itself.
 Loading fails with a clear error otherwise (avoids scenarios silently matching every request
 because of a missing filter).
 
@@ -662,3 +693,7 @@ mock:
 
 When a scenario file is saved, the server detects the change and reloads the scenario registry
 with zero downtime. No signal or restart is required.
+
+For exact `routes`, live reload may change methods, conditions, and responses while preserving the
+same endpoint declaration set. Adding, removing, or changing an endpoint is rejected and requires
+a process restart so the ICAP router table cannot become stale.

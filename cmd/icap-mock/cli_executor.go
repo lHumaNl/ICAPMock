@@ -753,9 +753,15 @@ func registerHandlers(
 	// Register default endpoints
 	defaultEndpoints := []string{"/reqmod", "/respmod", "/options"}
 	handlers := map[string]handler.Handler{
-		"/reqmod":  wrappedReqmod,
-		"/respmod": wrappedRespmod,
-		"/options": wrappedOptions,
+		"/reqmod": newMethodDispatchHandler(
+			map[string]bool{icap.MethodREQMOD: true}, wrappedReqmod, wrappedRespmod, wrappedOptions,
+		),
+		"/respmod": newMethodDispatchHandler(
+			map[string]bool{icap.MethodRESPMOD: true}, wrappedReqmod, wrappedRespmod, wrappedOptions,
+		),
+		"/options": newMethodDispatchHandler(
+			map[string]bool{icap.MethodOPTIONS: true}, wrappedReqmod, wrappedRespmod, wrappedOptions,
+		),
 	}
 	for _, ep := range defaultEndpoints {
 		if err := rtr.Handle(ep, handlers[ep]); err != nil {
@@ -772,26 +778,35 @@ func registerHandlers(
 		// may declare multiple endpoints (EndpointList) and multiple methods;
 		// each (path, method) pair is registered once. Paths containing "{…}"
 		// captures go to the pattern-matched fallback (see rtr.HandlePattern).
-		methodsByEP := make(map[string]map[string]bool)
+		type endpointRegistration struct{ methods map[string]bool }
+		registrations := make(map[string]*endpointRegistration)
 		epOrder := make([]string, 0)
 		for _, ep := range defaultEndpoints {
-			methodsByEP[ep] = nil // skip — already registered above
+			registrations[ep] = nil // skip — already registered above
 		}
 		collect := func(ep string, methods []string) {
-			if _, isDefault := methodsByEP[ep]; isDefault && methodsByEP[ep] == nil {
+			if _, isDefault := registrations[ep]; isDefault && registrations[ep] == nil {
 				return
 			}
-			set, ok := methodsByEP[ep]
+			registration, ok := registrations[ep]
 			if !ok {
-				set = make(map[string]bool)
-				methodsByEP[ep] = set
+				registration = &endpointRegistration{methods: make(map[string]bool)}
+				registrations[ep] = registration
 				epOrder = append(epOrder, ep)
 			}
 			for _, m := range methods {
-				set[m] = true
+				registration.methods[m] = true
 			}
 		}
 		for _, s := range registry.List() {
+			if len(s.Match.Routes) > 0 {
+				for _, method := range s.Match.Methods {
+					for _, ep := range s.Match.Routes[method] {
+						collect(ep, []string{method})
+					}
+				}
+				continue
+			}
 			methods := s.Match.Methods
 			if len(methods) == 0 {
 				methods = []string{"RESPMOD"}
@@ -805,16 +820,13 @@ func registerHandlers(
 			}
 		}
 		for _, ep := range epOrder {
-			allowed := methodsByEP[ep]
+			registration := registrations[ep]
+			allowed := registration.methods
 			h := newMethodDispatchHandler(allowed, wrappedReqmod, wrappedRespmod, wrappedOptions)
-
-			methodList := make([]string, 0, len(allowed))
-			for m := range allowed {
-				methodList = append(methodList, m)
-			}
+			methodList := orderedAllowedMethods(allowed)
 
 			// Capture-style endpoints ("/env/{id}/…") need regex dispatch.
-			if strings.Contains(ep, "{") {
+			if strings.Contains(ep, "{") || strings.HasPrefix(ep, "re:") {
 				re, cerr := storage.CompileEndpointRegex(ep)
 				if cerr != nil {
 					return fmt.Errorf("compiling pattern endpoint %s: %w", ep, cerr)
@@ -836,24 +848,21 @@ func registerHandlers(
 	return nil
 }
 
-// newMethodDispatchHandler returns a handler that picks the right method
-// handler by req.Method, restricted to the set of methods actually declared
-// by scenarios on this path. Requests whose method is not in the set get a
-// 405-equivalent 204 (ICAP has no 405; the router already 404s unknown paths,
-// so here we fall through to RESPMOD for legacy tolerance).
-func newMethodDispatchHandler(allowed map[string]bool, reqmod, respmod, options handler.Handler) handler.Handler {
+// newMethodDispatchHandler dispatches REQMOD and RESPMOD by the actual request
+// method so registry-level global fallbacks remain reachable. OPTIONS remains
+// restricted to endpoints that explicitly advertise it.
+func newMethodDispatchHandler(
+	allowed map[string]bool,
+	reqmod, respmod, options handler.Handler,
+) handler.Handler {
 	return handler.WrapHandler(func(ctx context.Context, req *icap.Request) (*icap.Response, error) {
 		switch req.Method {
-		case "REQMOD":
-			if allowed["REQMOD"] {
-				return reqmod.Handle(ctx, req)
-			}
-		case "RESPMOD":
-			if allowed["RESPMOD"] {
-				return respmod.Handle(ctx, req)
-			}
-		case "OPTIONS":
-			if allowed["OPTIONS"] {
+		case icap.MethodREQMOD:
+			return reqmod.Handle(ctx, req)
+		case icap.MethodRESPMOD:
+			return respmod.Handle(ctx, req)
+		case icap.MethodOPTIONS:
+			if allowed[icap.MethodOPTIONS] {
 				return options.Handle(ctx, req)
 			}
 		}
@@ -861,6 +870,16 @@ func newMethodDispatchHandler(allowed map[string]bool, reqmod, respmod, options 
 		// preserve previous behavior for silently-typed scenarios.
 		return respmod.Handle(ctx, req)
 	}, "")
+}
+
+func orderedAllowedMethods(allowed map[string]bool) []string {
+	ordered := make([]string, 0, len(allowed))
+	for _, method := range []string{icap.MethodREQMOD, icap.MethodRESPMOD, icap.MethodOPTIONS} {
+		if allowed[method] {
+			ordered = append(ordered, method)
+		}
+	}
+	return ordered
 }
 
 // startMetricsServer starts the Prometheus metrics HTTP server.

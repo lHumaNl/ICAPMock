@@ -7,18 +7,22 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/icap-mock/icap-mock/internal/weight"
+	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
 // stringList decodes a YAML field that accepts either a single scalar string
 // or a sequence of strings. It underlies MethodList and EndpointList so the
 // two types share decoding without duplicating logic.
 type stringList []string
+
+const yamlStringTag = "!!str"
 
 func (s *stringList) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind { //nolint:exhaustive // DocumentNode/MappingNode/AliasNode never appear here; other shapes fall to default.
@@ -85,6 +89,73 @@ func (e *EndpointList) UnmarshalYAML(node *yaml.Node) error {
 // MarshalYAML delegates to stringList.
 func (e EndpointList) MarshalYAML() (interface{}, error) {
 	return stringList(e).marshalYAML()
+}
+
+// RouteMap binds each ICAP method to its exact endpoint set. Unlike separate
+// method and endpoint lists, it does not create a Cartesian product.
+type RouteMap map[string]EndpointList
+
+var exactRouteMethodOrder = []string{icap.MethodREQMOD, icap.MethodRESPMOD}
+
+// UnmarshalYAML enforces stricter endpoint typing than legacy EndpointList:
+// exact routes reject nulls, non-string scalars, and empty list members.
+func (r *RouteMap) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("routes must be a map from method to endpoint or endpoint list")
+	}
+	routes := make(RouteMap, len(node.Content)/2)
+	for i := 0; i < len(node.Content); i += 2 {
+		methodNode := node.Content[i]
+		endpointNode := node.Content[i+1]
+		if methodNode.Kind != yaml.ScalarNode || methodNode.Tag != yamlStringTag || strings.TrimSpace(methodNode.Value) == "" {
+			return fmt.Errorf("route method must be a non-empty string")
+		}
+		if _, exists := routes[methodNode.Value]; exists {
+			return fmt.Errorf("duplicate route method %q", methodNode.Value)
+		}
+		endpoints, err := decodeStrictRouteEndpoints(endpointNode)
+		if err != nil {
+			return fmt.Errorf("routes.%s: %w", methodNode.Value, err)
+		}
+		routes[methodNode.Value] = endpoints
+	}
+	*r = routes
+	return nil
+}
+
+func decodeStrictRouteEndpoints(node *yaml.Node) (EndpointList, error) {
+	switch node.Kind { //nolint:exhaustive // exact routes intentionally accept only scalar and sequence nodes.
+	case yaml.ScalarNode:
+		if node.Tag != yamlStringTag || strings.TrimSpace(node.Value) == "" {
+			return nil, fmt.Errorf("endpoint must be a non-empty string")
+		}
+		return EndpointList{node.Value}, nil
+	case yaml.SequenceNode:
+		if len(node.Content) == 0 {
+			return nil, fmt.Errorf("endpoint list must not be empty")
+		}
+		endpoints := make(EndpointList, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode || item.Tag != yamlStringTag || strings.TrimSpace(item.Value) == "" {
+				return nil, fmt.Errorf("endpoint list items must be non-empty strings")
+			}
+			endpoints = append(endpoints, item.Value)
+		}
+		return endpoints, nil
+	default:
+		return nil, fmt.Errorf("endpoint must be a string or a list of strings")
+	}
+}
+
+func cloneRouteMap(routes RouteMap) RouteMap {
+	if routes == nil {
+		return nil
+	}
+	clone := make(RouteMap, len(routes))
+	for method, endpoints := range routes {
+		clone[method] = append(EndpointList(nil), endpoints...)
+	}
+	return clone
 }
 
 // DelayConfig represents a static or range-based delay.
@@ -156,7 +227,7 @@ func (m *HeaderMatchValueV2) decodeYAML(node *yaml.Node) error {
 		}
 		values := make([]string, 0, len(node.Content))
 		for _, item := range node.Content {
-			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+			if item.Kind != yaml.ScalarNode || item.Tag != yamlStringTag {
 				return fmt.Errorf("header match list item must be a string, got %v", item.Kind)
 			}
 			if strings.TrimSpace(item.Value) == "" {
@@ -253,10 +324,28 @@ type ScenarioDefaultsV2 struct {
 	Headers           map[string]string             `yaml:"headers,omitempty"`
 	ResponseTemplates map[string]ResponseTemplateV2 `yaml:"response_templates,omitempty"`
 	Use               string                        `yaml:"use,omitempty"`
+	Routes            RouteMap                      `yaml:"routes,omitempty"`
 	Method            MethodList                    `yaml:"method,omitempty"`
 	Endpoint          EndpointList                  `yaml:"endpoint,omitempty"`
 	Status            int                           `yaml:"status,omitempty"`
 	HTTPStatus        int                           `yaml:"http_status,omitempty"`
+	routesSet         bool
+	methodSet         bool
+	endpointSet       bool
+}
+
+// UnmarshalYAML preserves routing-field presence for conflict validation.
+func (d *ScenarioDefaultsV2) UnmarshalYAML(node *yaml.Node) error {
+	type plain ScenarioDefaultsV2
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*d = ScenarioDefaultsV2(decoded)
+	d.routesSet = mappingContainsKey(node, "routes")
+	d.methodSet = mappingContainsKey(node, "method")
+	d.endpointSet = mappingContainsKey(node, "endpoint")
+	return nil
 }
 
 // ScenarioEntryV2 defines a single scenario in v2 format.
@@ -277,6 +366,7 @@ type ScenarioEntryV2 struct {
 	HTTPSet      map[string]string      `yaml:"http_set,omitempty"`
 	Stream       *StreamConfig          `yaml:"stream,omitempty"`
 	Block        *bool                  `yaml:"block,omitempty"`
+	Routes       RouteMap               `yaml:"routes,omitempty"`
 	Method       MethodList             `yaml:"method,omitempty"`
 	Endpoint     EndpointList           `yaml:"endpoint,omitempty"`
 	Use          string                 `yaml:"use,omitempty"`
@@ -291,6 +381,9 @@ type ScenarioEntryV2 struct {
 	Status       int                    `yaml:"status,omitempty"`
 	HTTPStatus   int                    `yaml:"http_status,omitempty"`
 	Priority     int                    `yaml:"priority,omitempty"`
+	routesSet    bool
+	methodSet    bool
+	endpointSet  bool
 }
 
 // UnmarshalYAML preserves an explicitly null responses field as a present empty list.
@@ -301,6 +394,9 @@ func (s *ScenarioEntryV2) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*s = ScenarioEntryV2(decoded)
+	s.routesSet = mappingContainsKey(node, "routes")
+	s.methodSet = mappingContainsKey(node, "method")
+	s.endpointSet = mappingContainsKey(node, "endpoint")
 	if mappingContainsKey(node, "responses") && s.Responses == nil {
 		s.Responses = make(WeightedResponseListV2, 0)
 	}
@@ -561,6 +657,193 @@ func ParseMatch(s string) (*MatchValue, error) {
 	return mv, nil
 }
 
+type resolvedScenarioRouting struct {
+	routes    RouteMap
+	methods   MethodList
+	endpoints EndpointList
+}
+
+func resolveScenarioRouting(name string, defaults ScenarioDefaultsV2, entry ScenarioEntryV2) (resolvedScenarioRouting, error) {
+	defaultsHasRoutes := defaults.routesSet || defaults.Routes != nil
+	entryHasRoutes := entry.routesSet || entry.Routes != nil
+	if err := validateRoutingDeclarations(name, defaults, entry, defaultsHasRoutes, entryHasRoutes); err != nil {
+		return resolvedScenarioRouting{}, err
+	}
+	if entryHasRoutes {
+		return routingFromRouteMap(entry.Routes), nil
+	}
+
+	hasMethod := len(entry.Method) > 0
+	hasEndpoint := len(entry.Endpoint) > 0
+	if defaultsHasRoutes {
+		return resolveFromDefaultRoutes(name, defaults.Routes, entry, hasMethod, hasEndpoint)
+	}
+
+	methods := defaults.Method
+	if hasMethod {
+		methods = entry.Method
+	}
+	endpoints := defaults.Endpoint
+	if hasEndpoint {
+		endpoints = entry.Endpoint
+	}
+	return validateLegacyRouting(name, methods, endpoints)
+}
+
+func validateRoutingDeclarations(
+	name string,
+	defaults ScenarioDefaultsV2,
+	entry ScenarioEntryV2,
+	defaultsHasRoutes bool,
+	entryHasRoutes bool,
+) error {
+	if defaultsHasRoutes && (defaults.methodSet || defaults.endpointSet ||
+		len(defaults.Method) > 0 || len(defaults.Endpoint) > 0) {
+		return fmt.Errorf("defaults.routes cannot be combined with defaults.method or defaults.endpoint")
+	}
+	if entryHasRoutes && (entry.methodSet || entry.endpointSet || len(entry.Method) > 0 || len(entry.Endpoint) > 0) {
+		return fmt.Errorf("scenario %q: routes cannot be combined with method or endpoint", name)
+	}
+	if defaultsHasRoutes {
+		if err := validateRouteMap("defaults.routes", defaults.Routes); err != nil {
+			return err
+		}
+	}
+	if entryHasRoutes {
+		return validateRouteMap(fmt.Sprintf("scenario %q routes", name), entry.Routes)
+	}
+	return nil
+}
+
+func resolveFromDefaultRoutes(
+	name string,
+	defaultRoutes RouteMap,
+	entry ScenarioEntryV2,
+	hasMethod bool,
+	hasEndpoint bool,
+) (resolvedScenarioRouting, error) {
+	if !hasMethod && !hasEndpoint {
+		return routingFromRouteMap(defaultRoutes), nil
+	}
+	if hasMethod && hasEndpoint {
+		return validateLegacyRouting(name, entry.Method, entry.Endpoint)
+	}
+	if hasMethod {
+		return selectDefaultRouteMethods(name, defaultRoutes, entry.Method)
+	}
+	return replaceDefaultRouteEndpoints(name, defaultRoutes, entry.Endpoint)
+}
+
+func selectDefaultRouteMethods(name string, defaults RouteMap, methods MethodList) (resolvedScenarioRouting, error) {
+	selected := make(RouteMap, len(methods))
+	for _, method := range methods {
+		endpoints, ok := defaults[method]
+		if !ok {
+			return resolvedScenarioRouting{}, fmt.Errorf(
+				"scenario %q: method %q is not present in defaults.routes; add endpoint explicitly or declare the method in defaults.routes",
+				name,
+				method,
+			)
+		}
+		selected[method] = append(EndpointList(nil), endpoints...)
+	}
+	if err := validateRouteMap(fmt.Sprintf("scenario %q effective routes", name), selected); err != nil {
+		return resolvedScenarioRouting{}, err
+	}
+	return routingFromRouteMap(selected), nil
+}
+
+func replaceDefaultRouteEndpoints(
+	name string,
+	defaults RouteMap,
+	endpoints EndpointList,
+) (resolvedScenarioRouting, error) {
+	replaced := make(RouteMap, len(defaults))
+	for _, method := range orderedRouteMethods(defaults) {
+		replaced[method] = append(EndpointList(nil), endpoints...)
+	}
+	if err := validateRouteMap(fmt.Sprintf("scenario %q effective routes", name), replaced); err != nil {
+		return resolvedScenarioRouting{}, err
+	}
+	return routingFromRouteMap(replaced), nil
+}
+
+func validateRouteMap(where string, routes RouteMap) error {
+	if len(routes) == 0 {
+		return fmt.Errorf("%s must not be empty", where)
+	}
+	methods := make([]string, 0, len(routes))
+	for method := range routes {
+		methods = append(methods, method)
+	}
+	sort.Strings(methods)
+	for _, method := range methods {
+		endpoints := routes[method]
+		if method != icap.MethodREQMOD && method != icap.MethodRESPMOD {
+			return fmt.Errorf("%s: invalid route method %q (allowed: REQMOD, RESPMOD)", where, method)
+		}
+		if len(endpoints) == 0 {
+			return fmt.Errorf("%s.%s must contain at least one endpoint", where, method)
+		}
+		seen := make(map[string]struct{}, len(endpoints))
+		for _, endpoint := range endpoints {
+			if strings.TrimSpace(endpoint) == "" {
+				return fmt.Errorf("%s.%s contains an empty endpoint", where, method)
+			}
+			if _, exists := seen[endpoint]; exists {
+				return fmt.Errorf("%s.%s contains duplicate endpoint %q", where, method, endpoint)
+			}
+			seen[endpoint] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func validateLegacyRouting(name string, methods MethodList, endpoints EndpointList) (resolvedScenarioRouting, error) {
+	if len(methods) == 0 {
+		return resolvedScenarioRouting{}, fmt.Errorf("scenario %q: method is not set (provide defaults.method, scenario.method, or routes)", name)
+	}
+	for _, method := range methods {
+		if !validICAPMethods[method] {
+			return resolvedScenarioRouting{}, fmt.Errorf("scenario %q: invalid ICAP method %q (allowed: REQMOD, RESPMOD, OPTIONS)", name, method)
+		}
+	}
+	if len(endpoints) == 0 {
+		return resolvedScenarioRouting{}, fmt.Errorf("scenario %q: endpoint is not set (provide defaults.endpoint, scenario.endpoint, or routes)", name)
+	}
+	return resolvedScenarioRouting{
+		methods:   append(MethodList(nil), methods...),
+		endpoints: append(EndpointList(nil), endpoints...),
+	}, nil
+}
+
+func routingFromRouteMap(routes RouteMap) resolvedScenarioRouting {
+	clone := cloneRouteMap(routes)
+	methods := MethodList(orderedRouteMethods(clone))
+	seenEndpoints := make(map[string]struct{})
+	endpoints := make(EndpointList, 0)
+	for _, method := range methods {
+		for _, endpoint := range clone[method] {
+			if _, exists := seenEndpoints[endpoint]; exists {
+				continue
+			}
+			seenEndpoints[endpoint] = struct{}{}
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+	return resolvedScenarioRouting{routes: clone, methods: methods, endpoints: endpoints}
+}
+
+func orderedRouteMethods(routes RouteMap) []string {
+	methods := make([]string, 0, len(routes))
+	for _, method := range exactRouteMethodOrder {
+		if _, ok := routes[method]; ok {
+			methods = append(methods, method)
+		}
+	}
+	return methods
+}
+
 // ConvertV2ToScenarios converts a v2 scenario file into the runtime Scenario
 // representation. It resolves defaults, named response templates, and
 // branches; validates method/endpoint presence; and assigns file-order
@@ -573,6 +856,16 @@ func ParseMatch(s string) (*MatchValue, error) {
 func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scenario, error) { //nolint:gocyclo // v2-to-v1 conversion necessarily touches many fields
 	if file == nil {
 		return nil, fmt.Errorf("nil ScenarioFileV2")
+	}
+	defaultsHasRoutes := file.Defaults.routesSet || file.Defaults.Routes != nil
+	if defaultsHasRoutes && (file.Defaults.methodSet || file.Defaults.endpointSet ||
+		len(file.Defaults.Method) > 0 || len(file.Defaults.Endpoint) > 0) {
+		return nil, fmt.Errorf("defaults.routes cannot be combined with defaults.method or defaults.endpoint")
+	}
+	if defaultsHasRoutes {
+		if err := validateRouteMap("defaults.routes", file.Defaults.Routes); err != nil {
+			return nil, err
+		}
 	}
 
 	// Pre-validate defaults.use target exists, if set.
@@ -599,28 +892,9 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 			continue
 		}
 
-		// Resolve method(s): entry overrides default wholesale (not merged).
-		methods := file.Defaults.Method
-		if len(entry.Method) > 0 {
-			methods = entry.Method
-		}
-
-		// Resolve endpoint list: entry overrides default wholesale.
-		endpoints := file.Defaults.Endpoint
-		if len(entry.Endpoint) > 0 {
-			endpoints = entry.Endpoint
-		}
-
-		if len(methods) == 0 {
-			return nil, fmt.Errorf("scenario %q: method is not set (provide defaults.method or scenario.method)", name)
-		}
-		for _, m := range methods {
-			if !validICAPMethods[m] {
-				return nil, fmt.Errorf("scenario %q: invalid ICAP method %q (allowed: REQMOD, RESPMOD, OPTIONS)", name, m)
-			}
-		}
-		if len(endpoints) == 0 {
-			return nil, fmt.Errorf("scenario %q: endpoint is not set (provide defaults.endpoint or scenario.endpoint)", name)
+		routing, err := resolveScenarioRouting(name, file.Defaults, entry)
+		if err != nil {
+			return nil, err
 		}
 
 		// Validate mutual exclusion: branches vs scenario-level response.
@@ -639,8 +913,9 @@ func ConvertV2ToScenarios(file *ScenarioFileV2, orderedNames []string) ([]*Scena
 		// Build MatchRule.
 		headers, headerContains := splitHeaderMatches(entry.When)
 		matchRule := MatchRule{
-			Methods:        []string(methods),
-			Paths:          []string(endpoints),
+			Routes:         routing.routes,
+			Methods:        routing.methods,
+			Paths:          []string(routing.endpoints),
 			Headers:        headers,
 			HeaderContains: headerContains,
 		}

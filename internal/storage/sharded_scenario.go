@@ -269,6 +269,18 @@ func (r *ShardedScenarioRegistry) Load(path string) error {
 
 // indexScenario добавляет сценарий в соответствующий shard и индекс.
 func (r *ShardedScenarioRegistry) indexScenario(s *Scenario) {
+	if entries, ok := r.exactRouteShardEntries(s); ok {
+		for shardIdx, keys := range entries {
+			shard := r.shards[shardIdx]
+			shard.mu.Lock()
+			shard.scenarios = append(shard.scenarios, s)
+			for _, key := range keys {
+				shard.index[key] = append(shard.index[key], s)
+			}
+			shard.mu.Unlock()
+		}
+		return
+	}
 	if scenarioRequiresGlobalPriorityCheck(s) {
 		r.addGlobalScenario(s)
 		return
@@ -289,6 +301,29 @@ func (r *ShardedScenarioRegistry) indexScenario(s *Scenario) {
 	for _, key := range r.buildIndexKeys(s) {
 		shard.index[key] = append(shard.index[key], s)
 	}
+}
+
+func (r *ShardedScenarioRegistry) exactRouteShardEntries(s *Scenario) (map[int][]string, bool) {
+	if len(s.Match.Routes) == 0 {
+		return nil, false
+	}
+	entries := make(map[int][]string)
+	seen := make(map[string]struct{})
+	for _, method := range orderedRouteMethods(s.Match.Routes) {
+		for _, path := range s.Match.Routes[method] {
+			if path == "" || strings.HasPrefix(path, "re:") || strings.Contains(path, "{") {
+				return nil, false
+			}
+			key := method + ":" + path
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			shardIdx := r.hashString(path)
+			entries[shardIdx] = append(entries[shardIdx], key)
+		}
+	}
+	return entries, true
 }
 
 func (r *ShardedScenarioRegistry) addGlobalScenario(s *Scenario) {
@@ -552,7 +587,7 @@ func (r *ShardedScenarioRegistry) applyGlobalPriorityCandidate(
 	if err != nil || !globalFound {
 		return current, found, err
 	}
-	if !found || global.Priority > current.Priority {
+	if !found || scenarioOutranks(global, current) {
 		return global, true, nil
 	}
 	return current, found, nil
@@ -568,10 +603,10 @@ func (r *ShardedScenarioRegistry) matchInShard(ctx context.Context, shard *Scena
 		candidates = append(candidates, shard.index[key]...)
 	}
 	shard.mu.RUnlock()
+	candidates = uniqueScenarioPointers(candidates)
 
 	checkedCount := 0
 	var bestMatch *Scenario
-	var bestPriority = -9999
 
 	for _, s := range candidates {
 		if err := ctx.Err(); err != nil {
@@ -582,9 +617,8 @@ func (r *ShardedScenarioRegistry) matchInShard(ctx context.Context, shard *Scena
 		if err != nil {
 			return nil, false, err
 		}
-		if matched && s.Priority > bestPriority {
+		if matched && (bestMatch == nil || scenarioOutranks(s, bestMatch)) {
 			bestMatch = s
-			bestPriority = s.Priority
 		}
 	}
 
@@ -633,7 +667,6 @@ func (r *ShardedScenarioRegistry) matchGlobalPriorityCandidates(ctx context.Cont
 	r.mu.RUnlock()
 
 	var bestMatch *Scenario
-	bestPriority := -9999
 	for _, s := range candidates {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
@@ -642,9 +675,8 @@ func (r *ShardedScenarioRegistry) matchGlobalPriorityCandidates(ctx context.Cont
 		if err != nil {
 			return nil, false, err
 		}
-		if matched && s.Priority > bestPriority {
+		if matched && (bestMatch == nil || scenarioOutranks(s, bestMatch)) {
 			bestMatch = s
-			bestPriority = s.Priority
 		}
 	}
 	return bestMatch, bestMatch != nil, nil
@@ -725,7 +757,8 @@ func (r *ShardedScenarioRegistry) fallbackMatch(ctx context.Context, req *icap.R
 	}
 
 	var bestMatch *Scenario
-	var bestPriority = -9999
+	seen := make(map[*Scenario]struct{})
+	defaultSeen := false
 
 	for _, shard := range r.shards {
 		if err := ctx.Err(); err != nil {
@@ -735,6 +768,16 @@ func (r *ShardedScenarioRegistry) fallbackMatch(ctx context.Context, req *icap.R
 		candidates := append([]*Scenario(nil), shard.scenarios...)
 		shard.mu.RUnlock()
 		for _, s := range candidates {
+			if s.Name == defaultScenarioName {
+				if defaultSeen {
+					continue
+				}
+				defaultSeen = true
+			}
+			if _, exists := seen[s]; exists {
+				continue
+			}
+			seen[s] = struct{}{}
 			if err := ctx.Err(); err != nil {
 				return nil, false, err
 			}
@@ -742,9 +785,8 @@ func (r *ShardedScenarioRegistry) fallbackMatch(ctx context.Context, req *icap.R
 			if err != nil {
 				return nil, false, err
 			}
-			if matched && s.Priority > bestPriority {
+			if matched && (bestMatch == nil || scenarioOutranks(s, bestMatch)) {
 				bestMatch = s
-				bestPriority = s.Priority
 			}
 		}
 	}
@@ -769,8 +811,56 @@ func (r *ShardedScenarioRegistry) Reload() error {
 	if path == "" {
 		return nil
 	}
+	next := newShardedScenarioRegistryWithConfig(r.config, r.bodyPattern)
+	if err := next.Load(path); err != nil {
+		return err
+	}
+	if err := ValidateExactRouteTopology(r.List(), next.List()); err != nil {
+		return err
+	}
+	r.replaceValidated(next, path)
+	return nil
+}
 
-	return r.Load(path)
+func (r *ShardedScenarioRegistry) replaceValidated(next *ShardedScenarioRegistry, path string) {
+	r.mutationMu.Lock()
+	defer r.mutationMu.Unlock()
+	r.generation.Add(1)
+	defer r.generation.Add(1)
+
+	for i := range r.shards {
+		nextShard := next.shards[i]
+		nextShard.mu.RLock()
+		scenarios := append([]*Scenario(nil), nextShard.scenarios...)
+		index := cloneScenarioIndex(nextShard.index)
+		nextShard.mu.RUnlock()
+
+		shard := r.shards[i]
+		shard.mu.Lock()
+		shard.scenarios = scenarios
+		shard.index = index
+		shard.mu.Unlock()
+	}
+
+	next.mu.RLock()
+	global := append([]*Scenario(nil), next.globalScenarios...)
+	next.mu.RUnlock()
+	r.mu.Lock()
+	r.globalScenarios = global
+	r.filePath = path
+	r.mu.Unlock()
+	r.cacheDisabledForComplexMatch.Store(next.cacheDisabledForComplexMatch.Load())
+	if r.cache != nil {
+		r.cache.Clear()
+	}
+}
+
+func cloneScenarioIndex(source map[string][]*Scenario) map[string][]*Scenario {
+	clone := make(map[string][]*Scenario, len(source))
+	for key, scenarios := range source {
+		clone[key] = append([]*Scenario(nil), scenarios...)
+	}
+	return clone
 }
 
 // List возвращает все сценарии отсортированные по приоритету.
@@ -787,23 +877,35 @@ func (r *ShardedScenarioRegistry) List() []*Scenario {
 	all = append(all, r.globalScenarios...)
 	r.mu.RUnlock()
 
-	// Удаляем дубликаты default scenario
-	unique := make(map[string]bool)
-	result := make([]*Scenario, 0, len(all))
-
-	for _, s := range all {
-		if s.Name != defaultScenarioName || !unique[defaultScenarioName] {
-			result = append(result, s)
-			if s.Name == defaultScenarioName {
-				unique[defaultScenarioName] = true
-			}
-		}
-	}
+	result := uniqueScenarioPointers(all)
 
 	// Сортируем по приоритету
 	sortScenariosByPriority(result)
 
 	return result
+}
+
+func uniqueScenarioPointers(scenarios []*Scenario) []*Scenario {
+	seen := make(map[*Scenario]struct{}, len(scenarios))
+	unique := make([]*Scenario, 0, len(scenarios))
+	defaultSeen := false
+	for _, scenario := range scenarios {
+		if scenario == nil {
+			continue
+		}
+		if scenario.Name == defaultScenarioName {
+			if defaultSeen {
+				continue
+			}
+			defaultSeen = true
+		}
+		if _, exists := seen[scenario]; exists {
+			continue
+		}
+		seen[scenario] = struct{}{}
+		unique = append(unique, scenario)
+	}
+	return unique
 }
 
 // Add добавляет сценарий в реестр.
@@ -835,6 +937,7 @@ func (r *ShardedScenarioRegistry) Add(scenario *Scenario) error {
 			Suggestion:   "fix the validation error before adding the scenario",
 		}
 	}
+	scenario.order = scenarioOrderForAdd(r.List(), scenario.Name)
 
 	// Удаляем существующий сценарий с тем же именем
 	_ = r.remove(scenario.Name)
@@ -1083,8 +1186,39 @@ func (c *ScenarioMatchCache) evict() {
 // sortScenariosByPriority сортирует сценарии по приоритету (убывание).
 // Использует efficient sort с O(n log n) сложностью.
 func sortScenariosByPriority(scenarios []*Scenario) {
-	// Используем efficient sort вместо bubble sort (O(n log n) вместо O(n²))
-	sort.Slice(scenarios, func(i, j int) bool {
-		return scenarios[i].Priority > scenarios[j].Priority // Сортировка по убыванию
+	sort.SliceStable(scenarios, func(i, j int) bool {
+		return scenarioOutranks(scenarios[i], scenarios[j])
 	})
+}
+
+func scenarioOutranks(left, right *Scenario) bool {
+	if right == nil {
+		return left != nil
+	}
+	if left == nil {
+		return false
+	}
+	if left.Priority != right.Priority {
+		return left.Priority > right.Priority
+	}
+	return left.order < right.order
+}
+
+func nextScenarioOrder(scenarios []*Scenario) int {
+	next := 0
+	for _, scenario := range scenarios {
+		if scenario != nil && scenario.order >= next {
+			next = scenario.order + 1
+		}
+	}
+	return next
+}
+
+func scenarioOrderForAdd(scenarios []*Scenario, name string) int {
+	for _, scenario := range scenarios {
+		if scenario != nil && scenario.Name == name {
+			return scenario.order
+		}
+	}
+	return nextScenarioOrder(scenarios)
 }

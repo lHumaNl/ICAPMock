@@ -19,6 +19,7 @@
 - **Branches** — `branches:` list inside a scenario for OR-style dispatch with per-branch response (inline, `use:`, or weighted); first match wins; falls through to the next scenario if none match
 - **Path captures** — endpoints like `/env/{id}/status` extract `{id}` from the URI; captured values are available as `${id}` in body/set/http_headers
 - **Multi-method / multi-endpoint per port** — `method:` and `endpoint:` accept a scalar or a list; a single ICAP listener serves them all
+- **Exact method-to-endpoint routes** — `routes:` binds REQMOD/RESPMOD to distinct endpoint sets without a Cartesian product
 - **Flexible header matching** — exact values, regular expressions (`re:` prefix), generic
   contains-any lists, and fast media-type sets for `Content-Type`
 - **Prometheus metrics** — expose request counts, latencies, and error rates at `/metrics`
@@ -150,8 +151,9 @@ Scenario files define how the mock server responds to incoming ICAP requests. Ea
 
 ```yaml
 defaults:
-  method: RESPMOD                 # required (here or per-scenario)
-  endpoint: /scan                 # required (here or per-scenario)
+  routes:                         # alternatively use legacy method + endpoint
+    REQMOD: /av/reqmod
+    RESPMOD: [/av/respmod, /av/scanfile]
   status: 204
   headers:
     x-service: "ICAP Mock"
@@ -357,6 +359,7 @@ Available metrics include:
 
 - `icap_requests_total{content_type,method,outcome,server,response,scenario}` — canonical ICAP request count; `content_type` is normalized from encapsulated HTTP headers and truncated to 120 characters, `outcome` is `allowed`, `blocked`, or `error`, and matched requests include scenario/response labels
 - `icap_request_errors_total{server,method,stage,error_type,scenario,response}` — bounded request error count for context cancellation, body receive, routing, scenario match, processor response, and response-build failures; raw error text is logged but never used as a metric label
+- `icap_errors_total{server,type}` — aggregate ICAP error count, including routing failures such as `route_not_found`
 - `icap_active_connections{server}` — current open connections per configured server
 - `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` — scenario response latency classic histogram
 - `icap_scenarios_loaded{server}` — currently loaded scenario count

@@ -120,6 +120,75 @@ func TestRuntimeManager_ReloadScenariosRollback(t *testing.T) {
 	assertLoaded(t, registry.List(), "valid")
 }
 
+func TestRuntimeManager_ExactRoutesRejectsEndpointTopologyReload(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "routes.yaml", exactRoutesScenarioFile("REQMOD", "/old"))
+	initial, err := LoadScenarioDirectory(dir, storage.NewShardedScenarioRegistry)
+	if err != nil {
+		t.Fatalf("LoadScenarioDirectory() error = %v", err)
+	}
+	registry := NewManagedScenarioRegistry(initial)
+	manager := NewRuntimeManager(&config.Config{}, "")
+	manager.RegisterScenarioSet(ScenarioSet{Name: "default", Dir: dir, Registry: registry})
+
+	if err := os.WriteFile(path, []byte(exactRoutesScenarioFile("REQMOD", "/new")), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	err = manager.ReloadScenarios(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "restart") {
+		t.Fatalf("ReloadScenarios() error = %v, want endpoint topology restart error", err)
+	}
+	assertLoaded(t, registry.List(), "exact")
+	if got := registry.List()[0].Match.Paths; len(got) == 0 || got[0] != "/old" {
+		t.Fatalf("active endpoint after rejected reload = %v, want /old", got)
+	}
+}
+
+func TestRuntimeManager_ExactRoutesRejectsFirstEndpointAfterEmptyStartup(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "routes.yaml", exactRoutesScenarioFile("REQMOD", "/scan"))
+	registry := NewManagedScenarioRegistry(storage.NewShardedScenarioRegistry())
+	manager := NewRuntimeManager(&config.Config{}, "")
+	manager.RegisterScenarioSet(ScenarioSet{Name: "default", Dir: dir, Registry: registry})
+
+	err := manager.ReloadScenarios(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "restart") {
+		t.Fatalf("ReloadScenarios() error = %v, want restart required", err)
+	}
+	assertNotLoaded(t, registry.List(), "exact")
+}
+
+func TestRuntimeManager_ExactRoutesAllowsMethodRemapOnSameEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "routes.yaml", exactRoutesScenarioFile("REQMOD", "/scan"))
+	initial, err := LoadScenarioDirectory(dir, storage.NewShardedScenarioRegistry)
+	if err != nil {
+		t.Fatalf("LoadScenarioDirectory() error = %v", err)
+	}
+	registry := NewManagedScenarioRegistry(initial)
+	manager := NewRuntimeManager(&config.Config{}, "")
+	manager.RegisterScenarioSet(ScenarioSet{Name: "default", Dir: dir, Registry: registry})
+
+	if err := os.WriteFile(path, []byte(exactRoutesScenarioFile("RESPMOD", "/scan")), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := manager.ReloadScenarios(context.Background()); err != nil {
+		t.Fatalf("ReloadScenarios() error = %v", err)
+	}
+	if got := registry.List()[0].Match.Methods; len(got) == 0 || got[0] != icap.MethodRESPMOD {
+		t.Fatalf("active methods after reload = %v, want RESPMOD", got)
+	}
+}
+
+func exactRoutesScenarioFile(method, endpoint string) string {
+	return "defaults:\n" +
+		"  routes:\n" +
+		"    " + method + ": " + endpoint + "\n" +
+		"  status: 204\n" +
+		"scenarios:\n" +
+		"  exact: {}\n"
+}
+
 func TestRuntimeManager_ScenarioCountsAggregatesSortedSets(t *testing.T) {
 	avDir := t.TempDir()
 	proxyDir := t.TempDir()

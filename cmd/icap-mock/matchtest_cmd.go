@@ -7,9 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/icap-mock/icap-mock/internal/management"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
@@ -62,47 +62,46 @@ func (c *MatchTestCommand) Description() string       { return "Test which scena
 func (c *MatchTestCommand) Parse(args []string) error { return c.fs.Parse(args) }
 func (c *MatchTestCommand) Usage()                    { c.fs.Usage() }
 
-func (c *MatchTestCommand) Run(_ context.Context) error {
+func (c *MatchTestCommand) Run(ctx context.Context) error {
 	uri := c.resolveURI()
 	if uri == "" {
 		return fmt.Errorf("either --uri or --path is required")
 	}
 
-	scenarios, err := c.loadScenarios()
+	registry, err := c.loadScenarios()
 	if err != nil {
 		return err
 	}
+	scenarios := registry.List()
 
 	req, err := c.buildRequest(uri)
 	if err != nil {
 		return err
+	}
+	winner, err := registry.Match(ctx, req)
+	if err != nil {
+		return fmt.Errorf("matching request with runtime registry: %w", err)
 	}
 
 	c.printRequestSummary(uri)
 
 	fmt.Fprintf(os.Stdout, "Scenarios (%d loaded):\n\n", len(scenarios)) //nolint:errcheck
 
-	matched := false
 	for _, s := range scenarios {
 		result := explainMatch(s, req)
-		if result.matched {
+		if s == winner {
+			result.matched = true
 			printMatchResult(s, result, c.verbose)
-			matched = true
-			break
+			return nil
 		} else if c.verbose {
 			printSkipResult(s, result)
 		}
 	}
 
-	if !matched {
-		fmt.Fprintln(os.Stdout, "  No scenario matched.") //nolint:errcheck
-		if !c.verbose {
-			fmt.Fprintln(os.Stdout, "  Tip: use --verbose to see why each scenario was skipped.") //nolint:errcheck
-		}
-		return fmt.Errorf("no matching scenario found")
+	if winner != nil {
+		return fmt.Errorf("runtime registry returned scenario %q that is absent from its scenario list", winner.Name)
 	}
-
-	return nil
+	return fmt.Errorf("no matching scenario found")
 }
 
 func (c *MatchTestCommand) resolveURI() string {
@@ -115,26 +114,15 @@ func (c *MatchTestCommand) resolveURI() string {
 	return ""
 }
 
-func (c *MatchTestCommand) loadScenarios() ([]*storage.Scenario, error) {
-	registry := storage.NewScenarioRegistry()
-	entries, err := os.ReadDir(c.scenariosDir)
+func (c *MatchTestCommand) loadScenarios() (storage.ScenarioRegistry, error) {
+	registry, err := management.LoadScenarioDirectory(c.scenariosDir, storage.NewScenarioRegistry)
 	if err != nil {
-		return nil, fmt.Errorf("reading scenarios directory %s: %w", c.scenariosDir, err)
+		return nil, fmt.Errorf("loading scenarios directory %s: %w", c.scenariosDir, err)
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || (!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml")) {
-			continue
-		}
-		if loadErr := registry.Load(filepath.Join(c.scenariosDir, name)); loadErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", name, loadErr)
-		}
-	}
-	scenarios := registry.List()
-	if len(scenarios) == 0 {
+	if len(registry.List()) == 0 {
 		return nil, fmt.Errorf("no scenarios found in %s", c.scenariosDir)
 	}
-	return scenarios, nil
+	return registry, nil
 }
 
 func (c *MatchTestCommand) buildRequest(uri string) (*icap.Request, error) {
@@ -202,6 +190,10 @@ func printMatchResult(s *storage.Scenario, result matchResult, verbose bool) {
 	fmt.Fprintln(os.Stdout) //nolint:errcheck
 	if verbose {
 		for _, check := range result.checks {
+			if strings.HasPrefix(check, "FAIL ") {
+				fmt.Fprintf(os.Stdout, "      [FAIL] %s\n", strings.TrimPrefix(check, "FAIL ")) //nolint:errcheck
+				continue
+			}
 			fmt.Fprintf(os.Stdout, "      [PASS] %s\n", check) //nolint:errcheck
 		}
 	}
@@ -266,6 +258,15 @@ func (e *matchExplainer) run() matchResult {
 }
 
 func (e *matchExplainer) checkMethod() {
+	if len(e.scenario.Match.Routes) > 0 {
+		endpoints, ok := e.scenario.Match.Routes[e.req.Method]
+		if !ok {
+			e.fail(fmt.Sprintf("exact routes do not declare method %s", e.req.Method))
+			return
+		}
+		e.pass(fmt.Sprintf("exact route method=%s selects endpoints %v", e.req.Method, endpoints))
+		return
+	}
 	methods := e.scenario.Match.Methods
 	if len(methods) == 0 {
 		return
@@ -280,6 +281,14 @@ func (e *matchExplainer) checkMethod() {
 }
 
 func (e *matchExplainer) checkPath() {
+	if len(e.scenario.Match.Routes) > 0 {
+		e.checkEndpointList(e.scenario.Match.Routes[e.req.Method], "exact route")
+		return
+	}
+	if len(e.scenario.Match.Paths) > 0 {
+		e.checkEndpointList(storage.EndpointList(e.scenario.Match.Paths), "endpoint")
+		return
+	}
 	if e.scenario.Match.Path == "" {
 		return
 	}
@@ -288,6 +297,17 @@ func (e *matchExplainer) checkPath() {
 	} else {
 		e.fail(fmt.Sprintf("path_pattern: %s does not match %q", e.scenario.Match.Path, e.path))
 	}
+}
+
+func (e *matchExplainer) checkEndpointList(endpoints storage.EndpointList, label string) {
+	for _, endpoint := range endpoints {
+		re, err := storage.CompileEndpointRegex(endpoint)
+		if err == nil && re.MatchString(e.path) {
+			e.pass(fmt.Sprintf("%s %s matches %q", label, endpoint, e.path))
+			return
+		}
+	}
+	e.fail(fmt.Sprintf("%s: want one of %v, got %q", label, endpoints, e.path))
 }
 
 func (e *matchExplainer) checkHeaders() {
@@ -359,5 +379,9 @@ func extractPathFromURI(uri string) string {
 	if idx == -1 {
 		return "/"
 	}
-	return uri[idx:]
+	path := uri[idx:]
+	if end := strings.IndexAny(path, "?#"); end >= 0 {
+		path = path[:end]
+	}
+	return path
 }

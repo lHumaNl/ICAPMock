@@ -277,9 +277,25 @@ func buildScenarioReplacements(
 		if err != nil {
 			return nil, err
 		}
+		if err := validateExactRouteTopology(set, registry); err != nil {
+			return nil, err
+		}
 		replacements[i] = registry
 	}
 	return replacements, nil
+}
+
+func validateExactRouteTopology(set ScenarioSet, replacement storage.ScenarioRegistry) error {
+	if set.Registry == nil || replacement == nil {
+		return nil
+	}
+	currentScenarios := set.Registry.List()
+	replacementScenarios := replacement.List()
+	err := storage.ValidateExactRouteTopology(currentScenarios, replacementScenarios)
+	if err == nil {
+		return nil
+	}
+	return unsupportedRuntimeChange(fmt.Sprintf("scenario set %q: %v", set.Name, err))
 }
 
 func buildScenarioReplacement(
