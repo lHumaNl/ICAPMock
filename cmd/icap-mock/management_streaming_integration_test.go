@@ -151,8 +151,9 @@ func TestRealIntegration_REQMODPreviewContinuationStreamsMaterializedBody(t *tes
 	interim := readUntilToken(t, conn, "\r\n\r\n")
 	assertContains(t, interim, "ICAP/1.0 100 Continue")
 	writeConnString(t, conn, "5\r\nworld\r\n0\r\n\r\n")
-	response := readUntilToken(t, conn, "0\r\n\r\n")
-	assertContains(t, response, "a\r\nhelloworld\r\n0\r\n\r\n")
+	const streamedBody = "a\r\nhelloworld\r\n0\r\n\r\n"
+	response := readUntilToken(t, conn, streamedBody)
+	assertContains(t, response, streamedBody)
 }
 
 func TestRealIntegration_REQMODNonStreamingWaitsForFullUploadBeforeResponding(t *testing.T) {
