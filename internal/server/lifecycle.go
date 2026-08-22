@@ -3,14 +3,17 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -18,6 +21,88 @@ const (
 	defaultDrainBodyLimit = 10 * 1024 * 1024
 	defaultDrainTimeout   = 30 * time.Second
 )
+
+var errInvalidPreviewBody = errors.New("invalid ICAP preview body framing")
+
+type previewContinuationReader struct {
+	server *ICAPServer
+	conn   *Connection
+	reader *icap.ChunkedReader
+	ctx    context.Context
+	err    error
+	once   sync.Once
+}
+
+type deferredPreviewBodyReader struct { //nolint:govet // fields mirror preview then continuation read order.
+	preview      []byte
+	continuation *previewContinuationReader
+	previewRead  *bytes.Reader
+}
+
+func newDeferredPreviewBodyReader(preview []byte, continuation *previewContinuationReader) *deferredPreviewBodyReader {
+	return &deferredPreviewBodyReader{
+		preview: preview, previewRead: bytes.NewReader(preview), continuation: continuation,
+	}
+}
+
+func (r *deferredPreviewBodyReader) Read(p []byte) (int, error) {
+	if r.previewRead.Len() > 0 {
+		return r.previewRead.Read(p)
+	}
+	return r.continuation.Read(p)
+}
+
+func (r *deferredPreviewBodyReader) PreviewBodySnapshot() []byte { return r.preview }
+
+func (r *previewContinuationReader) Read(p []byte) (int, error) {
+	stopCancellation := func() bool { return false }
+	if r.ctx != nil {
+		stopCancellation = context.AfterFunc(r.ctx, func() {
+			now := time.Now()
+			_ = r.conn.SetWriteDeadline(now)
+			_ = r.conn.SetReadDeadline(now)
+		})
+	}
+	defer stopCancellation()
+	if r.ctx != nil && r.ctx.Err() != nil {
+		return 0, r.ctx.Err()
+	}
+	r.once.Do(r.continueBody)
+	if r.err != nil {
+		return 0, r.err
+	}
+	n, err := r.reader.Read(p)
+	if errors.Is(err, io.EOF) {
+		requestinfo.MarkScenarioBodyMaterialized(r.ctx)
+	}
+	return n, err
+}
+
+func (r *previewContinuationReader) continueBody() {
+	if r.server.config.WriteTimeout > 0 {
+		if err := wrapDeadlineSetupError(
+			"preview continuation write",
+			r.conn.SetWriteDeadline(time.Now().Add(r.server.config.WriteTimeout)),
+		); err != nil {
+			r.err = err
+			return
+		}
+	}
+	writer := r.conn.Writer()
+	if _, err := writer.WriteString("ICAP/1.0 100 Continue\r\n\r\n"); err != nil {
+		r.err = fmt.Errorf("writing preview continuation: %w", err)
+		return
+	}
+	if err := writer.Flush(); err != nil {
+		r.err = fmt.Errorf("flushing preview continuation: %w", err)
+		return
+	}
+	if err := r.server.setActiveReadDeadline(r.conn); err != nil {
+		r.err = err
+		return
+	}
+	r.err = r.reader.ContinueAfterPreview()
+}
 
 type requestDeadlineReader struct {
 	reader    BufferedReader
@@ -154,10 +239,11 @@ func (s *ICAPServer) setWaitReadDeadline(conn *Connection, keepAliveWait bool) e
 }
 
 func (s *ICAPServer) setActiveReadDeadline(conn *Connection) error {
-	if s.config.ReadTimeout <= 0 {
-		return wrapDeadlineSetupError("active read", conn.SetReadDeadline(time.Time{}))
+	timeout := s.config.ReadTimeout
+	if timeout <= 0 {
+		timeout = defaultDrainTimeout
 	}
-	return wrapDeadlineSetupError("active read", conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout)))
+	return wrapDeadlineSetupError("active read", conn.SetReadDeadline(time.Now().Add(timeout)))
 }
 
 func (s *ICAPServer) waitReadTimeout(keepAliveWait bool) time.Duration {
@@ -186,8 +272,8 @@ func (s *ICAPServer) handleParseError(ctx context.Context, conn *Connection, err
 			"idle_duration", time.Since(conn.LastActivity()),
 			"idle_timeout", conn.config.IdleTimeout,
 		)
-		if s.metrics != nil {
-			s.metrics.RecordIdleConnectionClosedForServer(s.metricsServerName, "idle")
+		if metricsCollector, metricsServer := s.metricsSnapshot(); metricsCollector != nil {
+			metricsCollector.RecordIdleConnectionClosedForServer(metricsServer, "idle")
 		}
 		return
 	}
@@ -237,12 +323,76 @@ func (s *ICAPServer) drainRequestBodies(conn *Connection, req *icap.Request) err
 
 func (s *ICAPServer) receiveRequestBodies(conn *Connection, req *icap.Request) error {
 	if shouldDeferBodyReceive(req) {
-		return nil
+		return s.receivePreviewBody(conn, req)
 	}
 	if err := s.setActiveReadDeadline(conn); err != nil {
 		return err
 	}
 	return receiveRequestBodies(req, s.drainBodyLimit())
+}
+
+func (s *ICAPServer) receivePreviewBody(conn *Connection, req *icap.Request) error {
+	message := previewBodyMessage(req)
+	if message == nil || message.IsBodyLoaded() || message.BodyReader == nil {
+		return nil
+	}
+	reader, ok := message.BodyReader.(*icap.ChunkedReader)
+	if !ok {
+		return fmt.Errorf("%w: preview body is not chunked", errInvalidPreviewBody)
+	}
+	if err := s.setActiveReadDeadline(conn); err != nil {
+		return err
+	}
+	reader.EnablePreview()
+	limit := int64(req.Preview)
+	if bodyLimit := s.drainBodyLimit(); bodyLimit > 0 && bodyLimit < limit {
+		limit = bodyLimit
+	}
+	preview, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return fmt.Errorf("receiving preview body: %w", err)
+	}
+	if int64(len(preview)) > limit {
+		return fmt.Errorf("%w: received more than %d preview bytes", errInvalidPreviewBody, limit)
+	}
+	atBoundary, ieof := reader.PreviewBoundary()
+	if !atBoundary {
+		return fmt.Errorf("%w: missing preview terminator", errInvalidPreviewBody)
+	}
+	if len(preview) > req.Preview {
+		return fmt.Errorf("%w: received %d bytes, declared %d", errInvalidPreviewBody, len(preview), req.Preview)
+	}
+	if ieof {
+		message.SetLoadedBody(preview)
+		return nil
+	}
+	continuation := &previewContinuationReader{server: s, conn: conn, reader: reader}
+	message.BodyReader = newDeferredPreviewBodyReader(preview, continuation)
+	return nil
+}
+
+func setPreviewContinuationContext(ctx context.Context, req *icap.Request) {
+	message := previewBodyMessage(req)
+	if message == nil {
+		return
+	}
+	reader, ok := message.BodyReader.(*deferredPreviewBodyReader)
+	if ok {
+		reader.continuation.ctx = ctx
+	}
+}
+
+func previewBodyMessage(req *icap.Request) *icap.HTTPMessage {
+	if req == nil {
+		return nil
+	}
+	if req.Method == icap.MethodREQMOD {
+		return req.HTTPRequest
+	}
+	if req.Method == icap.MethodRESPMOD {
+		return req.HTTPResponse
+	}
+	return nil
 }
 
 func (s *ICAPServer) setDrainReadDeadline(conn *Connection) error {

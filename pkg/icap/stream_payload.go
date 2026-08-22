@@ -55,10 +55,10 @@ type sequenceStreamPayload struct {
 }
 
 type sequenceReadCloser struct {
+	closeErr error
 	current  io.ReadCloser
 	payloads []StreamPayload
 	index    int
-	closed   bool
 }
 
 type maxBytesReadCloser struct {
@@ -181,8 +181,11 @@ func (p *sequenceStreamPayload) SizeHint() (int64, bool) {
 func (p *sequenceStreamPayload) Replayable() bool { return p.replayable }
 
 func (r *sequenceReadCloser) Read(p []byte) (int, error) {
-	if r.closed {
+	if r.index < 0 {
 		return 0, io.ErrClosedPipe
+	}
+	if r.closeErr != nil {
+		return 0, r.closeErr
 	}
 	if len(p) == 0 {
 		return 0, nil
@@ -191,11 +194,11 @@ func (r *sequenceReadCloser) Read(p []byte) (int, error) {
 }
 
 func (r *sequenceReadCloser) Close() error {
-	r.closed = true
+	r.index = -1
 	if r.current == nil {
-		return nil
+		return r.closeErr
 	}
-	err := r.current.Close()
+	err := errors.Join(r.closeErr, r.current.Close())
 	r.current = nil
 	return err
 }
@@ -351,6 +354,9 @@ func (r *sequenceReadCloser) ensureCurrent() error {
 	if r.current != nil || r.index >= len(r.payloads) {
 		return nil
 	}
+	if r.payloads[r.index] == nil {
+		return errors.New("stream sequence payload is nil")
+	}
 	reader, err := r.payloads[r.index].Open()
 	if err != nil {
 		return err
@@ -368,6 +374,6 @@ func (r *sequenceReadCloser) advance() error {
 
 func (r *sequenceReadCloser) advanceOnEOF(err error) {
 	if errors.Is(err, io.EOF) {
-		_ = r.advance()
+		r.closeErr = errors.Join(r.closeErr, r.advance())
 	}
 }

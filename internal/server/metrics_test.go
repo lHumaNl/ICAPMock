@@ -125,6 +125,29 @@ func TestRecordIncomingRequestUsesRequestScopedScenarioMetadata(t *testing.T) {
 	}
 }
 
+func TestRecordIncomingRequestPrefersAuthoritativeScenarioOutcome(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metricsinternal.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	srv := &ICAPServer{metrics: collector, metricsServerName: "edge"}
+	req := &icap.Request{Method: icap.MethodREQMOD}
+	ctx := requestinfo.WithScenarioMetadata(context.Background())
+	requestinfo.SetScenarioMetadata(ctx, "scan", "explicit-block")
+	requestinfo.SetScenarioOutcome(ctx, metricsinternal.OutcomeBlocked)
+
+	srv.recordIncomingRequest(ctx, req, icap.NewResponse(icap.StatusNoContentNeeded))
+
+	labels := map[string]string{
+		"server": "edge", "method": "REQMOD", "content_type": "none", "outcome": "blocked",
+		"response": "explicit-block", "scenario": "scan",
+	}
+	if got := counterValue(t, reg, labels); got != 1 {
+		t.Errorf("incoming requests = %v, want 1", got)
+	}
+}
+
 func counterValue(t *testing.T, reg prometheus.Gatherer, labels map[string]string) float64 {
 	t.Helper()
 	for _, metric := range metricFamily(t, reg, requestsTotalMetricName).GetMetric() {

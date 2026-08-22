@@ -173,7 +173,7 @@ func TestRequestPreviewMode(t *testing.T) {
 				"\r\n" +
 				"5\r\nhello\r\n0\r\n\r\n",
 			wantPreview: 0,
-			wantMode:    false,
+			wantMode:    true,
 			wantErr:     false,
 		},
 		{
@@ -266,6 +266,12 @@ func TestRequestPreviewMode(t *testing.T) {
 				}
 				if req.IsPreviewMode() != tt.wantMode {
 					t.Errorf("Request.IsPreviewMode() = %v, want %v", req.IsPreviewMode(), tt.wantMode)
+				}
+				if req.HasPreview() != tt.wantMode {
+					t.Errorf("Request.HasPreview() = %v, want %v", req.HasPreview(), tt.wantMode)
+				}
+				if req.PreviewSet != tt.wantMode {
+					t.Errorf("Request.PreviewSet = %v, want %v", req.PreviewSet, tt.wantMode)
 				}
 			}
 		})
@@ -523,7 +529,7 @@ func TestPreviewModeRFC3507(t *testing.T) {
 		}
 	})
 
-	t.Run("Preview:0 means no preview", func(t *testing.T) {
+	t.Run("Preview:0 enables preview", func(t *testing.T) {
 		input := "REQMOD icap://icap-server.net:1344/reqmod ICAP/1.0\r\n" +
 			"Host: icap-server.net\r\n" +
 			"Encapsulated: req-hdr=0, req-body=412\r\n" +
@@ -544,8 +550,8 @@ func TestPreviewModeRFC3507(t *testing.T) {
 		if req.Preview != 0 {
 			t.Errorf("Preview = %d, want 0", req.Preview)
 		}
-		if req.IsPreviewMode() {
-			t.Errorf("IsPreviewMode() = true, want false")
+		if !req.IsPreviewMode() || !req.HasPreview() || !req.PreviewSet {
+			t.Error("Preview: 0 was not recorded as an active preview")
 		}
 	})
 
@@ -573,6 +579,26 @@ func TestPreviewModeRFC3507(t *testing.T) {
 			t.Errorf("IsPreviewMode() = true, want false")
 		}
 	})
+}
+
+func TestRequestZeroPreviewDoesNotReadFullBody(t *testing.T) {
+	body := strings.NewReader("full body")
+	req := &icap.Request{
+		Method:      icap.MethodREQMOD,
+		PreviewSet:  true,
+		HTTPRequest: &icap.HTTPMessage{BodyReader: body},
+	}
+
+	preview, err := req.GetPreviewBody()
+	if err != nil {
+		t.Fatalf("GetPreviewBody() error = %v", err)
+	}
+	if len(preview) != 0 {
+		t.Fatalf("GetPreviewBody() = %q, want empty preview", preview)
+	}
+	if body.Len() != len("full body") {
+		t.Fatalf("GetPreviewBody() consumed %d bytes", len("full body")-body.Len())
+	}
 }
 
 // TestPreviewWithChunkedEncoding tests preview mode with chunked encoding.

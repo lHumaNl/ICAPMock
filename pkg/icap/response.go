@@ -4,6 +4,7 @@ package icap
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,6 +66,13 @@ type Response struct {
 	Body            []byte
 	StatusCode      int
 	closeAfterWrite bool
+}
+
+// ResponseWriteOptions configures delivery lifecycle observation.
+type ResponseWriteOptions struct {
+	// OnStreamingStart runs once after the stream source opens successfully and
+	// immediately before body pacing or delivery begins.
+	OnStreamingStart func()
 }
 
 // NewResponse creates a new ICAP response with the given status code.
@@ -213,7 +221,17 @@ func cloneHTTPMessage(m *HTTPMessage) *HTTPMessage {
 
 // WriteTo writes the response to an io.Writer.
 func (r *Response) WriteTo(w io.Writer) (int64, error) {
-	return r.writeDirectTo(w)
+	return r.WriteToContext(context.Background(), w, ResponseWriteOptions{})
+}
+
+// WriteToContext writes the response while honoring cancellation and reporting
+// the boundary where actual streaming body delivery starts.
+func (r *Response) WriteToContext(
+	ctx context.Context,
+	w io.Writer,
+	options ResponseWriteOptions,
+) (int64, error) {
+	return r.writeDirectToContext(ctx, w, options)
 }
 
 // writeToBuffer writes the response content to a bytes.Buffer.

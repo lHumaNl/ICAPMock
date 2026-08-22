@@ -92,6 +92,16 @@ descriptions are emitted only in structured ERROR logs.
 The aggregate `icap_errors_total{server,type}` counter also includes routing failures such as
 `route_not_found` and response delivery failures such as `response_write_failed`.
 
+Request lifecycle gauges use bounded `server` and `method` labels:
+
+- `icap_requests_in_flight{server,method}` remains active from routing through terminal response
+  delivery, including ordinary writes, stream pacing, final flush, and FIN close. Keep-alive waiting
+  is excluded.
+- `icap_requests_processing_in_flight{server,method}` preserves the shared REQMOD/RESPMOD handler
+  boundary and returns to zero when response preparation finishes, before response delivery.
+- `icap_streaming_active{server}` is the subset currently executing streaming body delivery or
+  pacing.
+
 Scenario response latency uses the classic histogram
 `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` with
 finite buckets at 0.001, 0.01, and 0.05 seconds, then 0.1-second intervals through 1 second, 0.25-second intervals through 2 seconds,
@@ -99,6 +109,11 @@ finite buckets at 0.001, 0.01, and 0.05 seconds, then 0.1-second intervals throu
 through 60 seconds, and 10-second intervals through 120 seconds. Query quantiles from
 `icap_scenario_response_duration_seconds_bucket` with `le`.
 Request size histograms also remain classic histograms.
+
+Matched scenario processor time is reported separately as
+`icap_scenario_processing_duration_seconds{content_type,method,outcome,server,response,scenario}`.
+It covers processor execution through response construction and exposes only `_sum` and `_count`;
+it has no histogram buckets or summary quantiles.
 
 ### Body-pattern safety limits
 
@@ -456,7 +471,7 @@ scenarios:
       source:
         from: request_http_body
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
 
   respmod-stream:
     method: RESPMOD
@@ -469,7 +484,7 @@ scenarios:
         percent: "40%"
         duration: 250ms
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
       end:
         mode: fin
 ```
@@ -485,8 +500,15 @@ scenarios:
   supported for existing files, but cannot be mixed with `send` / `throttle` / `end`.
 - `end.mode: fin` does not add `Connection: close`; ICAPMock writes the partial chunked body,
   omits the terminating chunk, and then closes the TCP stream.
-- `start_delay: 100ms` or `start_delay: 100ms-500ms` waits before the first streamed chunk after the
-  request upload and any scenario `delay`; it does not change inter-chunk pacing or `send.duration`.
+- `throttle.target_chunk_size` is an adaptive preferred size. Alternatively, `target_chunks` is a
+  non-strict preferred count; the two hints are mutually exclusive and all plans are capped at 1000
+  non-empty body chunks. `throttle.every` is a minimum chunk-start interval and can be combined with
+  `send.duration`.
+- Use response-level `delay` to postpone the whole response. Streaming duration ranges are selected
+  once per response. `icap_scenario_response_duration_seconds` ends only after terminal delivery,
+  including pacing, final flush, and FIN close, while request upload and keep-alive wait are excluded.
+  `icap_scenario_processing_duration_seconds` ends when the processor has constructed the response,
+  before body delivery begins.
 
 ### `stream.parts`
 

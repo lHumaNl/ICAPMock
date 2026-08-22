@@ -27,29 +27,26 @@ const (
 	streamFinishFIN              = "fin"
 	streamFinishTerm             = "term"
 	streamFinishWeighted         = "weighted"
-	defaultStreamChunkSize       = 1
 )
 
 // StreamConfig defines gradual chunked encapsulated body streaming.
 //
 //nolint:govet // field order follows the YAML schema groups for readability.
 type StreamConfig struct {
-	Fallback        StreamFallbackConfig  `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	Source          StreamSourceConfig    `yaml:"source,omitempty" json:"source,omitempty"`
-	Parts           []StreamPartConfig    `yaml:"parts,omitempty" json:"parts,omitempty"`
-	From            string                `yaml:"from,omitempty" json:"from,omitempty"`
-	Body            string                `yaml:"body,omitempty" json:"body,omitempty"`
-	BodyFile        string                `yaml:"body_file,omitempty" json:"body_file,omitempty"`
-	Multipart       StreamMultipartConfig `yaml:"multipart,omitempty" json:"multipart,omitempty"`
-	Send            StreamSendConfig      `yaml:"send,omitempty" json:"send,omitempty"`
-	Throttle        StreamThrottleConfig  `yaml:"throttle,omitempty" json:"throttle,omitempty"`
-	End             StreamEndConfig       `yaml:"end,omitempty" json:"end,omitempty"`
-	Finish          StreamFinishConfig    `yaml:"finish,omitempty" json:"finish,omitempty"`
-	Chunks          StreamChunksConfig    `yaml:"chunks,omitempty" json:"chunks,omitempty"`
-	StartDelay      DurationSpec          `yaml:"start_delay,omitempty" json:"start_delay,omitempty"`
-	Duration        DurationSpec          `yaml:"duration,omitempty" json:"duration,omitempty"`
-	PartsSet        bool                  `yaml:"-" json:"-"`
-	derivedControls bool                  `yaml:"-" json:"-"` // legacy fields were populated from send/throttle/end.
+	Fallback  StreamFallbackConfig  `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Source    StreamSourceConfig    `yaml:"source,omitempty" json:"source,omitempty"`
+	Parts     []StreamPartConfig    `yaml:"parts,omitempty" json:"parts,omitempty"`
+	From      string                `yaml:"from,omitempty" json:"from,omitempty"`
+	Body      string                `yaml:"body,omitempty" json:"body,omitempty"`
+	BodyFile  string                `yaml:"body_file,omitempty" json:"body_file,omitempty"`
+	Multipart StreamMultipartConfig `yaml:"multipart,omitempty" json:"multipart,omitempty"`
+	Send      StreamSendConfig      `yaml:"send,omitempty" json:"send,omitempty"`
+	Throttle  StreamThrottleConfig  `yaml:"throttle,omitempty" json:"throttle,omitempty"`
+	End       StreamEndConfig       `yaml:"end,omitempty" json:"end,omitempty"`
+	Finish    StreamFinishConfig    `yaml:"finish,omitempty" json:"finish,omitempty"`
+	Chunks    StreamChunksConfig    `yaml:"chunks,omitempty" json:"chunks,omitempty"`
+	Duration  DurationSpec          `yaml:"duration,omitempty" json:"duration,omitempty"`
+	PartsSet  bool                  `yaml:"-" json:"-"`
 }
 
 // StreamSendConfig controls how much data to send and over what duration.
@@ -61,9 +58,11 @@ type StreamSendConfig struct {
 
 // StreamThrottleConfig controls chunk sizing and inter-chunk pacing.
 type StreamThrottleConfig struct {
-	ChunkSize SizeSpec     `yaml:"chunk_size,omitempty" json:"chunk_size,omitempty"`
-	Every     DurationSpec `yaml:"every,omitempty" json:"every,omitempty"`
-	IsSet     bool         `yaml:"-" json:"-"`
+	TargetChunkSize SizeSpec     `yaml:"target_chunk_size,omitempty" json:"target_chunk_size,omitempty"`
+	Every           DurationSpec `yaml:"every,omitempty" json:"every,omitempty"`
+	TargetChunks    int          `yaml:"target_chunks,omitempty" json:"target_chunks,omitempty"`
+	IsSet           bool         `yaml:"-" json:"-"`
+	targetChunksSet bool         // distinguishes an explicit zero from an omitted hint.
 }
 
 // StreamEndConfig controls whether the stream completes, closes with FIN, or terminates early.
@@ -355,14 +354,8 @@ func validateStreamTiming(s *StreamConfig) error {
 	if s.Chunks.Size.IsSet && s.Chunks.Size.Min <= 0 {
 		return fmt.Errorf("chunks.size must be positive")
 	}
-	if !s.Chunks.Size.IsSet {
-		s.Chunks.Size = SizeSpec{Min: defaultStreamChunkSize, Max: defaultStreamChunkSize, IsSet: true}
-	}
 	if s.Chunks.Delay.IsSet && s.Duration.IsSet {
 		return fmt.Errorf("chunks.delay and duration are mutually exclusive")
-	}
-	if s.StartDelay.IsSet && s.StartDelay.Min <= 0 {
-		return fmt.Errorf("start_delay must be positive")
 	}
 	return nil
 }
@@ -381,18 +374,15 @@ func validateStreamFinish(s *StreamConfig) error {
 	case streamFinishFIN:
 		return validateFINFinish(f)
 	case streamFinishTerm:
-		return validateTermFinish(s)
+		return validateTermFinish()
 	case streamFinishWeighted:
 		return validateWeightedFinish(f)
 	}
 	return nil
 }
 
-func validateTermFinish(s *StreamConfig) error {
-	if !s.derivedControls {
-		return fmt.Errorf("finish.mode term requires send/throttle/end controls")
-	}
-	return validatePartialEndControls(s, streamFinishTerm)
+func validateTermFinish() error {
+	return fmt.Errorf("finish.mode term requires send/throttle/end controls")
 }
 
 func validateCompleteFinish(f *StreamFinishConfig) error {

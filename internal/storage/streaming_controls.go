@@ -38,6 +38,9 @@ func (s *StreamSendConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (t *StreamThrottleConfig) UnmarshalYAML(node *yaml.Node) error {
+	if yamlMappingHasKey(node, "chunk_size") {
+		return fmt.Errorf("throttle.chunk_size is not supported; use throttle.target_chunk_size")
+	}
 	type rawThrottle StreamThrottleConfig
 	var raw rawThrottle
 	if err := node.Decode(&raw); err != nil {
@@ -45,6 +48,7 @@ func (t *StreamThrottleConfig) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*t = StreamThrottleConfig(raw)
 	t.IsSet = true
+	t.targetChunksSet = yamlMappingHasKey(node, "target_chunks")
 	return nil
 }
 
@@ -53,6 +57,13 @@ func (t *StreamThrottleConfig) UnmarshalJSON(data []byte) error {
 		*t = StreamThrottleConfig{}
 		return nil
 	}
+	keys, err := jsonObjectKeys(data)
+	if err != nil {
+		return err
+	}
+	if _, exists := keys["chunk_size"]; exists {
+		return fmt.Errorf("throttle.chunk_size is not supported; use throttle.target_chunk_size")
+	}
 	type rawThrottle StreamThrottleConfig
 	var raw rawThrottle
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -60,6 +71,7 @@ func (t *StreamThrottleConfig) UnmarshalJSON(data []byte) error {
 	}
 	*t = StreamThrottleConfig(raw)
 	t.IsSet = true
+	_, t.targetChunksSet = keys["target_chunks"]
 	return nil
 }
 
@@ -114,15 +126,53 @@ func (p *PercentSpec) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (s *SizeSpec) UnmarshalJSON(data []byte) error {
+	raw, err := decodeJSONSizeScalar(data)
+	if err != nil {
+		return err
+	}
+	minVal, maxVal, err := parseSizeSpec(raw)
+	if err != nil {
+		return err
+	}
+	*s = SizeSpec{Min: minVal, Max: maxVal, IsSet: true}
+	return nil
+}
+
+func (d *DurationSpec) UnmarshalJSON(data []byte) error {
+	var raw string
+	if isJSONNull(data) || json.Unmarshal(data, &raw) != nil {
+		return fmt.Errorf("duration must be a string")
+	}
+	delay, err := ParseDelay(raw)
+	if err != nil {
+		return err
+	}
+	*d = DurationSpec{Min: delay.Min, Max: delay.Max, IsSet: true}
+	return nil
+}
+
+func decodeJSONSizeScalar(data []byte) (string, error) {
+	if isJSONNull(data) {
+		return "", fmt.Errorf("size must be a string or number")
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		return text, nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err == nil {
+		return number.String(), nil
+	}
+	return "", fmt.Errorf("size must be a string or number")
+}
+
 func validateStreamControls(s *StreamConfig) error {
 	if err := validateNewStreamConflicts(s); err != nil {
 		return err
 	}
 	if hasNewStreamControls(s) {
-		if err := validateNewStreamControls(s); err != nil {
-			return err
-		}
-		applyNewStreamControls(s)
+		return validateNewStreamControls(s)
 	}
 	if err := validateStreamTiming(s); err != nil {
 		return err
@@ -132,9 +182,6 @@ func validateStreamControls(s *StreamConfig) error {
 
 func validateNewStreamConflicts(s *StreamConfig) error {
 	if !hasNewStreamControls(s) {
-		return nil
-	}
-	if s.derivedControls {
 		return nil
 	}
 	if s.Duration.IsSet {
@@ -150,6 +197,9 @@ func validateNewStreamConflicts(s *StreamConfig) error {
 }
 
 func validateNewStreamControls(s *StreamConfig) error {
+	if err := validateThrottleTargets(s.Throttle); err != nil {
+		return err
+	}
 	mode := newStreamEndMode(s.End)
 	if !validNewEndMode(mode) {
 		return fmt.Errorf("end.mode must be complete, fin, or term")
@@ -159,6 +209,20 @@ func validateNewStreamControls(s *StreamConfig) error {
 	}
 	if s.Send.Percent.IsSet {
 		return fmt.Errorf("send.percent is only allowed when end.mode is fin or term")
+	}
+	return nil
+}
+
+func validateThrottleTargets(throttle StreamThrottleConfig) error {
+	targetChunksSet := throttle.targetChunksSet || throttle.TargetChunks != 0
+	if targetChunksSet && throttle.TargetChunks <= 0 {
+		return fmt.Errorf("throttle.target_chunks must be positive")
+	}
+	if throttle.TargetChunkSize.IsSet && throttle.TargetChunkSize.Min <= 0 {
+		return fmt.Errorf("throttle.target_chunk_size must be positive")
+	}
+	if throttle.TargetChunkSize.IsSet && targetChunksSet {
+		return fmt.Errorf("throttle.target_chunk_size and throttle.target_chunks are mutually exclusive")
 	}
 	return nil
 }
@@ -176,26 +240,11 @@ func validatePartialEndControls(s *StreamConfig, mode string) error {
 	return nil
 }
 
-func applyNewStreamControls(s *StreamConfig) {
-	s.derivedControls = true
-	if s.End.IsSet || s.End.Mode != "" {
-		s.Finish.Mode = newStreamEndMode(s.End)
-	}
-	if s.Send.Duration.IsSet && !s.Throttle.Every.IsSet {
-		s.Duration = s.Send.Duration
-	}
-	if s.Throttle.ChunkSize.IsSet {
-		s.Chunks.Size = s.Throttle.ChunkSize
-	}
-	if s.Throttle.Every.IsSet {
-		s.Chunks.Delay = s.Throttle.Every
-	}
-}
-
 func hasNewStreamControls(s *StreamConfig) bool {
 	return s.Send.IsSet || s.Throttle.IsSet || s.End.IsSet ||
 		s.Send.Percent.IsSet || s.Send.Duration.IsSet ||
-		s.Throttle.ChunkSize.IsSet || s.Throttle.Every.IsSet || s.End.Mode != ""
+		s.Throttle.TargetChunkSize.IsSet || s.Throttle.targetChunksSet ||
+		s.Throttle.TargetChunks != 0 || s.Throttle.Every.IsSet || s.End.Mode != ""
 }
 
 func hasLegacyFinishConfig(f StreamFinishConfig) bool {

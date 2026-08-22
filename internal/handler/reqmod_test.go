@@ -146,6 +146,199 @@ func TestReqmodHandlerMetrics(t *testing.T) {
 	})
 }
 
+func TestReqmodHandler_ProcessingInFlightUsesCapturedCollector(t *testing.T) {
+	regA := prometheus.NewRegistry()
+	collectorA, err := metrics.NewCollector(regA)
+	if err != nil {
+		t.Fatalf("NewCollector(A) error = %v", err)
+	}
+	regB := prometheus.NewRegistry()
+	collectorB, err := metrics.NewCollector(regB)
+	if err != nil {
+		t.Fatalf("NewCollector(B) error = %v", err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	proc := processor.Func(func(context.Context, *icap.Request) (*icap.Response, error) {
+		close(started)
+		<-release
+		return icap.NewResponse(icap.StatusNoContentNeeded), nil
+	})
+	h := handler.NewReqmodHandlerForServer("edge", proc, collectorA, nil)
+	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/scan")
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, handleErr := h.Handle(context.Background(), req)
+		done <- handleErr
+	}()
+	<-started
+
+	if got := gatheredHandlerGauge(t, regA, "icap_requests_processing_in_flight"); got != 1 {
+		t.Fatalf("collector A processing in-flight while blocked = %v, want 1", got)
+	}
+	if got := gatheredHandlerGauge(t, regA, "icap_requests_in_flight"); got != 0 {
+		t.Fatalf("handler-owned lifecycle in-flight = %v, want 0", got)
+	}
+	h.SetMetrics(collectorB)
+	close(release)
+	if handleErr := <-done; handleErr != nil {
+		t.Fatalf("Handle() error = %v", handleErr)
+	}
+	if got := gatheredHandlerGauge(t, regA, "icap_requests_processing_in_flight"); got != 0 {
+		t.Fatalf("collector A processing in-flight after return = %v, want 0", got)
+	}
+	if got := gatheredHandlerGauge(t, regB, "icap_requests_processing_in_flight"); got != 0 {
+		t.Fatalf("collector B processing in-flight = %v, want 0", got)
+	}
+}
+
+func TestReqmodHandler_ProcessingStartedWithoutMetricsDoesNotDecrementLaterCollector(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	proc := processor.Func(func(context.Context, *icap.Request) (*icap.Response, error) {
+		close(started)
+		<-release
+		return icap.NewResponse(icap.StatusNoContentNeeded), nil
+	})
+	h := handler.NewReqmodHandlerForServer("edge", proc, nil, nil)
+	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/scan")
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, handleErr := h.Handle(context.Background(), req)
+		done <- handleErr
+	}()
+	<-started
+	h.SetMetrics(collector)
+	close(release)
+	if handleErr := <-done; handleErr != nil {
+		t.Fatalf("Handle() error = %v", handleErr)
+	}
+	if got := gatheredHandlerGauge(t, reg, "icap_requests_processing_in_flight"); got != 0 {
+		t.Fatalf("late collector processing in-flight = %v, want 0", got)
+	}
+}
+
+func TestReqmodHandler_AllInvocationMetricsUseCapturedCollector(t *testing.T) {
+	regA := prometheus.NewRegistry()
+	collectorA, err := metrics.NewCollector(regA)
+	if err != nil {
+		t.Fatalf("NewCollector(A) error = %v", err)
+	}
+	regB := prometheus.NewRegistry()
+	collectorB, err := metrics.NewCollector(regB)
+	if err != nil {
+		t.Fatalf("NewCollector(B) error = %v", err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	expectedErr := errors.New("processor failed")
+	proc := processor.Func(func(context.Context, *icap.Request) (*icap.Response, error) {
+		close(started)
+		<-release
+		return nil, expectedErr
+	})
+	h := handler.NewReqmodHandlerForServer("edge", proc, collectorA, nil)
+	req, err := icap.NewRequest(icap.MethodREQMOD, "icap://localhost/scan")
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, handleErr := h.Handle(context.Background(), req)
+		done <- handleErr
+	}()
+	<-started
+	h.SetMetrics(collectorB)
+	close(release)
+	if handleErr := <-done; !errors.Is(handleErr, expectedErr) {
+		t.Fatalf("Handle() error = %v, want %v", handleErr, expectedErr)
+	}
+
+	if got := gatheredHandlerCounter(t, regA, "icap_errors_total", map[string]string{
+		"server": "edge", "type": "processing_error",
+	}); got != 1 {
+		t.Fatalf("collector A processing errors = %v, want 1", got)
+	}
+	if got := gatheredHandlerCounter(t, regB, "icap_errors_total", map[string]string{
+		"server": "edge", "type": "processing_error",
+	}); got != 0 {
+		t.Fatalf("collector B processing errors = %v, want 0", got)
+	}
+}
+
+func gatheredHandlerGauge(
+	t *testing.T,
+	reg prometheus.Gatherer,
+	name string,
+) float64 {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["server"] == "edge" && labels["method"] == "REQMOD" {
+				return metric.GetGauge().GetValue()
+			}
+		}
+	}
+	return 0
+}
+
+func gatheredHandlerCounter(
+	t *testing.T,
+	reg prometheus.Gatherer,
+	name string,
+	wantLabels map[string]string,
+) float64 {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			matched := true
+			for label, want := range wantLabels {
+				if labels[label] != want {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
+}
+
 // TestReqmodHandlerProcessorErrors tests error handling from processor.
 func TestReqmodHandlerProcessorErrors(t *testing.T) {
 	t.Parallel()

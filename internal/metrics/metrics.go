@@ -34,15 +34,16 @@ var scenarioResponseDurationBuckets = []float64{
 // errors, connections, scenarios, and streaming.
 //
 // All methods are safe for concurrent use.
-type Collector struct {
+type Collector struct { //nolint:govet // metric fields stay grouped by subsystem for maintainability.
 	// Request metrics
-	requestsTotal        *prometheus.CounterVec
-	requestsInFlight     *prometheus.GaugeVec
-	requestSize          *prometheus.HistogramVec
-	previewRequestsTotal *prometheus.CounterVec
-	apiRequestsTotal     *prometheus.CounterVec
-	apiErrorsTotal       *prometheus.CounterVec
-	contentTypeLabels    *contentTypeLabelLimiter
+	requestsTotal              *prometheus.CounterVec
+	requestsInFlight           *prometheus.GaugeVec
+	requestsProcessingInFlight *prometheus.GaugeVec
+	requestSize                *prometheus.HistogramVec
+	previewRequestsTotal       *prometheus.CounterVec
+	apiRequestsTotal           *prometheus.CounterVec
+	apiErrorsTotal             *prometheus.CounterVec
+	contentTypeLabels          *contentTypeLabelLimiter
 
 	// Error metrics
 	errorsTotal        *prometheus.CounterVec
@@ -58,15 +59,18 @@ type Collector struct {
 	goroutinesCurrent prometheus.Gauge
 
 	// Mock metrics
-	scenarioResponseDuration *prometheus.HistogramVec
-	scenarioStageDuration    *prometheus.HistogramVec
-	scenariosLoaded          *prometheus.GaugeVec
-	scenariosLoadedLabels    map[string]struct{}
-	scenarioLabels           *scenarioLabelLimiter
+	scenarioResponseDuration   *prometheus.HistogramVec
+	scenarioProcessingDuration *prometheus.SummaryVec
+	scenarioStageDuration      *prometheus.HistogramVec
+	scenariosLoaded            *prometheus.GaugeVec
+	scenariosLoadedLabels      map[string]struct{}
+	scenarioLabels             *scenarioLabelLimiter
 
 	// Streaming metrics
-	streamingActive     prometheus.Gauge
-	streamingBytesTotal *prometheus.CounterVec
+	streamingActive         *prometheus.GaugeVec
+	streamingBytesTotal     *prometheus.CounterVec
+	streamingActiveMu       sync.Mutex
+	streamingActiveByServer map[string]uint64
 
 	// Config reload metrics
 	configReloadTotal      *prometheus.CounterVec
@@ -143,7 +147,15 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.GaugeOpts{
 				Namespace: "icap",
 				Name:      "requests_in_flight",
-				Help:      "Current number of ICAP requests being processed by server and method.",
+				Help:      "Current number of ICAP requests awaiting terminal response delivery by server and method.",
+			},
+			[]string{"server", "method"},
+		),
+		requestsProcessingInFlight: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: "icap",
+				Name:      "requests_processing_in_flight",
+				Help:      "Current number of ICAP requests executing shared handler and processor response preparation by server and method, excluding response delivery.",
 			},
 			[]string{"server", "method"},
 		),
@@ -248,8 +260,16 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 			prometheus.HistogramOpts{
 				Namespace: "icap",
 				Name:      "scenario_response_duration_seconds",
-				Help:      "Scenario response duration in seconds by content type, method, outcome, server, response, and scenario.",
+				Help:      "Server-side elapsed time from timed scenario handling through terminal response delivery in seconds by content type, method, outcome, server, response, and scenario.",
 				Buckets:   scenarioResponseDurationBuckets,
+			},
+			[]string{"content_type", "method", "outcome", "server", "response", "scenario"},
+		),
+		scenarioProcessingDuration: prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Namespace: "icap",
+				Name:      "scenario_processing_duration_seconds",
+				Help:      "Scenario processor elapsed time through response construction in seconds by content type, method, outcome, server, response, and scenario; exposes sum and count without quantiles.",
 			},
 			[]string{"content_type", "method", "outcome", "server", "response", "scenario"},
 		),
@@ -273,13 +293,15 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		scenarioLabels: newScenarioLabelLimiter(maxScenarioLatencySeries),
 
 		// Streaming metrics
-		streamingActive: prometheus.NewGauge(
+		streamingActive: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "icap",
 				Name:      "streaming_active",
-				Help:      "Current number of active streaming sessions.",
+				Help:      "Current number of active streaming sessions by server.",
 			},
+			[]string{"server"},
 		),
+		streamingActiveByServer: make(map[string]uint64),
 		streamingBytesTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "icap",
@@ -461,6 +483,7 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 	reg.MustRegister(
 		c.requestsTotal,
 		c.requestsInFlight,
+		c.requestsProcessingInFlight,
 		c.requestSize,
 		c.previewRequestsTotal,
 		c.apiRequestsTotal,
@@ -473,6 +496,7 @@ func NewCollector(reg prometheus.Registerer) (*Collector, error) {
 		c.connectionClosesTotal,
 		c.goroutinesCurrent,
 		c.scenarioResponseDuration,
+		c.scenarioProcessingDuration,
 		c.scenarioStageDuration,
 		c.scenariosLoaded,
 		c.streamingActive,
@@ -516,8 +540,8 @@ func (c *Collector) RecordRequestForServer(server, method, contentType, outcome,
 	)
 }
 
-// IncRequestsInFlight increments the gauge tracking requests currently being processed.
-// This should be called when a request starts being processed.
+// IncRequestsInFlight increments the gauge tracking requests awaiting terminal delivery.
+// This should be called when a request enters the routed server lifecycle.
 //
 // This method is safe for concurrent use.
 func (c *Collector) IncRequestsInFlight(method string) {
@@ -529,8 +553,8 @@ func (c *Collector) IncRequestsInFlightForServer(server, method string) {
 	c.requestsInFlight.WithLabelValues(normalizedMetricLabel(server), method).Inc()
 }
 
-// DecRequestsInFlight decrements the gauge tracking requests currently being processed.
-// This should be called when a request finishes processing.
+// DecRequestsInFlight decrements the gauge tracking requests awaiting terminal delivery.
+// This should be called only after terminal response delivery or failure.
 //
 // This method is safe for concurrent use.
 func (c *Collector) DecRequestsInFlight(method string) {
@@ -540,6 +564,26 @@ func (c *Collector) DecRequestsInFlight(method string) {
 // DecRequestsInFlightForServer decrements in-flight requests by server and method.
 func (c *Collector) DecRequestsInFlightForServer(server, method string) {
 	c.requestsInFlight.WithLabelValues(normalizedMetricLabel(server), method).Dec()
+}
+
+// IncRequestsProcessingInFlight increments the default-server processing gauge.
+func (c *Collector) IncRequestsProcessingInFlight(method string) {
+	c.IncRequestsProcessingInFlightForServer(defaultServerMetricLabel, method)
+}
+
+// IncRequestsProcessingInFlightForServer increments requests executing shared handler processing.
+func (c *Collector) IncRequestsProcessingInFlightForServer(server, method string) {
+	c.requestsProcessingInFlight.WithLabelValues(normalizedMetricLabel(server), method).Inc()
+}
+
+// DecRequestsProcessingInFlight decrements the default-server processing gauge.
+func (c *Collector) DecRequestsProcessingInFlight(method string) {
+	c.DecRequestsProcessingInFlightForServer(defaultServerMetricLabel, method)
+}
+
+// DecRequestsProcessingInFlightForServer decrements requests executing shared handler processing.
+func (c *Collector) DecRequestsProcessingInFlightForServer(server, method string) {
+	c.requestsProcessingInFlight.WithLabelValues(normalizedMetricLabel(server), method).Dec()
 }
 
 // RecordRequestSize records the size of a request body in bytes.
@@ -737,6 +781,26 @@ func (c *Collector) RecordScenarioResponseDurationForServer(
 		Observe(duration.Seconds())
 }
 
+// RecordScenarioProcessingDurationForServer records processor-scoped elapsed time.
+// The summary has no quantile objectives and therefore exposes only sum and count.
+func (c *Collector) RecordScenarioProcessingDurationForServer(
+	server, method, contentTypeLabel, outcome, scenario, response string,
+	duration time.Duration,
+) {
+	labels := c.admitScenarioLabels(server, method, contentTypeLabel, outcome, scenario, response)
+	if duration < 0 {
+		duration = 0
+	}
+	c.scenarioProcessingDuration.WithLabelValues(
+		labels.contentType,
+		labels.method,
+		labels.outcome,
+		labels.server,
+		labels.response,
+		labels.scenario,
+	).Observe(duration.Seconds())
+}
+
 func normalizeOutcomeLabel(outcome string) string {
 	switch outcome {
 	case OutcomeAllowed, OutcomeBlocked, OutcomeError:
@@ -790,7 +854,12 @@ func (c *Collector) RecordFallbackScenarioRequest(server, response string, durat
 //
 // This method is safe for concurrent use.
 func (c *Collector) IncStreamingActive() {
-	c.streamingActive.Inc()
+	c.IncStreamingActiveForServer(defaultServerMetricLabel)
+}
+
+// IncStreamingActiveForServer increments active streaming sessions by server.
+func (c *Collector) IncStreamingActiveForServer(server string) {
+	c.adjustStreamingActive(normalizedMetricLabel(server), 1)
 }
 
 // DecStreamingActive decrements the gauge tracking active streaming sessions.
@@ -798,7 +867,28 @@ func (c *Collector) IncStreamingActive() {
 //
 // This method is safe for concurrent use.
 func (c *Collector) DecStreamingActive() {
-	c.streamingActive.Dec()
+	c.DecStreamingActiveForServer(defaultServerMetricLabel)
+}
+
+// DecStreamingActiveForServer decrements active streaming sessions by server.
+// It ignores unmatched decrements to prevent a server's gauge from becoming negative.
+func (c *Collector) DecStreamingActiveForServer(server string) {
+	c.adjustStreamingActive(normalizedMetricLabel(server), -1)
+}
+
+func (c *Collector) adjustStreamingActive(server string, delta int) {
+	c.streamingActiveMu.Lock()
+	defer c.streamingActiveMu.Unlock()
+
+	if delta < 0 && c.streamingActiveByServer[server] == 0 {
+		return
+	}
+	c.streamingActive.WithLabelValues(server).Add(float64(delta))
+	if delta > 0 {
+		c.streamingActiveByServer[server]++
+		return
+	}
+	c.streamingActiveByServer[server]--
 }
 
 // RecordStreamingBytes adds to the counter for streamed bytes.

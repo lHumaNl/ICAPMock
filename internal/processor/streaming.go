@@ -7,10 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
-	"os"
 	"strconv"
-	"time"
 
 	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/storage"
@@ -31,13 +28,6 @@ var (
 	errStreamSourceBodyTooLarge = errors.New("stream source body exceeds max_body_size")
 )
 
-var (
-	openStreamFile = func(path string) (io.ReadCloser, error) {
-		return os.Open(path) //nolint:gosec // scenario-controlled path
-	}
-	statStreamFile = os.Stat //nolint:gosec // scenario-controlled path
-)
-
 func (p *MockProcessor) attachStream(resp *icap.Response, tmpl *storage.ResponseTemplate, req *icap.Request) error {
 	if tmpl.Stream == nil {
 		return nil
@@ -46,21 +36,28 @@ func (p *MockProcessor) attachStream(resp *icap.Response, tmpl *storage.Response
 	if err != nil {
 		return streamICAPError("failed to resolve stream source", err)
 	}
+	keepPayload := false
+	defer func() {
+		if !keepPayload {
+			_ = cleanupStreamPayload(payload)
+		}
+	}()
 	target := streamTarget(resp)
 	if target == nil {
 		return streamICAPError("failed to attach stream", fmt.Errorf("no encapsulated HTTP message"))
 	}
 	target.Body = nil
-	bodyStream, err := newBodyStream(tmpl.Stream, payload)
+	bodyStream, err := newBodyStream(tmpl.Stream, payload, p.streamSelector)
 	if err != nil {
 		return streamICAPError("failed to configure stream", err)
 	}
 	target.BodyStream = bodyStream
+	keepPayload = true
 	if target.Header == nil {
 		target.Header = make(icap.Header)
 	}
 	setStreamContentLength(target.Header, payload)
-	if target.BodyStream.FinishMode == icap.StreamFinishFIN {
+	if target.BodyStream.Plan.FinishMode() == icap.StreamFinishFIN {
 		resp.MarkCloseAfterWrite()
 	}
 	return nil
@@ -127,13 +124,15 @@ func inlineStreamPayload(body string, limit int64) (icap.StreamPayload, error) {
 }
 
 func fileStreamPayload(path string, limit int64) (icap.StreamPayload, error) {
-	info, err := statStreamFile(path)
+	file, err := openStreamFile(path)
 	if err != nil {
 		return nil, err
 	}
-	payload := icap.NewReplayableStreamPayload(func() (io.ReadCloser, error) {
-		return openStreamFile(path)
-	}, info.Size())
+	info, err := file.Stat()
+	if err != nil {
+		return nil, errors.Join(err, file.Close())
+	}
+	payload := newPreparedFilePayload(file, info.Size())
 	return limitStreamPayload(payload, limit)
 }
 
@@ -149,11 +148,12 @@ func streamPartsPayload(
 	for i := range parts {
 		payload, err := streamPartPayload(parts[i], req, limit)
 		if err != nil {
+			_ = cleanupStreamPayloads(payloads)
 			return nil, err
 		}
 		payloads = append(payloads, payload)
 	}
-	return limitStreamPayload(icap.NewSequenceStreamPayload(payloads), limit)
+	return limitStreamPayload(newPreparedSequencePayload(payloads), limit)
 }
 
 func rejectRepeatedLiveHTTPBodyParts(parts []storage.StreamPartConfig, req *icap.Request) error {
@@ -204,8 +204,12 @@ func streamPartPayload(
 }
 
 func limitStreamPayload(payload icap.StreamPayload, limit int64) (icap.StreamPayload, error) {
-	payload, err := icap.NewLimitedStreamPayload(payload, limit)
-	return payload, streamBodyReadError(err, limit)
+	limited, err := icap.NewLimitedStreamPayload(payload, limit)
+	if err != nil {
+		_ = cleanupStreamPayload(payload)
+		return nil, streamBodyReadError(err, limit)
+	}
+	return preserveStreamPayloadCleanup(limited, payload), nil
 }
 
 func rawHTTPBodyMessage(from string, req *icap.Request) (*icap.HTTPMessage, error) {
@@ -443,93 +447,6 @@ func streamTarget(resp *icap.Response) *icap.HTTPMessage {
 		return resp.HTTPResponse
 	}
 	return resp.HTTPRequest
-}
-
-func newBodyStream(cfg *storage.StreamConfig, payload icap.StreamPayload) (*icap.BodyStream, error) {
-	size, known := payload.SizeHint()
-	finAfterBytes, finAfterBytesSet, err := resolveFinAfterBytes(cfg, size, known)
-	if err != nil {
-		return nil, err
-	}
-	finAfterTime := resolveFinAfterTime(cfg)
-	stream := &icap.BodyStream{
-		Payload:          payload,
-		ChunkSize:        int(cfg.Chunks.Size.Min),
-		ChunkSizeMax:     int(cfg.Chunks.Size.Max),
-		Delay:            cfg.Chunks.Delay.Min,
-		DelayMax:         cfg.Chunks.Delay.Max,
-		Duration:         cfg.Duration.Min,
-		FinishMode:       resolveFinishMode(cfg.Finish),
-		CompletePercent:  cfg.Finish.CompletePercent,
-		FinPercent:       cfg.Finish.FinPercent,
-		FinAfterBytes:    finAfterBytes,
-		FinAfterBytesSet: finAfterBytesSet,
-		FinAfterTime:     finAfterTime,
-		StartDelay:       cfg.StartDelay.Min,
-		StartDelayMax:    cfg.StartDelay.Max,
-		DelayStopAfter:   resolveDelayStopAfter(cfg),
-		TotalBytes:       streamTotalBytes(cfg, size, finAfterBytes, finAfterBytesSet),
-	}
-	return stream, nil
-}
-
-func resolveDelayStopAfter(cfg *storage.StreamConfig) time.Duration {
-	if !cfg.Send.Duration.IsSet || !cfg.Throttle.Every.IsSet {
-		return 0
-	}
-	if cfg.Finish.Mode != "" && cfg.Finish.Mode != icap.StreamFinishComplete {
-		return 0
-	}
-	return cfg.Send.Duration.Min
-}
-
-func resolveFinAfterTime(cfg *storage.StreamConfig) time.Duration {
-	if cfg.Send.Percent.IsSet && cfg.Send.Duration.IsSet {
-		return cfg.Send.Duration.Min
-	}
-	return cfg.Finish.Fin.After.Time.Min
-}
-
-func resolveFinAfterBytes(cfg *storage.StreamConfig, size int64, known bool) (bodyBytes int64, set bool, err error) {
-	if cfg.Send.Percent.IsSet {
-		return resolvePercentFINBytes(cfg.Send.Percent, size, known)
-	}
-	if cfg.Finish.Fin.After.Bytes.IsSet {
-		return cfg.Finish.Fin.After.Bytes.Min, true, nil
-	}
-	return 0, false, nil
-}
-
-func resolvePercentFINBytes(percent storage.PercentSpec, size int64, known bool) (bodyBytes int64, set bool, err error) {
-	if !known {
-		return 0, false, fmt.Errorf("send.percent requires a known stream source size")
-	}
-	selected := selectStreamPercent(percent)
-	return (size * int64(selected)) / 100, true, nil
-}
-
-func streamTotalBytes(cfg *storage.StreamConfig, size, finBytes int64, finBytesSet bool) int64 {
-	if cfg.Send.Percent.IsSet && finBytesSet {
-		return finBytes
-	}
-	return size
-}
-
-func selectStreamPercent(percent storage.PercentSpec) int {
-	if percent.Max <= percent.Min {
-		return percent.Min
-	}
-	return percent.Min + rand.Intn(percent.Max-percent.Min+1) //nolint:gosec // scenario randomness is non-security.
-}
-
-func resolveFinishMode(f storage.StreamFinishConfig) string {
-	if f.Mode != icap.StreamFinishWeighted {
-		return f.Mode
-	}
-	if rand.Intn(100) < f.CompletePercent { //nolint:gosec // deterministic stream writer supports injection in tests
-		return icap.StreamFinishComplete
-	}
-	return icap.StreamFinishFIN
 }
 
 func streamICAPError(message string, err error) error {

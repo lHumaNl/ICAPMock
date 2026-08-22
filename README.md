@@ -281,7 +281,7 @@ scenarios:
       source:
         from: request_http_body
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
 
   multipart-upload-stream:
     endpoint: /stream/multipart-upload
@@ -305,7 +305,7 @@ scenarios:
         percent: "40%"
         duration: 250ms
       throttle:
-        chunk_size: 4
+        target_chunk_size: 4
       end:
         mode: term
 ```
@@ -328,8 +328,11 @@ Notes:
   supported for existing files, but cannot be mixed with `send` / `throttle` / `end`.
 - `end.mode: fin` keeps ICAP response headers normal: ICAPMock does not add `Connection: close`;
   it writes the partial chunked body, omits the terminating chunk, and then closes the TCP stream.
-- `stream.start_delay` adds a pre-first-chunk wait after the upload and scenario `delay`, independent
-  from chunk pacing and `send.duration`.
+- `throttle.target_chunk_size` is an adaptive preferred size, while `target_chunks` is a non-strict
+  preferred count; they are mutually exclusive. `throttle.every` is the minimum interval between
+  non-empty body chunks and can be combined with `send.duration`.
+- Use response-level `delay` to postpone the whole response. A duration range is selected once per
+  stream, and terminal scenario latency includes response delivery, pacing, flush, and FIN close.
 
 ---
 
@@ -361,7 +364,11 @@ Available metrics include:
 - `icap_request_errors_total{server,method,stage,error_type,scenario,response}` — bounded request error count for context cancellation, body receive, routing, scenario match, processor response/build, and response write failures; raw error text is logged but never used as a metric label
 - `icap_errors_total{server,type}` — aggregate ICAP error count, including routing failures such as `route_not_found` and response delivery failures such as `response_write_failed`
 - `icap_active_connections{server}` — current open connections per configured server
-- `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` — scenario response latency classic histogram
+- `icap_requests_in_flight{server,method}` — requests that entered routing and have not yet reached terminal response delivery or terminal failure; includes ordinary writes, stream pacing, final flush, and FIN close, but excludes keep-alive waiting
+- `icap_requests_processing_in_flight{server,method}` — REQMOD/RESPMOD requests currently executing the shared handler and processor through response preparation; excludes response delivery
+- `icap_scenario_response_duration_seconds{content_type,method,outcome,server,response,scenario}` — server-side elapsed time from timed scenario handling through terminal delivery; includes response delay, stream pacing, writes, final flush, and FIN close, but excludes request upload and keep-alive wait
+- `icap_scenario_processing_duration_seconds{content_type,method,outcome,server,response,scenario}` — matched scenario processor wall time through response construction; this summary intentionally exposes only `_sum` and `_count`, with no buckets or quantiles
+- `icap_streaming_active{server}` — responses currently executing streaming body delivery or pacing per configured server
 - `icap_scenarios_loaded{server}` — currently loaded scenario count
 - `icap_api_requests_total{server,route,method,status_code}` — management API calls with bounded route labels
 - `icap_api_errors_total{server,route,method,status_code,error_type}` — failed management API calls
@@ -379,6 +386,15 @@ Override these credentials via environment variables or a secret before any shar
 layout starts with `0.001, 0.01, 0.05`, then `0.1, 0.2, ..., 1.0`, then `1.25, 1.5, 1.75, 2.0`, then `2.5, 3.0, ..., 5.0`,
 then `6, 7, 8, 9, 10`, then `15, 20, ..., 60`, then `70, 80, ..., 120` seconds,
 plus the implicit `+Inf` bucket.
+
+`icap_scenario_processing_duration_seconds` is a summary without configured quantiles. Use its
+`_sum` and `_count` series to calculate average processor time without the additional series created
+by histogram buckets or client-side summary quantiles.
+
+For a slow stream, `icap_requests_in_flight` and `icap_streaming_active` remain positive until
+terminal delivery, while `icap_requests_processing_in_flight` returns to zero as soon as the prepared
+response is handed back to the server. `icap_active_connections` may remain positive afterward while
+the connection waits for another keep-alive request.
 
 Scrape it with standard Prometheus-compatible text or OpenMetrics settings:
 

@@ -16,8 +16,10 @@ import (
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/icap-mock/icap-mock/internal/config"
+	apperrors "github.com/icap-mock/icap-mock/internal/errors"
 	"github.com/icap-mock/icap-mock/internal/logger"
 	"github.com/icap-mock/icap-mock/internal/metrics"
+	"github.com/icap-mock/icap-mock/internal/requestinfo"
 	"github.com/icap-mock/icap-mock/internal/storage"
 	"github.com/icap-mock/icap-mock/internal/weight"
 	"github.com/icap-mock/icap-mock/pkg/icap"
@@ -170,7 +172,7 @@ func TestSelectWeightedResponseAtUsesUniformIndexWithoutWeights(t *testing.T) {
 	}
 }
 
-func TestMockProcessor_RecordsScenarioMetrics(t *testing.T) {
+func TestMockProcessor_DoesNotRecordTerminalScenarioMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := metrics.NewCollector(reg)
 	if err != nil {
@@ -189,12 +191,68 @@ func TestMockProcessor_RecordsScenarioMetrics(t *testing.T) {
 	}
 
 	count := scenarioRequestMetricValue(t, reg, "named-scenario", "clean")
-	if count != 1 {
-		t.Errorf("scenario request count = %v, want 1", count)
+	if count != 0 {
+		t.Errorf("scenario request count = %v, want 0", count)
+	}
+	processingCount := scenarioProcessingMetricCount(t, reg, map[string]string{
+		"scenario": "named-scenario",
+		"response": "clean",
+		"outcome":  metrics.OutcomeAllowed,
+	})
+	if processingCount != 1 {
+		t.Errorf("scenario processing count = %v, want 1", processingCount)
 	}
 }
 
-func TestMockProcessor_RecordsSelectedWeightedBlockOutcome(t *testing.T) {
+func TestMockProcessor_RecordsMatchedBranchSelectionFailureProcessingMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	scenario := &storage.Scenario{
+		Name: "invalid-branch-selection",
+		Branches: []storage.Branch{{
+			Response: storage.ResponseTemplate{ICAPStatus: 204},
+		}},
+	}
+	proc := NewMockProcessor(&fixedProcessorScenarioRegistry{scenario: scenario}, createTestLogger(t))
+	proc.SetMetricsForServer(collector, "edge")
+
+	_, err = proc.Process(context.Background(), createTestREQMODRequest(t))
+	if !errors.Is(err, apperrors.ErrScenarioNotFound) {
+		t.Fatalf("Process() error = %v, want ErrScenarioNotFound", err)
+	}
+	count := scenarioProcessingMetricCount(t, reg, map[string]string{
+		"server":   "edge",
+		"scenario": scenario.Name,
+		"response": "unknown",
+		"outcome":  metrics.OutcomeError,
+	})
+	if count != 1 {
+		t.Fatalf("scenario processing count = %v, want 1", count)
+	}
+}
+
+func TestMockProcessor_DoesNotRecordProcessingMetricWithoutScenarioMatch(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(reg)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	proc := NewMockProcessor(&fixedProcessorScenarioRegistry{err: storage.ErrNoMatch}, createTestLogger(t))
+	proc.SetMetrics(collector)
+
+	_, err = proc.Process(context.Background(), createTestREQMODRequest(t))
+	if !errors.Is(err, apperrors.ErrScenarioNotFound) {
+		t.Fatalf("Process() error = %v, want ErrScenarioNotFound", err)
+	}
+	if count := scenarioProcessingMetricCount(t, reg, nil); count != 0 {
+		t.Fatalf("scenario processing count = %v, want 0", count)
+	}
+}
+
+func TestMockProcessor_DoesNotRecordSelectedWeightedTerminalOutcome(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := metrics.NewCollector(reg)
 	if err != nil {
@@ -213,12 +271,32 @@ func TestMockProcessor_RecordsSelectedWeightedBlockOutcome(t *testing.T) {
 	}
 
 	labels := map[string]string{"scenario": "weighted-explicit-allow", "response": "500", "outcome": "error"}
-	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 1 {
-		t.Errorf("scenario request count = %v, want 1", got)
+	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 0 {
+		t.Errorf("scenario request count = %v, want 0", got)
 	}
 }
 
-func TestMockProcessor_RecordsBranchWeightedBlockOutcome(t *testing.T) {
+func TestMockProcessor_RecordsAuthoritativeSelectedOutcome(t *testing.T) {
+	registry := storage.NewScenarioRegistry()
+	if err := registry.Add(weightedExplicitAllowScenario()); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+	proc := NewMockProcessor(registry, createTestLogger(t))
+	ctx := requestinfo.WithScenarioMetadata(context.Background())
+
+	if _, err := proc.Process(ctx, createTestREQMODRequest(t)); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	metadata, ok := requestinfo.ContextScenarioMetadata(ctx)
+	if !ok {
+		t.Fatal("ContextScenarioMetadata() metadata is missing")
+	}
+	if metadata.Outcome != metrics.OutcomeAllowed {
+		t.Fatalf("metadata outcome = %q, want %q", metadata.Outcome, metrics.OutcomeAllowed)
+	}
+}
+
+func TestMockProcessor_DoesNotRecordBranchWeightedTerminalOutcome(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	collector, err := metrics.NewCollector(reg)
 	if err != nil {
@@ -239,8 +317,8 @@ func TestMockProcessor_RecordsBranchWeightedBlockOutcome(t *testing.T) {
 	}
 
 	labels := map[string]string{"scenario": "branch-weighted-explicit-allow", "response": "500", "outcome": "error"}
-	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 1 {
-		t.Errorf("scenario request count = %v, want 1", got)
+	if got := scenarioRequestMetricValueWithLabels(t, reg, labels); got != 0 {
+		t.Errorf("scenario request count = %v, want 0", got)
 	}
 }
 
@@ -337,6 +415,21 @@ func scenarioRequestMetricValueWithLabels(t *testing.T, reg prometheus.Gatherer,
 	return 0
 }
 
+func scenarioProcessingMetricCount(t *testing.T, reg prometheus.Gatherer, labels map[string]string) float64 {
+	t.Helper()
+	for _, mf := range gatherProcessorTestMetrics(t, reg) {
+		if mf.GetName() != "icap_scenario_processing_duration_seconds" {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			if metricHasLabels(metric, labels) {
+				return float64(metric.GetSummary().GetSampleCount())
+			}
+		}
+	}
+	return 0
+}
+
 func gatherProcessorTestMetrics(t *testing.T, reg prometheus.Gatherer) []*dto.MetricFamily {
 	t.Helper()
 	mfs, err := reg.Gather()
@@ -357,6 +450,37 @@ func metricHasLabels(metric *dto.Metric, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+type fixedProcessorScenarioRegistry struct {
+	scenario *storage.Scenario
+	err      error
+}
+
+func (r *fixedProcessorScenarioRegistry) Load(string) error {
+	return nil
+}
+
+func (r *fixedProcessorScenarioRegistry) Match(context.Context, *icap.Request) (*storage.Scenario, error) {
+	return r.scenario, r.err
+}
+
+func (r *fixedProcessorScenarioRegistry) Reload() error {
+	return nil
+}
+
+func (r *fixedProcessorScenarioRegistry) List() []*storage.Scenario {
+	return []*storage.Scenario{r.scenario}
+}
+
+func (r *fixedProcessorScenarioRegistry) Add(scenario *storage.Scenario) error {
+	r.scenario = scenario
+	return nil
+}
+
+func (r *fixedProcessorScenarioRegistry) Remove(string) error {
+	r.scenario = nil
+	return nil
 }
 
 // TestMockProcessor_NoMatch tests behavior when no scenario matches.
@@ -680,7 +804,7 @@ func TestMockProcessor_StreamResponseBody(t *testing.T) {
 	if _, err := resp.WriteTo(&out); err != nil {
 		t.Fatalf("WriteTo() error = %v", err)
 	}
-	if !strings.Contains(out.String(), "3\r\nwxy\r\n1\r\nz\r\n0\r\n\r\n") {
+	if !strings.Contains(out.String(), "2\r\nwx\r\n2\r\nyz\r\n0\r\n\r\n") {
 		t.Fatalf("streamed response body missing: %q", out.String())
 	}
 }

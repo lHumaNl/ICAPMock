@@ -37,6 +37,8 @@ const (
 
 const closeReasonShutdown = "shutdown"
 
+const defaultRequestTimeout = 30 * time.Second
+
 // RequestIDFromContext retrieves the request ID from the context.
 // Returns an empty string if not found.
 func RequestIDFromContext(ctx context.Context) string {
@@ -122,6 +124,7 @@ type ICAPServer struct {
 	logger                     *slog.Logger
 	metrics                    *metrics.Collector
 	metricsServerName          string
+	metricsMu                  sync.RWMutex
 	goroutineConfig            GoroutineMonitorConfig
 	wg                         sync.WaitGroup
 	goroutinePeak              int
@@ -193,14 +196,24 @@ func (s *ICAPServer) SetRouter(r *router.Router) {
 // SetMetrics sets the metrics collector for the server.
 // This is optional. When set, goroutine monitoring updates the Prometheus gauge.
 func (s *ICAPServer) SetMetrics(m *metrics.Collector) {
+	s.metricsMu.Lock()
+	defer s.metricsMu.Unlock()
 	s.metrics = m
 }
 
 // SetMetricsServerName sets the bounded server label used by ICAP server metrics.
 func (s *ICAPServer) SetMetricsServerName(name string) {
 	if name != "" {
+		s.metricsMu.Lock()
+		defer s.metricsMu.Unlock()
 		s.metricsServerName = name
 	}
+}
+
+func (s *ICAPServer) metricsSnapshot() (collector *metrics.Collector, server string) {
+	s.metricsMu.RLock()
+	defer s.metricsMu.RUnlock()
+	return s.metrics, s.metricsServerName
 }
 
 // SetGoroutineMonitorConfig configures the goroutine leak detection monitoring.
@@ -343,7 +356,8 @@ func (s *ICAPServer) Start(ctx context.Context) error {
 	go s.acceptLoop(ctx)
 
 	// Start TLS certificate monitoring
-	s.tlsMonitor = NewTLSCertificateMonitor(&s.config.TLS, s.logger, s.metrics)
+	metricsCollector, _ := s.metricsSnapshot()
+	s.tlsMonitor = NewTLSCertificateMonitor(&s.config.TLS, s.logger, metricsCollector)
 	if s.tlsMonitor != nil {
 		s.wg.Add(1)
 		go func() {
@@ -438,9 +452,9 @@ func (s *ICAPServer) acceptLoop(ctx context.Context) {
 				// Got a slot, handle the connection
 			default:
 				// Connection limit reached, reject
-				if s.metrics != nil {
-					s.metrics.RecordConnectionRejected(s.metricsServerName, "max_connections")
-					s.metrics.RecordConnectionClosed(s.metricsServerName, "max_connections")
+				if metricsCollector, metricsServer := s.metricsSnapshot(); metricsCollector != nil {
+					metricsCollector.RecordConnectionRejected(metricsServer, "max_connections")
+					metricsCollector.RecordConnectionClosed(metricsServer, "max_connections")
 				}
 				_ = netConn.Close()
 				continue
@@ -458,8 +472,8 @@ func (s *ICAPServer) acceptLoop(ctx context.Context) {
 
 			// Add to pool
 			s.pool.Add(conn)
-			if s.metrics != nil {
-				s.metrics.IncActiveConnectionsForServer(s.metricsServerName)
+			if metricsCollector, metricsServer := s.metricsSnapshot(); metricsCollector != nil {
+				metricsCollector.IncActiveConnectionsForServer(metricsServer)
 			}
 
 			// Handle connection in a goroutine
@@ -483,29 +497,24 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 	var currentRequest *icap.Request
 	var currentResponse *icap.Response
 	currentRequestCtx := connCtx
+	var currentCancel context.CancelFunc
+	var currentAccounting *terminalAccounting
 	requestOutcomeRecorded := false
+	abortConnection := false
 
 	// No extra goroutine needed to cancel on server stop:
 	// The main request loop checks stopChan and returns, which triggers
 	// the deferred connCancel(). This avoids one goroutine per connection.
 
 	defer func() {
-		if r := recover(); r != nil {
+		recovered := recover()
+		if recovered != nil {
 			closeReason = "panic"
-			if currentRequest != nil && !requestOutcomeRecorded {
-				requestOutcomeRecorded = true
-				s.recordIncomingRequestOutcome(
-					currentRequestCtx,
-					currentRequest,
-					currentResponse,
-					metrics.OutcomeError,
-				)
-			}
+			abortConnection = true
 			s.logger.Error("panic in connection handler",
-				"error", r,
+				"error", recovered,
 				"remote_addr", extractPeerIP(conn.RemoteAddr()),
 			)
-			// connCancel() will be called by the defer below
 		}
 		if closeReason != "panic" {
 			select {
@@ -514,13 +523,30 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			default:
 			}
 		}
-		// Cancel connection-scoped context to stop any ongoing operations
+		if currentCancel != nil {
+			currentCancel()
+		}
 		connCancel()
-		_ = conn.Close()
+		if abortConnection {
+			_ = conn.Abort()
+		} else {
+			_ = conn.Close()
+		}
+		if recovered != nil {
+			if currentAccounting != nil {
+				currentAccounting.finalize(currentResponse, metrics.OutcomeError)
+			} else if currentRequest != nil && !requestOutcomeRecorded {
+				requestOutcomeRecorded = true
+				s.recordIncomingRequestOutcome(
+					currentRequestCtx, currentRequest, currentResponse, metrics.OutcomeError,
+				)
+			}
+			releaseLifecycleBodies(currentRequest, currentResponse)
+		}
 		s.pool.Remove(conn)
-		if s.metrics != nil {
-			s.metrics.DecActiveConnectionsForServer(s.metricsServerName)
-			s.metrics.RecordConnectionClosed(s.metricsServerName, closeReason)
+		if metricsCollector, metricsServer := s.metricsSnapshot(); metricsCollector != nil {
+			metricsCollector.DecActiveConnectionsForServer(metricsServer)
+			metricsCollector.RecordConnectionClosed(metricsServer, closeReason)
 		}
 		<-s.semaphore // Release slot
 		s.wg.Done()
@@ -541,6 +567,8 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			currentRequest = nil
 			currentResponse = nil
 			currentRequestCtx = connCtx
+			currentCancel = nil
+			currentAccounting = nil
 			requestOutcomeRecorded = false
 			keepAliveWait := requestCount > 0
 			if err := s.setWaitReadDeadline(conn, keepAliveWait); err != nil {
@@ -595,9 +623,10 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			// Use WriteTimeout as the processing deadline to ensure timely response
 			ctxTimeout := s.config.WriteTimeout
 			if ctxTimeout <= 0 {
-				ctxTimeout = 30 * time.Second // Default fallback
+				ctxTimeout = defaultRequestTimeout
 			}
 			ctx, cancel := context.WithTimeout(connCtx, ctxTimeout)
+			currentCancel = cancel
 
 			// Add request metadata to context for tracing and logging
 			requestID := util.GenerateRequestID(now)
@@ -605,10 +634,19 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 			ctx = context.WithValue(ctx, clientIPKey, req.ClientIP)
 			ctx = requestinfo.WithContentTypeLabel(ctx, s.canonicalContentTypeLabel(req))
 			ctx = requestinfo.WithScenarioMetadata(ctx)
+			currentAccounting = newPendingTerminalAccounting(ctx, s, req)
+			if req.IsPreviewMode() {
+				ctx = requestinfo.WithScenarioTimingStart(ctx, currentAccounting.start)
+				currentAccounting.ctx = ctx
+			} else {
+				currentAccounting.start()
+			}
 			currentRequestCtx = ctx
+			setPreviewContinuationContext(ctx, req)
 
 			// Route and handle the request with request-scoped context
 			var resp *icap.Response
+			routeStarted := time.Now()
 			if s.router != nil {
 				resp, err = s.router.Serve(ctx, req)
 			} else {
@@ -616,11 +654,17 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 				resp = icap.NewResponseError(icap.StatusInternalServerError, "No router configured")
 			}
 
-			// Cancel the request context after processing
-			cancel()
-
 			if err != nil {
 				resp = icap.NewResponseError(icap.StatusInternalServerError, err.Error())
+				if materializedAt, ok := requestinfo.ScenarioBodyMaterializedAt(ctx); ok {
+					currentAccounting.startAt(materializedAt)
+				}
+			} else {
+				// Production preview processors start at their post-materialization
+				// boundary. For custom handlers that do not expose a boundary,
+				// include their full route/response work without including any
+				// continuation wait that already triggered the timing hook.
+				currentAccounting.startAt(requestinfo.ScenarioTimingFallback(ctx, routeStarted))
 			}
 			currentResponse = resp
 			drainAfterResponse := shouldDrainAfterResponse(req)
@@ -636,13 +680,20 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 					s.logConnectionError(
 						ctx, req, errorStageSetDeadline, "deadline_setup_failed", conn.RemoteAddr(), deadlineErr,
 					)
-					requestOutcomeRecorded = true
-					s.recordIncomingRequestOutcome(ctx, req, resp, metrics.OutcomeError)
+					currentAccounting.finalize(resp, metrics.OutcomeError)
+					cancel()
+					currentCancel = nil
 					releaseLifecycleBodies(req, resp)
 					return
 				}
 			}
-			if err := writeResponseFromICAP(conn.Writer(), resp); err != nil {
+			writeOptions := icap.ResponseWriteOptions{OnStreamingStart: currentAccounting.streamingStarted}
+			stopWriteCancellation := context.AfterFunc(ctx, func() {
+				_ = conn.SetWriteDeadline(time.Now())
+			})
+			if err := writeResponseFromICAP(ctx, conn.Writer(), resp, writeOptions); err != nil {
+				stopWriteCancellation()
+				abortConnection = true
 				closeReason = "write_error"
 				s.logConnectionError(
 					ctx,
@@ -652,8 +703,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 					conn.RemoteAddr(),
 					err,
 				)
-				requestOutcomeRecorded = true
-				s.recordIncomingRequestOutcome(ctx, req, resp, metrics.OutcomeError)
+				currentAccounting.finalize(resp, metrics.OutcomeError)
 				s.recordRequestError(
 					ctx,
 					req,
@@ -661,14 +711,39 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 					metrics.RequestErrorTypeResponseWriteFailed,
 					"",
 				)
-				if s.metrics != nil {
-					s.metrics.RecordErrorForServer(s.metricsServerName, metrics.RequestErrorTypeResponseWriteFailed)
+				if metricsCollector, metricsServer := s.metricsSnapshot(); metricsCollector != nil {
+					metricsCollector.RecordErrorForServer(metricsServer, metrics.RequestErrorTypeResponseWriteFailed)
 				}
+				cancel()
+				currentCancel = nil
 				releaseLifecycleBodies(req, resp)
 				return
 			}
-			requestOutcomeRecorded = true
-			s.recordIncomingRequest(ctx, req, resp)
+			stopWriteCancellation()
+			if resp.CloseAfterWrite() {
+				closeReason = "stream_fin"
+				if closeErr := conn.Close(); closeErr != nil {
+					s.logConnectionError(
+						ctx, req, errorStageWriteResponse,
+						metrics.RequestErrorTypeResponseWriteFailed, conn.RemoteAddr(), closeErr,
+					)
+					currentAccounting.finalize(resp, metrics.OutcomeError)
+					s.recordRequestError(
+						ctx, req, metrics.RequestErrorStageWriteResponse,
+						metrics.RequestErrorTypeResponseWriteFailed, "",
+					)
+					if metricsCollector, metricsServer := s.metricsSnapshot(); metricsCollector != nil {
+						metricsCollector.RecordErrorForServer(metricsServer, metrics.RequestErrorTypeResponseWriteFailed)
+					}
+				} else {
+					currentAccounting.finalize(resp, "")
+				}
+				cancel()
+				currentCancel = nil
+				releaseLifecycleBodies(req, resp)
+				return
+			}
+			currentAccounting.finalize(resp, "")
 			if drainAfterResponse {
 				if err := s.drainRequestBodies(conn, req); err != nil {
 					closeReason = "body_drain_error"
@@ -688,6 +763,8 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 				)
 			}
 			releaseLifecycleBodies(req, resp)
+			cancel()
+			currentCancel = nil
 
 			if requestClose {
 				if headerHasToken(req.Header, "Connection", "close") {
@@ -700,11 +777,7 @@ func (s *ICAPServer) handleConnection(parentCtx context.Context, conn *Connectio
 
 			// Check for explicit or internal response close signal.
 			if shouldCloseAfterResponse(resp) {
-				if resp.CloseAfterWrite() {
-					closeReason = "stream_fin"
-				} else {
-					closeReason = "response_connection_close"
-				}
+				closeReason = "response_connection_close"
 				return
 			}
 			requestCount++
@@ -869,8 +942,8 @@ func (s *ICAPServer) monitorGoroutines() {
 			lastCount = current
 
 			// Update metric if available
-			if s.metrics != nil {
-				s.metrics.SetGoroutines(current)
+			if metricsCollector, _ := s.metricsSnapshot(); metricsCollector != nil {
+				metricsCollector.SetGoroutines(current)
 			}
 		}
 	}

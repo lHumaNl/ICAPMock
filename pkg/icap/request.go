@@ -200,6 +200,25 @@ type HTTPMessage struct {
 	bodyLoaded bool
 }
 
+type previewBodySnapshotter interface {
+	PreviewBodySnapshot() []byte
+}
+
+// PreviewBodySnapshot returns buffered preview bytes without requesting a
+// deferred ICAP continuation. The boolean is false for ordinary body readers.
+func (m *HTTPMessage) PreviewBodySnapshot() ([]byte, bool) {
+	if m == nil {
+		return nil, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	reader, ok := m.BodyReader.(previewBodySnapshotter)
+	if !ok {
+		return nil, false
+	}
+	return bytes.Clone(reader.PreviewBodySnapshot()), true
+}
+
 // GetBody returns the body content, loading it lazily from BodyReader if needed.
 // This method is thread-safe and can be called from multiple goroutines.
 // sync.Once ensures that the body is loaded exactly once, even with concurrent calls.
@@ -317,7 +336,7 @@ func (m *HTTPMessage) GetPreviewBody(previewSize int) ([]byte, error) {
 // which support lazy loading.
 //
 // Body-related methods (GetBody, IsBodyLoaded) are thread-safe.
-type Request struct {
+type Request struct { //nolint:govet // public protocol fields remain grouped for API readability.
 	BodyReader   io.Reader
 	bodyErr      error
 	Header       Header
@@ -327,18 +346,44 @@ type Request struct {
 	// scenario matcher (e.g. "{id}" in the scenario endpoint yields
 	// Captures["id"]). Nil or empty when no endpoint capture matched. Consumers
 	// substitute "${name}" in response fields using this map.
-	Captures     map[string]string
-	RemoteAddr   string
-	URI          string
-	Proto        string
-	Method       string
-	ClientIP     string
-	Body         []byte
-	Encapsulated Encapsulated
-	Preview      int
-	mu           sync.RWMutex
-	bodyOnce     sync.Once
-	bodyLoaded   bool
+	Captures         map[string]string
+	RemoteAddr       string
+	URI              string
+	Proto            string
+	Method           string
+	ClientIP         string
+	Body             []byte
+	Encapsulated     Encapsulated
+	Preview          int
+	mu               sync.RWMutex
+	bodyOnce         sync.Once
+	bodyLoaded       bool
+	PreviewSet       bool
+	matchedBranch    int
+	matchedBranchSet bool
+}
+
+// SetMatchedBranch caches the branch chosen by scenario matching for this request.
+func (r *Request) SetMatchedBranch(index int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.matchedBranch = index
+	r.matchedBranchSet = index >= 0
+}
+
+// MatchedBranch returns the branch chosen during scenario matching.
+func (r *Request) MatchedBranch() (int, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.matchedBranch, r.matchedBranchSet
+}
+
+// ClearMatchedBranch removes a branch cached by an earlier candidate scenario.
+func (r *Request) ClearMatchedBranch() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.matchedBranch = 0
+	r.matchedBranchSet = false
 }
 
 // GetBody returns the ICAP body content, loading it lazily from BodyReader if needed.
@@ -460,6 +505,7 @@ func ParseRequest(r *bufio.Reader) (*Request, error) { //nolint:gocyclo // ICAP 
 		if err != nil {
 			return nil, fmt.Errorf("parsing Preview header: %w", err)
 		}
+		req.PreviewSet = true
 	}
 
 	// Parse Encapsulated header
@@ -854,9 +900,15 @@ func (r *Request) IsRESPMOD() bool {
 	return r.Method == MethodRESPMOD
 }
 
-// IsPreviewMode returns true if the request is in preview mode (Preview > 0).
+// HasPreview reports whether a Preview header was present. The Preview > 0
+// fallback preserves compatibility with directly constructed requests.
+func (r *Request) HasPreview() bool {
+	return r.PreviewSet || r.Preview > 0
+}
+
+// IsPreviewMode returns true if the request has an active Preview header.
 func (r *Request) IsPreviewMode() bool {
-	return r.Preview > 0
+	return r.HasPreview()
 }
 
 // GetPreviewBody reads the appropriate preview body based on the request method.
@@ -866,6 +918,9 @@ func (r *Request) IsPreviewMode() bool {
 func (r *Request) GetPreviewBody() ([]byte, error) {
 	if !r.IsPreviewMode() {
 		return nil, nil
+	}
+	if r.Preview == 0 {
+		return []byte{}, nil
 	}
 
 	switch r.Method {

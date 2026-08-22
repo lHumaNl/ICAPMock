@@ -203,16 +203,11 @@ func TestMockProcessor_AdaptedHTTPBodyStreamSelectsSourceByICAPMethod(t *testing
 	}
 }
 
-func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t *testing.T) {
+func TestMockProcessor_LegacyStreamBuildsEquivalentFINPlan(t *testing.T) {
 	scenario := rawResponseHTTPBodyStreamScenario()
 	scenario.Response.Stream.Chunks.Delay = storage.DurationSpec{
 		Min:   2 * time.Millisecond,
 		Max:   2 * time.Millisecond,
-		IsSet: true,
-	}
-	scenario.Response.Stream.StartDelay = storage.DurationSpec{
-		Min:   5 * time.Millisecond,
-		Max:   7 * time.Millisecond,
 		IsSet: true,
 	}
 	scenario.Response.Stream.Finish = storage.StreamFinishConfig{
@@ -233,20 +228,17 @@ func TestMockProcessor_ResponseHTTPBodyStreamPreservesChunkDelayAndFINSettings(t
 		t.Fatal("response BodyStream = nil")
 	}
 	stream := resp.HTTPResponse.BodyStream
-	if stream.ChunkSize != 2 {
-		t.Fatalf("ChunkSize = %d, want 2", stream.ChunkSize)
+	if stream.Plan.TargetChunkSize() != 2 {
+		t.Fatalf("TargetChunkSize() = %d, want 2", stream.Plan.TargetChunkSize())
 	}
-	if stream.Delay != 2*time.Millisecond {
-		t.Fatalf("Delay = %v, want %v", stream.Delay, 2*time.Millisecond)
+	if stream.Plan.Every() != 2*time.Millisecond {
+		t.Fatalf("Every() = %v, want %v", stream.Plan.Every(), 2*time.Millisecond)
 	}
-	if stream.StartDelay != 5*time.Millisecond || stream.StartDelayMax != 7*time.Millisecond {
-		t.Fatalf("StartDelay = %v-%v, want 5ms-7ms", stream.StartDelay, stream.StartDelayMax)
+	if stream.Plan.FinishMode() != icap.StreamFinishFIN {
+		t.Fatalf("FinishMode() = %q, want %q", stream.Plan.FinishMode(), icap.StreamFinishFIN)
 	}
-	if stream.FinishMode != icap.StreamFinishFIN {
-		t.Fatalf("FinishMode = %q, want %q", stream.FinishMode, icap.StreamFinishFIN)
-	}
-	if stream.FinAfterBytes != 3 {
-		t.Fatalf("FinAfterBytes = %d, want 3", stream.FinAfterBytes)
+	if stream.Plan.BodyBytes() != 3 {
+		t.Fatalf("BodyBytes() = %d, want 3", stream.Plan.BodyBytes())
 	}
 	if got, ok := resp.GetHeader("Connection"); ok {
 		t.Fatalf("Connection header = %q, %v, want absent", got, ok)
@@ -263,11 +255,11 @@ func TestMockProcessor_NewFINPercentStreamCapsBodyBytes(t *testing.T) {
 		t.Fatalf("Process() error = %v", err)
 	}
 	stream := resp.HTTPResponse.BodyStream
-	if stream.FinAfterBytes != 4 || !stream.FinAfterBytesSet {
-		t.Fatalf("FinAfterBytes = %d/%v, want 4/true", stream.FinAfterBytes, stream.FinAfterBytesSet)
+	if stream.Plan.BodyBytes() != 4 {
+		t.Fatalf("BodyBytes() = %d, want 4", stream.Plan.BodyBytes())
 	}
-	stream.Sleep = func(time.Duration) {}
-	assertStreamOutput(t, resp, "3\r\nabc\r\n1\r\nd\r\n")
+	stream.Sleeper = func(context.Context, time.Duration) error { return nil }
+	assertStreamOutput(t, resp, "2\r\nab\r\n2\r\ncd\r\n")
 }
 
 func TestMockProcessor_NewCompleteDurationWithThrottleSetsStopLimit(t *testing.T) {
@@ -277,11 +269,11 @@ func TestMockProcessor_NewCompleteDurationWithThrottleSetsStopLimit(t *testing.T
 		t.Fatalf("Process() error = %v", err)
 	}
 	stream := resp.HTTPResponse.BodyStream
-	if stream.Delay != 3*time.Millisecond {
-		t.Fatalf("Delay = %v, want 3ms", stream.Delay)
+	if stream.Plan.Every() != 3*time.Millisecond {
+		t.Fatalf("Every() = %v, want 3ms", stream.Plan.Every())
 	}
-	if stream.DelayStopAfter != 5*time.Millisecond {
-		t.Fatalf("DelayStopAfter = %v, want 5ms", stream.DelayStopAfter)
+	if stream.Plan.Duration() != 5*time.Millisecond {
+		t.Fatalf("Duration() = %v, want 5ms", stream.Plan.Duration())
 	}
 }
 
@@ -292,8 +284,8 @@ func TestMockProcessor_NewFINPercentRequiresKnownSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if resp.HTTPResponse.BodyStream.FinAfterBytes != 1 {
-		t.Fatalf("FinAfterBytes = %d, want 1", resp.HTTPResponse.BodyStream.FinAfterBytes)
+	if resp.HTTPResponse.BodyStream.Plan.BodyBytes() != 1 {
+		t.Fatalf("BodyBytes() = %d, want 1", resp.HTTPResponse.BodyStream.Plan.BodyBytes())
 	}
 }
 
@@ -598,12 +590,15 @@ func TestMockProcessor_BodyFileStreamsAfterWriteToAndCloses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if state.opens != 0 || reader.read != 0 {
-		t.Fatalf("opened/read before WriteTo = %d/%d, want 0/0", state.opens, reader.read)
+	if state.opens != 1 || state.stats != 1 || reader.read != 0 {
+		t.Fatalf("opened/statted/read before WriteTo = %d/%d/%d, want 1/1/0", state.opens, state.stats, reader.read)
 	}
 	assertStreamOutput(t, resp, "2\r\nfi\r\n2\r\nle\r\n0\r\n\r\n")
 	if !reader.closed {
 		t.Fatal("body_file reader was not closed")
+	}
+	if _, err := resp.WriteTo(io.Discard); !errors.Is(err, icap.ErrStreamPayloadConsumed) {
+		t.Fatalf("second WriteTo() error = %v, want ErrStreamPayloadConsumed", err)
 	}
 }
 
@@ -640,8 +635,8 @@ func TestMockProcessor_SimplePartsStreamInOrderWithoutPreConcat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if state.opens != 0 || reader.read != 0 {
-		t.Fatalf("opened/read before WriteTo = %d/%d, want 0/0", state.opens, reader.read)
+	if state.opens != 1 || state.stats != 1 || reader.read != 0 {
+		t.Fatalf("opened/statted/read before WriteTo = %d/%d/%d, want 1/1/0", state.opens, state.stats, reader.read)
 	}
 	if got, _ := resp.HTTPResponse.Header.Get("Content-Length"); got != "3" {
 		t.Fatalf("Content-Length = %q, want 3", got)
@@ -1123,7 +1118,7 @@ func newPercentFINStream(source, body string, percent int) *storage.StreamConfig
 			Percent:  storage.PercentSpec{Min: percent, Max: percent, IsSet: true},
 			Duration: storage.DurationSpec{Min: time.Millisecond, Max: time.Millisecond, IsSet: true},
 		},
-		Throttle: storage.StreamThrottleConfig{ChunkSize: storage.SizeSpec{Min: 3, Max: 3, IsSet: true}},
+		Throttle: storage.StreamThrottleConfig{TargetChunkSize: storage.SizeSpec{Min: 3, Max: 3, IsSet: true}},
 		End:      storage.StreamEndConfig{Mode: icap.StreamFinishFIN},
 	}
 }
@@ -1212,6 +1207,7 @@ func assertStreamOutput(t *testing.T, resp *icap.Response, wantChunked string) {
 type processorStreamFileStub struct {
 	path  string
 	opens int
+	stats int
 }
 
 func stubProcessorStreamFile(
@@ -1222,14 +1218,24 @@ func stubProcessorStreamFile(
 ) *processorStreamFileStub {
 	t.Helper()
 	state := &processorStreamFileStub{path: path}
-	oldOpen, oldStat := openStreamFile, statStreamFile
-	openStreamFile = func(_ string) (io.ReadCloser, error) {
+	oldOpen := openStreamFile
+	openStreamFile = func(_ string) (streamFile, error) {
 		state.opens++
-		return reader, nil
+		return &processorStubStreamFile{ReadCloser: reader, size: size, state: state}, nil
 	}
-	statStreamFile = func(string) (os.FileInfo, error) { return streamFileInfo{size: size}, nil }
-	t.Cleanup(func() { openStreamFile, statStreamFile = oldOpen, oldStat })
+	t.Cleanup(func() { openStreamFile = oldOpen })
 	return state
+}
+
+type processorStubStreamFile struct {
+	io.ReadCloser
+	state *processorStreamFileStub
+	size  int64
+}
+
+func (f *processorStubStreamFile) Stat() (os.FileInfo, error) {
+	f.state.stats++
+	return streamFileInfo{size: f.size}, nil
 }
 
 type processorTrackingReadCloser struct {

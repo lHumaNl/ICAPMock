@@ -403,13 +403,12 @@ func TestResponseClone(t *testing.T) {
 func TestResponseClone_ReplayableBodyStreamIsIndependent(t *testing.T) {
 	original := responseWithBodyStream(icap.NewBytesStreamPayload([]byte("abcd")))
 	clone := original.Clone()
-	clone.HTTPResponse.BodyStream.ChunkSize = 1
 
 	if original.HTTPResponse.BodyStream == clone.HTTPResponse.BodyStream {
 		t.Fatal("BodyStream was shallow-copied")
 	}
 	assertResponseContains(t, original, "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n")
-	assertResponseContains(t, clone, "1\r\na\r\n1\r\nb\r\n1\r\nc\r\n1\r\nd\r\n0\r\n\r\n")
+	assertResponseContains(t, clone, "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n")
 }
 
 func TestResponseClone_OneShotBodyStreamReuseFailsClearly(t *testing.T) {
@@ -759,10 +758,17 @@ func TestReadResponse(t *testing.T) {
 }
 
 func responseWithBodyStream(payload icap.StreamPayload) *icap.Response {
+	size, _ := payload.SizeHint()
+	plan, err := icap.PlanBodyStream(icap.BodyStreamPlanOptions{
+		SourceSize: size, TargetChunkSize: 2, FinishMode: icap.StreamFinishComplete,
+	})
+	if err != nil {
+		panic(err)
+	}
 	resp := icap.NewResponse(icap.StatusOK)
 	resp.HTTPResponse = &icap.HTTPMessage{
 		Proto: "HTTP/1.1", Status: "200", StatusText: "OK", Header: icap.NewHeader(),
-		BodyStream: &icap.BodyStream{Payload: payload, ChunkSize: 2, FinishMode: icap.StreamFinishComplete},
+		BodyStream: &icap.BodyStream{Payload: payload, Plan: plan},
 	}
 	return resp
 }

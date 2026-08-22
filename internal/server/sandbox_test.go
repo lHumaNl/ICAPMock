@@ -163,7 +163,7 @@ func writeREQMODPrefixAndChunk(t *testing.T, conn net.Conn, addr string) {
 
 func writePreviewREQMODPrefixAndChunk(t *testing.T, conn net.Conn, addr string) {
 	t.Helper()
-	_, err := conn.Write([]byte(reqmodPreviewChunkedPrefix(addr) + "5\r\nhello\r\n"))
+	_, err := conn.Write([]byte(reqmodPreviewChunkedPrefix(addr) + "5\r\nhello\r\n0\r\n\r\n"))
 	require.NoError(t, err)
 }
 

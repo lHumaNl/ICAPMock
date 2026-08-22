@@ -22,6 +22,26 @@ func (p *MockProcessor) recordProcessingStageDuration(req *icap.Request, stage s
 	p.metrics.RecordScenarioProcessingStageDuration(p.server, req.Method, stage, duration)
 }
 
+func (p *MockProcessor) recordScenarioProcessingDuration(
+	ctx context.Context,
+	req *icap.Request,
+	scenario, response, outcome string,
+	duration time.Duration,
+) {
+	if p.metrics == nil || req == nil {
+		return
+	}
+	p.metrics.RecordScenarioProcessingDurationForServer(
+		p.server,
+		req.Method,
+		requestinfo.ContentTypeLabel(ctx, req),
+		outcome,
+		scenario,
+		response,
+		duration,
+	)
+}
+
 func (p *MockProcessor) logSlowScenarioMatch(
 	ctx context.Context,
 	req *icap.Request,

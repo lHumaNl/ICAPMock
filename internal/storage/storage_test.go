@@ -88,10 +88,39 @@ func TestFromICAPRequestWithBodyLimit_OmitsOversizedBody(t *testing.T) {
 	}
 }
 
+func TestFromICAPRequestWithBodyLimit_DoesNotMaterializeDeferredPreview(t *testing.T) {
+	reader := &storagePreviewReader{preview: []byte("hello")}
+	req := requestWithLazyHTTPBody(reader)
+
+	sr := FromICAPRequestWithBodyLimit(req, 204, time.Millisecond, 16)
+
+	if reader.reads != 0 {
+		t.Fatalf("deferred preview reads = %d, want 0", reader.reads)
+	}
+	if got := sr.HTTPRequest.Body; got != "hello" {
+		t.Fatalf("Body = %q, want preview bytes", got)
+	}
+	if !sr.HTTPRequest.BodyTruncated || sr.HTTPRequest.BodyOmittedReason != bodyOmittedPreview {
+		t.Fatalf("preview snapshot metadata = truncated:%v reason:%q", sr.HTTPRequest.BodyTruncated, sr.HTTPRequest.BodyOmittedReason)
+	}
+}
+
 type storageCountingReader struct {
 	remaining int64
 	read      int64
 }
+
+type storagePreviewReader struct {
+	preview []byte
+	reads   int
+}
+
+func (r *storagePreviewReader) Read([]byte) (int, error) {
+	r.reads++
+	return 0, errors.New("deferred body must not be read for storage")
+}
+
+func (r *storagePreviewReader) PreviewBodySnapshot() []byte { return r.preview }
 
 func (r *storageCountingReader) Read(p []byte) (int, error) {
 	if r.remaining == 0 {

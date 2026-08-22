@@ -89,6 +89,9 @@ func TestResponseFlushFailureRecordsRequestAndErrorMetrics(t *testing.T) {
 	if got := gatheredCounterValue(t, reg, "icap_requests_total", errorLabels); got != 1 {
 		t.Errorf("error request count = %v, want 1", got)
 	}
+	if got := gatheredHistogramCount(t, reg, errorLabels); got != 1 {
+		t.Errorf("error latency count = %v, want 1", got)
+	}
 	if got := gatheredCounterValue(t, reg, "icap_requests_total", allowedLabels); got != 0 {
 		t.Errorf("allowed request count = %v, want 0", got)
 	}

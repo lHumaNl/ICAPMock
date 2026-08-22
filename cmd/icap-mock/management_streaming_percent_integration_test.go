@@ -112,7 +112,7 @@ func requestHTTPBodyPercentFINScenarioYAML() string {
         percent: 40
         duration: 1ms
       throttle:
-        chunk_size: 40
+        target_chunk_size: 40
       end:
         mode: fin
 `
@@ -176,7 +176,7 @@ func responseHTTPBodyPercentFINScenarioYAML() string {
         percent: 40
         duration: 1ms
       throttle:
-        chunk_size: 40
+        target_chunk_size: 40
       end:
         mode: fin
 `
@@ -195,7 +195,7 @@ func responseHTTPBodyPercentTermScenarioYAML() string {
         percent: 40
         duration: 1ms
       throttle:
-        chunk_size: 40
+        target_chunk_size: 40
       end:
         mode: term
 `

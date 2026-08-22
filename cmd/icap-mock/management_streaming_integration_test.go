@@ -83,12 +83,12 @@ func TestRealIntegration_StreamingCompleteModesReturnFinalChunk(t *testing.T) {
 	})
 
 	t.Run("RESPMOD response_body complete", func(t *testing.T) {
-		resp := rt.sendAndReadStagedStream(t, buildRESPMODRequest(rt.icapURL("/stream-response-complete"), "/origin/response", "wxyz"), "3\r\nwxy\r\n")
+		resp := rt.sendAndReadStagedStream(t, buildRESPMODRequest(rt.icapURL("/stream-response-complete"), "/origin/response", "wxyz"), "2\r\nwx\r\n")
 		assertContains(t, resp.firstStage, "HTTP/1.1 200 OK")
-		assertContains(t, resp.firstStage, "3\r\nwxy\r\n")
-		assertNotContains(t, resp.firstStage, "1\r\nz\r\n")
+		assertContains(t, resp.firstStage, "2\r\nwx\r\n")
+		assertNotContains(t, resp.firstStage, "2\r\nyz\r\n")
 		assertNotContains(t, resp.firstStage, "0\r\n\r\n")
-		assertContains(t, resp.remainder, "1\r\nz\r\n0\r\n\r\n")
+		assertContains(t, resp.remainder, "2\r\nyz\r\n0\r\n\r\n")
 	})
 }
 
@@ -130,6 +130,31 @@ func TestRealIntegration_REQMODRequestHTTPBodyStreamingCompleteWithStagedReads(t
 	assertContains(t, response, "2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n")
 }
 
+func TestRealIntegration_REQMODPreviewContinuationStreamsMaterializedBody(t *testing.T) {
+	scenariosDir := t.TempDir()
+	writeTestFile(t, filepath.Join(scenariosDir, "neutral-preview-stream.yaml"), previewStreamingScenarioYAML())
+	rt := startIntegrationRuntime(t, scenariosDir)
+	t.Cleanup(rt.Close)
+	head := buildREQMODRequestHead(
+		rt.icapURL("/stream-request-http-complete"),
+		"/origin/request-http-complete",
+		map[string]string{"Content-Type": "application/octet-stream"},
+		10,
+	)
+	head = strings.Replace(head, "Encapsulated:", "Preview: 5\r\nEncapsulated:", 1)
+	conn, err := openStreamingConn(rt.icapAddr, head+"5\r\nhello\r\n0\r\n\r\n")
+	if err != nil {
+		t.Fatalf("open preview stream: %v", err)
+	}
+	defer conn.Close()
+
+	interim := readUntilToken(t, conn, "\r\n\r\n")
+	assertContains(t, interim, "ICAP/1.0 100 Continue")
+	writeConnString(t, conn, "5\r\nworld\r\n0\r\n\r\n")
+	response := readUntilToken(t, conn, "0\r\n\r\n")
+	assertContains(t, response, "a\r\nhelloworld\r\n0\r\n\r\n")
+}
+
 func TestRealIntegration_REQMODNonStreamingWaitsForFullUploadBeforeResponding(t *testing.T) {
 	scenariosDir := t.TempDir()
 	writeTestFile(t, filepath.Join(scenariosDir, "neutral-request-http-body-buffered.yaml"), requestHTTPBodyBufferedScenarioYAML())
@@ -149,16 +174,16 @@ func TestRealIntegration_REQMODNonStreamingWaitsForFullUploadBeforeResponding(t 
 	assertContains(t, response, "ICAP/1.0 204")
 }
 
-func TestRealIntegration_StreamStartDelayWaitsAfterFullUploadBeforeFirstChunk(t *testing.T) {
+func TestRealIntegration_ResponseDelayWaitsAfterFullUploadBeforeFirstChunk(t *testing.T) {
 	scenariosDir := t.TempDir()
-	writeTestFile(t, filepath.Join(scenariosDir, "neutral-stream-start-delay.yaml"), streamStartDelayScenarioYAML())
+	writeTestFile(t, filepath.Join(scenariosDir, "neutral-stream-response-delay.yaml"), streamResponseDelayScenarioYAML())
 
 	rt := startIntegrationRuntime(t, scenariosDir)
 	t.Cleanup(rt.Close)
 
 	conn, err := openStreamingConn(rt.icapAddr, buildREQMODRequest(rt.icapURL("/stream-start-delay"), "/origin/stream-start-delay", "abcd"))
 	if err != nil {
-		t.Fatalf("open stream start_delay request: %v", err)
+		t.Fatalf("open delayed stream request: %v", err)
 	}
 	defer conn.Close()
 
@@ -196,12 +221,12 @@ func TestRealIntegration_RESPMODSegmentedRequestBodyStreamsResponseHTTPBody(t *t
 	rt := startIntegrationRuntime(t, scenariosDir)
 	t.Cleanup(rt.Close)
 
-	resp := rt.sendAndReadStagedStream(t, buildSegmentedRESPMODRequest(rt.icapURL("/stream-segmented-response"), "/origin/upload", "abcde", "wxyz"), "3\r\nwxy\r\n")
+	resp := rt.sendAndReadStagedStream(t, buildSegmentedRESPMODRequest(rt.icapURL("/stream-segmented-response"), "/origin/upload", "abcde", "wxyz"), "2\r\nwx\r\n")
 	assertContains(t, resp.firstStage, "ICAP/1.0 200 OK")
-	assertContains(t, resp.firstStage, "3\r\nwxy\r\n")
-	assertNotContains(t, resp.firstStage, "1\r\nz\r\n")
+	assertContains(t, resp.firstStage, "2\r\nwx\r\n")
+	assertNotContains(t, resp.firstStage, "2\r\nyz\r\n")
 	assertNotContains(t, resp.firstStage, "abcde")
-	assertContains(t, resp.remainder, "1\r\nz\r\n0\r\n\r\n")
+	assertContains(t, resp.remainder, "2\r\nyz\r\n0\r\n\r\n")
 	assertNotContains(t, resp.remainder, "abcde")
 }
 
@@ -883,17 +908,34 @@ func requestHTTPBodyBufferedScenarioYAML() string {
 `
 }
 
-func streamStartDelayScenarioYAML() string {
+func previewStreamingScenarioYAML() string {
 	return `scenarios:
-  neutral_stream_start_delay:
+  neutral_preview_stream:
     method: REQMOD
-    endpoint: /stream-start-delay
+    endpoint: /stream-request-http-complete
     status: 200
     http_status: 403
     stream:
       source:
+        from: request_http_body
+      throttle:
+        target_chunk_size: 16
+      end:
+        mode: complete
+`
+}
+
+func streamResponseDelayScenarioYAML() string {
+	return `scenarios:
+  neutral_stream_response_delay:
+    method: REQMOD
+    endpoint: /stream-start-delay
+    status: 200
+    http_status: 403
+    delay: 120ms
+    stream:
+      source:
         from: request_body
-      start_delay: 120ms
       chunks:
         size: 2
       finish:

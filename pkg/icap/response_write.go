@@ -4,63 +4,137 @@ package icap
 
 import (
 	"bytes"
+	"context"
 	"io"
 
 	"github.com/icap-mock/icap-mock/pkg/pool"
 )
 
-func (r *Response) writeDirectTo(w io.Writer) (int64, error) {
-	cw := &countingWriter{w: w}
+type contextWriter struct {
+	ctx context.Context
+	w   io.Writer
+}
+
+type streamStartObserver struct {
+	callback func()
+	started  bool
+}
+
+func (r *Response) writeDirectToContext(
+	ctx context.Context,
+	w io.Writer,
+	options ResponseWriteOptions,
+) (int64, error) {
+	if err := validateResponseWriter(ctx, w); err != nil {
+		return 0, err
+	}
+	target := &contextWriter{ctx: ctx, w: w}
+	cw := &countingWriter{w: target}
+	observer := &streamStartObserver{callback: options.OnStreamingStart}
+	err := r.writeResponseParts(ctx, cw, observer)
+	if err == nil {
+		err = flushContext(ctx, target)
+	}
+	return cw.n, err
+}
+
+func validateResponseWriter(ctx context.Context, writer io.Writer) error {
+	if writer == nil {
+		return io.ErrClosedPipe
+	}
+	return ctx.Err()
+}
+
+func (r *Response) writeResponseParts(
+	ctx context.Context,
+	cw *countingWriter,
+	observer *streamStartObserver,
+) error {
 	buf := pool.ResponseBufferPool.Get()
 	defer pool.ResponseBufferPool.Put(buf)
 	r.writeEnvelopeToBuffer(buf)
-	if err := flushResponseBuffer(cw, buf); err != nil {
-		return cw.n, err
+	if err := flushResponseBuffer(ctx, cw, buf); err != nil {
+		return err
 	}
-	if err := r.writeHTTPMessageDirect(cw, buf, r.HTTPRequest, true); err != nil {
-		return cw.n, err
+	if err := r.writeHTTPMessageDirect(ctx, cw, buf, r.HTTPRequest, true, observer); err != nil {
+		return err
 	}
-	if err := r.writeHTTPMessageDirect(cw, buf, r.HTTPResponse, false); err != nil {
-		return cw.n, err
+	if err := r.writeHTTPMessageDirect(ctx, cw, buf, r.HTTPResponse, false, observer); err != nil {
+		return err
 	}
-	return r.writeICAPBodyDirect(cw)
+	return r.writeICAPBodyDirect(ctx, cw)
 }
 
-func (r *Response) writeHTTPMessageDirect(cw *countingWriter, buf *bytes.Buffer, m *HTTPMessage, isReq bool) error {
-	if m == nil {
+func (r *Response) writeHTTPMessageDirect(
+	ctx context.Context,
+	cw *countingWriter,
+	buf *bytes.Buffer,
+	message *HTTPMessage,
+	isRequest bool,
+	observer *streamStartObserver,
+) error {
+	if message == nil {
 		return nil
 	}
-	r.writeHTTPMessageHead(buf, m, isReq)
-	if err := flushResponseBuffer(cw, buf); err != nil {
+	r.writeHTTPMessageHead(buf, message, isRequest)
+	if err := flushResponseBuffer(ctx, cw, buf); err != nil {
 		return err
 	}
-	return writeHTTPBodyDirect(cw, m)
+	return writeHTTPBodyDirect(ctx, cw, message, observer)
 }
 
-func writeHTTPBodyDirect(cw *countingWriter, m *HTTPMessage) error {
-	if m.BodyStream != nil {
-		_, err := m.BodyStream.WriteTo(cw)
+func writeHTTPBodyDirect(
+	ctx context.Context,
+	cw *countingWriter,
+	message *HTTPMessage,
+	observer *streamStartObserver,
+) error {
+	if message.BodyStream != nil {
+		_, err := message.BodyStream.writeToContext(ctx, cw, observer.notify)
 		return err
 	}
-	if len(m.Body) > 0 {
-		return WriteChunkedBody(cw, m.Body)
+	if len(message.Body) > 0 {
+		return WriteChunkedBody(cw, message.Body)
 	}
 	return nil
 }
 
-func (r *Response) writeICAPBodyDirect(cw *countingWriter) (int64, error) {
+func (r *Response) writeICAPBodyDirect(ctx context.Context, cw *countingWriter) error {
 	if len(r.Body) == 0 {
-		return cw.n, nil
-	}
-	_, err := cw.Write(r.Body)
-	return cw.n, err
-}
-
-func flushResponseBuffer(cw *countingWriter, buf *bytes.Buffer) error {
-	if len(buf.Bytes()) == 0 {
 		return nil
 	}
-	_, err := cw.Write(buf.Bytes())
+	return writeAll(ctx, cw, r.Body)
+}
+
+func flushResponseBuffer(ctx context.Context, cw *countingWriter, buf *bytes.Buffer) error {
+	if buf.Len() == 0 {
+		return nil
+	}
+	err := writeAll(ctx, cw, buf.Bytes())
 	buf.Reset()
 	return err
+}
+
+func (w *contextWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return w.w.Write(p)
+}
+
+func (w *contextWriter) Flush() error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	return flush(w.w)
+}
+
+func (o *streamStartObserver) notify() {
+	if o == nil || o.started {
+		return
+	}
+	o.started = true
+	if o.callback != nil {
+		o.callback()
+	}
 }

@@ -16,6 +16,7 @@ var requestIDSequence atomic.Uint64
 const (
 	bodyOmittedTooLarge  = "body_size_limit_exceeded"
 	bodyOmittedReadError = "body_read_error"
+	bodyOmittedPreview   = "preview_remainder_not_materialized"
 	unlimitedBodyLimit   = -1
 )
 
@@ -177,6 +178,14 @@ func copyHeaders(headers icap.Header) map[string][]string {
 }
 
 func copyHTTPBody(record *HTTPMessageRecord, msg *icap.HTTPMessage, maxBodySize int64) {
+	if preview, deferred := msg.PreviewBodySnapshot(); deferred {
+		if len(preview) > 0 {
+			record.Body = string(preview)
+		}
+		record.BodyTruncated = true
+		record.BodyOmittedReason = bodyOmittedPreview
+		return
+	}
 	body, err := getHTTPBodyForStorage(msg, maxBodySize)
 	if err != nil {
 		markBodyOmitted(record, err, maxBodySize)

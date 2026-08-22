@@ -508,7 +508,7 @@ scenarios:
       source:
         from: request_http_body
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
         every: 5ms
 
 
@@ -528,7 +528,7 @@ scenarios:
         percent: "40%"
         duration: 250ms
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
       end:
         mode: fin
 
@@ -549,7 +549,7 @@ scenarios:
         percent: "40%"
         duration: 250ms
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
       end:
         mode: term
 
@@ -569,7 +569,7 @@ scenarios:
         - body: "\n-- streamed by icap-mock --\n"
         - from: response_body
       throttle:
-        chunk_size: 12
+        target_chunk_size: 12
 
 
   # ---------------------------------------------------------------------------
@@ -592,7 +592,7 @@ scenarios:
       fallback:
         body: "no matching multipart parts selected\n"
       throttle:
-        chunk_size: 16
+        target_chunk_size: 16
 
 
   # ---------------------------------------------------------------------------

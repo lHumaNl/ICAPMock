@@ -5,13 +5,53 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/icap-mock/icap-mock/internal/config"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
+
+func TestPreviewContinuationCancellationInterruptsBlockedContinueWrite(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	conn := newConnection(serverConn, &ConnectionConfig{})
+	defer conn.Abort()
+	chunked := icap.NewChunkedReader(strings.NewReader("0\r\n\r\n0\r\n\r\n"))
+	chunked.EnablePreview()
+	if _, err := io.ReadAll(chunked); err != nil {
+		t.Fatalf("reading preview boundary: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := &previewContinuationReader{
+		server: &ICAPServer{config: &config.ServerConfig{}},
+		conn:   conn,
+		reader: chunked,
+		ctx:    ctx,
+	}
+	done := make(chan error, 1)
+	go func() {
+		var one [1]byte
+		_, err := reader.Read(one[:])
+		done <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("preview continuation read error = nil after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("preview continuation write remained blocked after cancellation")
+	}
+}
 
 func TestRequestDeadlineReaderProvidesByteReaderWithoutReadAhead(t *testing.T) {
 	activations := 0

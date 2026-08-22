@@ -889,13 +889,13 @@ func TestCollector_StreamingActive(t *testing.T) {
 	collector.IncStreamingActive()
 	collector.IncStreamingActive()
 
-	count := testutil.ToFloat64(collector.streamingActive)
+	count := metricValue(t, reg, "icap_streaming_active", map[string]string{"server": defaultServerMetricLabel})
 	if count != 2 {
 		t.Errorf("streaming active = %v, want 2", count)
 	}
 
 	collector.DecStreamingActive()
-	count = testutil.ToFloat64(collector.streamingActive)
+	count = metricValue(t, reg, "icap_streaming_active", map[string]string{"server": defaultServerMetricLabel})
 	if count != 1 {
 		t.Errorf("streaming active after decrement = %v, want 1", count)
 	}
@@ -1035,11 +1035,16 @@ func TestCollector_MetricNames(t *testing.T) {
 	collector.RecordRequestForServer("default", "REQMOD", "", OutcomeAllowed, "204", "test")
 	collector.IncRequestsInFlight("REQMOD")
 	collector.DecRequestsInFlight("REQMOD")
+	collector.IncRequestsProcessingInFlightForServer("default", "REQMOD")
+	collector.DecRequestsProcessingInFlightForServer("default", "REQMOD")
 	collector.RecordRequestSize("REQMOD", 100)
 	collector.RecordError("test")
 	collector.IncActiveConnections()
 	collector.SetGoroutines(1)
 	collector.RecordScenarioRequest("test", "204", time.Millisecond)
+	collector.RecordScenarioProcessingDurationForServer(
+		"default", "REQMOD", ContentTypeNone, OutcomeAllowed, "test", "204", time.Millisecond,
+	)
 	collector.IncStreamingActive()
 	collector.RecordStreamingBytes("in", 1)
 	collector.RecordConfigReload("success")
@@ -1054,11 +1059,13 @@ func TestCollector_MetricNames(t *testing.T) {
 	expectedMetrics := []string{
 		"icap_requests_total",
 		"icap_requests_in_flight",
+		"icap_requests_processing_in_flight",
 		"icap_request_size_bytes",
 		"icap_errors_total",
 		"icap_active_connections",
 		"icap_goroutines_current",
 		"icap_scenario_response_duration_seconds",
+		"icap_scenario_processing_duration_seconds",
 		"icap_streaming_active",
 		"icap_streaming_bytes_total",
 		"icap_config_reload_total",

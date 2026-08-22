@@ -39,8 +39,9 @@ func (s *ICAPServer) logConnectionError(
 	if s.logger == nil || err == nil {
 		return
 	}
+	_, metricsServer := s.metricsSnapshot()
 	attrs := []any{
-		"server", s.metricsServerName,
+		"server", metricsServer,
 		"stage", stage,
 		"error_type", errorType,
 		"error", err.Error(),
@@ -103,15 +104,16 @@ func parseErrorCloseReason(err error, started, keepAliveWait bool) string {
 }
 
 func (s *ICAPServer) recordRequestError(ctx context.Context, req *icap.Request, stage, errorType, response string) {
-	if s.metrics == nil || req == nil {
+	metricsCollector, metricsServer := s.metricsSnapshot()
+	if metricsCollector == nil || req == nil {
 		return
 	}
 	metadata := requestMetricMetadata(ctx, nil)
 	if response != "" {
 		metadata.response = response
 	}
-	s.metrics.RecordRequestErrorForServer(
-		s.metricsServerName,
+	metricsCollector.RecordRequestErrorForServer(
+		metricsServer,
 		req.Method,
 		stage,
 		errorType,
@@ -127,8 +129,9 @@ func (s *ICAPServer) requestErrorAttrs(
 	errorType string,
 	err error,
 ) []any {
+	_, metricsServer := s.metricsSnapshot()
 	attrs := []any{
-		"server", s.metricsServerName,
+		"server", metricsServer,
 		"stage", stage,
 		"error_type", errorType,
 		"method", req.Method,

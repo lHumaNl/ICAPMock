@@ -1066,8 +1066,13 @@ func matchesScenario(ctx context.Context, s *Scenario, req *icap.Request, bodyPa
 
 	// If the scenario has branches, require at least one to match; otherwise
 	// treat the scenario as non-matching so the registry tries the next one.
-	if len(s.Branches) > 0 && s.SelectBranch(req) < 0 {
-		return false, nil
+	req.ClearMatchedBranch()
+	if len(s.Branches) > 0 {
+		branch := s.SelectBranch(req)
+		if branch < 0 {
+			return false, nil
+		}
+		req.SetMatchedBranch(branch)
 	}
 
 	return true, nil

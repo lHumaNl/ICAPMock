@@ -33,7 +33,7 @@ func NewEchoProcessor() *EchoProcessor {
 	return &EchoProcessor{server: "default"}
 }
 
-// SetMetricsForServer enables fallback scenario metrics for echo responses.
+// SetMetricsForServer sets the collector and bounded server label for processor metrics.
 func (p *EchoProcessor) SetMetricsForServer(collector *metrics.Collector, server string) {
 	p.metrics = collector
 	p.server = server
@@ -45,34 +45,28 @@ func (p *EchoProcessor) SetMetricsForServer(collector *metrics.Collector, server
 //
 // The request is always handled successfully (no error is returned).
 func (p *EchoProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) {
-	start := time.Now()
+	processingStarted := time.Now()
 	const fallbackResponse = "204"
+	requestinfo.StartScenarioTiming(ctx)
 	resp := &icap.Response{
 		StatusCode: icap.StatusNoContentNeeded,
 		Proto:      icap.Version,
 		Header:     icap.NewHeader(),
 	}
 	requestinfo.SetScenarioMetadata(ctx, metrics.FallbackScenarioMetricLabel, fallbackResponse)
-	if p.metrics != nil {
-		p.recordFallbackDuration(ctx, req, fallbackResponse, start)
+	requestinfo.SetScenarioOutcome(ctx, metrics.OutcomeAllowed)
+	if p.metrics != nil && req != nil {
+		p.metrics.RecordScenarioProcessingDurationForServer(
+			p.server,
+			req.Method,
+			requestinfo.ContentTypeLabel(ctx, req),
+			metrics.OutcomeAllowed,
+			metrics.FallbackScenarioMetricLabel,
+			fallbackResponse,
+			time.Since(processingStarted),
+		)
 	}
 	return resp, nil
-}
-
-func (p *EchoProcessor) recordFallbackDuration(
-	ctx context.Context,
-	req *icap.Request,
-	response string,
-	start time.Time,
-) {
-	method := ""
-	if req != nil {
-		method = req.Method
-	}
-	p.metrics.RecordScenarioResponseDurationForServer(
-		p.server, method, requestinfo.ContentTypeLabel(ctx, req), metrics.OutcomeAllowed,
-		metrics.FallbackScenarioMetricLabel, response, time.Since(start),
-	)
 }
 
 // Name returns "EchoProcessor" as the processor name.

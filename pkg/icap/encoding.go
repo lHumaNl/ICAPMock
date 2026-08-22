@@ -44,6 +44,18 @@ var (
 
 	// ErrTrailersTooLarge indicates that aggregate trailer bytes exceeded the limit.
 	ErrTrailersTooLarge = errors.New("trailer headers exceed maximum size")
+
+	// ErrPreviewNotEnabled indicates that continuation was requested for an ordinary body.
+	ErrPreviewNotEnabled = errors.New("chunked reader preview mode is not enabled")
+
+	// ErrPreviewNotAtBoundary indicates that the preview terminator has not been read.
+	ErrPreviewNotAtBoundary = errors.New("chunked reader is not at a preview boundary")
+
+	// ErrPreviewIEOF indicates that the client declared the preview to be the complete body.
+	ErrPreviewIEOF = errors.New("preview ended with ieof")
+
+	// ErrPreviewAlreadyContinued indicates that the preview was already resumed.
+	ErrPreviewAlreadyContinued = errors.New("preview continuation was already requested")
 )
 
 // crlfBytes is a pre-allocated CRLF byte slice to avoid repeated []byte("\r\n") conversions.
@@ -61,12 +73,16 @@ var crlfPool = sync.Pool{
 // ChunkedReader implements io.Reader for chunked transfer encoding.
 // It reads chunked data and provides O(1) memory usage for streaming.
 type ChunkedReader struct {
-	err        error
-	r          io.Reader
-	byteReader io.ByteReader
-	closer     io.Closer
-	n          int64
-	finished   bool
+	err              error
+	r                io.Reader
+	byteReader       io.ByteReader
+	closer           io.Closer
+	n                int64
+	finished         bool
+	previewEnabled   bool
+	previewBoundary  bool
+	previewIEOF      bool
+	previewContinued bool
 }
 
 // NewChunkedReader creates a new ChunkedReader that reads from r.
@@ -99,75 +115,130 @@ func (cr *ChunkedReader) Close() error {
 	return cr.closer.Close()
 }
 
+// EnablePreview makes the first zero chunk a preview boundary. Call it before
+// reading the body. A zero chunk with the ieof extension remains final.
+func (cr *ChunkedReader) EnablePreview() {
+	cr.previewEnabled = true
+}
+
+// PreviewBoundary reports whether reading reached a preview terminator and
+// whether that terminator included the case-insensitive ieof extension.
+func (cr *ChunkedReader) PreviewBoundary() (atBoundary, ieof bool) {
+	return cr.previewBoundary, cr.previewIEOF
+}
+
+// ContinueAfterPreview resumes a body after a non-ieof preview terminator.
+// A preview body can be resumed exactly once.
+func (cr *ChunkedReader) ContinueAfterPreview() error {
+	switch {
+	case !cr.previewEnabled:
+		return ErrPreviewNotEnabled
+	case cr.previewContinued:
+		return ErrPreviewAlreadyContinued
+	case !cr.previewBoundary:
+		return ErrPreviewNotAtBoundary
+	case cr.previewIEOF:
+		return ErrPreviewIEOF
+	default:
+		cr.previewBoundary = false
+		cr.previewContinued = true
+		return nil
+	}
+}
+
 // Read implements io.Reader. It reads from the chunked stream.
 func (cr *ChunkedReader) Read(p []byte) (n int, err error) {
 	if cr.err != nil {
 		return 0, cr.err
 	}
-
-	if cr.finished {
+	if cr.finished || cr.previewBoundary {
 		return 0, io.EOF
 	}
-
-	// Need to read next chunk header
 	if cr.n == 0 {
-		cr.n, cr.err = cr.readChunkHeader()
-		if cr.err != nil {
-			return 0, cr.err
-		}
-		if cr.n == 0 {
-			cr.finished = true
-			if trailerErr := cr.readTrailer(); trailerErr != nil {
-				cr.err = trailerErr
-				return 0, trailerErr
+		if err := cr.startChunk(); err != nil {
+			if !errors.Is(err, io.EOF) {
+				cr.err = err
 			}
-			return 0, io.EOF
+			return 0, err
 		}
 	}
+	return cr.readChunkData(p)
+}
 
-	// Read from current chunk
+func (cr *ChunkedReader) readChunkData(p []byte) (n int, err error) {
 	toRead := int64(len(p))
 	if toRead > cr.n {
 		toRead = cr.n
 	}
-
 	n, err = io.ReadFull(cr.r, p[:toRead])
 	cr.n -= int64(n)
-
-	// Read trailing \r\n after chunk data
 	if cr.n == 0 && err == nil {
 		if e := cr.readCRLF(); e != nil {
-			cr.err = e // Store error so subsequent reads fail
+			cr.err = e
 			return n, e
 		}
 	}
-
 	return n, err
 }
 
-// readChunkHeader reads and parses a chunk header line.
-func (cr *ChunkedReader) readChunkHeader() (int64, error) {
+func (cr *ChunkedReader) startChunk() error {
+	header, err := cr.readChunkHeader()
+	if err != nil {
+		return err
+	}
+	if header.size > 0 {
+		cr.n = header.size
+		return nil
+	}
+	return cr.finishZeroChunk(header)
+}
+
+func (cr *ChunkedReader) finishZeroChunk(header parsedChunkHeader) error {
+	if err := cr.readTrailer(); err != nil {
+		return err
+	}
+	if cr.previewEnabled && !cr.previewContinued {
+		cr.previewBoundary = true
+		cr.previewIEOF = header.hasExtension("ieof")
+		cr.finished = cr.previewIEOF
+		return io.EOF
+	}
+	cr.finished = true
+	return io.EOF
+}
+
+type parsedChunkHeader struct {
+	extensions []string
+	size       int64
+}
+
+func (h parsedChunkHeader) hasExtension(name string) bool {
+	for _, extension := range h.extensions {
+		extensionName, _, _ := strings.Cut(strings.TrimSpace(extension), "=")
+		if strings.EqualFold(strings.TrimSpace(extensionName), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// readChunkHeader reads and parses a chunk header line, retaining extensions.
+func (cr *ChunkedReader) readChunkHeader() (parsedChunkHeader, error) {
 	line, err := cr.readBoundedLine(MaxChunkHeaderLength, ErrChunkHeaderTooLong)
 	if err != nil {
-		return 0, err
+		return parsedChunkHeader{}, err
 	}
-
-	// Remove trailing \r\n
 	line = strings.TrimSuffix(line, "\r\n")
 	line = strings.TrimSuffix(line, "\n")
-
-	// Parse chunk size (may include extensions)
-	parts := strings.SplitN(line, ";", 2)
+	parts := strings.Split(line, ";")
 	size, err := ParseChunkSize(parts[0])
 	if err != nil {
-		return 0, err
+		return parsedChunkHeader{}, err
 	}
-
 	if size > MaxChunkSize {
-		return 0, errors.New("chunk size exceeds maximum")
+		return parsedChunkHeader{}, errors.New("chunk size exceeds maximum")
 	}
-
-	return size, nil
+	return parsedChunkHeader{size: size, extensions: parts[1:]}, nil
 }
 
 func (cr *ChunkedReader) readBoundedLine(limit int, limitErr error) (string, error) {

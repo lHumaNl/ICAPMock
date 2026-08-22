@@ -38,6 +38,7 @@ const slowScenarioMatchThreshold = time.Second
 // MockProcessor is thread-safe and can be used concurrently.
 type MockProcessor struct {
 	registry          storage.ScenarioRegistry
+	streamSelector    inclusiveStreamSelector
 	logger            *logger.Logger
 	metrics           *metrics.Collector
 	server            string
@@ -81,6 +82,7 @@ func NewMockProcessorWithMaxBodySize(
 		logger:            log,
 		server:            "default",
 		maxStreamBodySize: maxBodySize,
+		streamSelector:    randomStreamSelector{},
 	}
 }
 
@@ -94,8 +96,7 @@ func NewMockProcessorWithMaxBodySize(
 // If no scenario matches, it returns an ErrNoMatch error.
 // If the scenario specifies an error, it returns that error.
 func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.Response, error) { //nolint:gocyclo // request processing: match, select response, apply delay, build response
-	start := time.Now()
-
+	processingStarted := time.Now()
 	// Check context before processing
 	if err := ctx.Err(); err != nil {
 		p.logProcessorError(
@@ -170,13 +171,23 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 			err,
 		)
 	}
+	processingResponse := ""
+	processingOutcome := metrics.OutcomeError
+	defer func() {
+		p.recordScenarioProcessingDuration(
+			ctx, req, scenario.Name, processingResponse, processingOutcome, time.Since(processingStarted),
+		)
+	}()
 
 	// Determine the response source: matched branch (if the scenario uses
 	// branches) or the scenario-level response.
 	baseResp := &scenario.Response
 	weighted := scenario.WeightedResponses
 	if len(scenario.Branches) > 0 {
-		idx := scenario.SelectBranch(req)
+		idx, selected := req.MatchedBranch()
+		if !selected {
+			idx = -1
+		}
 		if idx < 0 {
 			// Matcher should have rejected the scenario; defensive guard.
 			p.logProcessorError(
@@ -247,9 +258,21 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		selectedResponse = &substituted
 	}
 	responseLabel := scenarioResponseLabel(selectedResponse)
+	processingResponse = responseLabel
 	requestinfo.SetScenarioMetadata(ctx, scenario.Name, responseLabel)
+	if materializeErr := materializeSelectedPreviewBody(req, selectedResponse, p.maxStreamBodySize); materializeErr != nil {
+		p.logProcessorError(
+			ctx, req, metrics.RequestErrorStageProcessorBuild, metrics.RequestErrorTypeResponseBuildFailed,
+			scenario.Name, responseLabel, materializeErr,
+		)
+		p.recordRequestError(
+			req, metrics.RequestErrorStageProcessorBuild, metrics.RequestErrorTypeResponseBuildFailed,
+			scenario.Name, responseLabel,
+		)
+		return nil, materializeErr
+	}
+	requestinfo.StartScenarioTiming(ctx)
 	p.logScenarioMatched(ctx, req, scenario.Name, selectedResponse)
-	defer p.recordScenarioMetrics(ctx, req, scenario.Name, selectedResponse, start)
 
 	// Apply delay
 	var delay time.Duration
@@ -313,8 +336,42 @@ func (p *MockProcessor) Process(ctx context.Context, req *icap.Request) (*icap.R
 		)
 		return nil, err
 	}
+	processingOutcome = effectiveResponseOutcome(selectedResponse, resp)
+	requestinfo.SetScenarioOutcome(ctx, processingOutcome)
 
 	return resp, nil
+}
+
+func effectiveResponseOutcome(template *storage.ResponseTemplate, resp *icap.Response) string {
+	if template != nil && template.Block != nil {
+		if *template.Block {
+			return metrics.OutcomeBlocked
+		}
+		return metrics.OutcomeAllowed
+	}
+	if resp == nil || resp.StatusCode >= icap.StatusBadRequest || template == nil || template.Error != "" {
+		return ""
+	}
+	if responseHasSelectedPartialStream(resp) || isBlockStatus(template.HTTPStatus) {
+		return metrics.OutcomeBlocked
+	}
+	return metrics.OutcomeAllowed
+}
+
+func responseHasSelectedPartialStream(resp *icap.Response) bool {
+	if resp == nil {
+		return false
+	}
+	for _, message := range []*icap.HTTPMessage{resp.HTTPRequest, resp.HTTPResponse} {
+		if message == nil || message.BodyStream == nil {
+			continue
+		}
+		mode := message.BodyStream.Plan.FinishMode()
+		if mode == icap.StreamFinishFIN || mode == icap.StreamFinishTerm {
+			return true
+		}
+	}
+	return false
 }
 
 // buildResponse constructs an ICAP response from a scenario's response template.
@@ -640,37 +697,6 @@ func substituteString(s string, vars map[string]string) string {
 		return vars[name]
 	})
 	return strings.ReplaceAll(tmp, escaped, "${")
-}
-
-func (p *MockProcessor) recordScenarioMetrics(
-	ctx context.Context,
-	req *icap.Request,
-	scenario string,
-	response *storage.ResponseTemplate,
-	start time.Time,
-) {
-	if p.metrics == nil || req == nil || response == nil {
-		return
-	}
-	p.metrics.RecordScenarioResponseDurationForServer(
-		p.server,
-		req.Method,
-		requestinfo.ContentTypeLabel(ctx, req),
-		responseOutcome(response),
-		scenario,
-		scenarioResponseLabel(response),
-		time.Since(start),
-	)
-}
-
-func responseOutcome(response *storage.ResponseTemplate) string {
-	if response == nil || response.Error != "" || isBlockStatus(responseStatusCode(response)) {
-		return metrics.OutcomeError
-	}
-	if responseBlocks(response) {
-		return metrics.OutcomeBlocked
-	}
-	return metrics.OutcomeAllowed
 }
 
 func processorContextErrorType(err error) string {

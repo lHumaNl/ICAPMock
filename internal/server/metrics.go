@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"strconv"
+	"time"
 
 	metricsinternal "github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/internal/requestinfo"
@@ -12,7 +13,43 @@ import (
 )
 
 func (s *ICAPServer) recordIncomingRequest(ctx context.Context, req *icap.Request, resp *icap.Response) {
-	s.recordIncomingRequestOutcome(ctx, req, resp, requestOutcome(resp))
+	s.recordIncomingRequestOutcome(ctx, req, resp, effectiveRequestOutcome(ctx, resp))
+}
+
+func (s *ICAPServer) recordTerminalMetrics(
+	ctx context.Context,
+	req *icap.Request,
+	resp *icap.Response,
+	outcome string,
+	duration time.Duration,
+) {
+	metricsCollector, metricsServer := s.metricsSnapshot()
+	if metricsCollector == nil || req == nil {
+		return
+	}
+	contentTypeLabel, metadata := s.requestMetricSnapshot(ctx, req, resp)
+	s.recordIncomingRequestWithLabel(req, contentTypeLabel, outcome, metadata)
+	metricsCollector.RecordScenarioResponseDurationForServer(
+		metricsServer,
+		req.Method,
+		contentTypeLabel,
+		outcome,
+		metadata.scenario,
+		metadata.response,
+		duration,
+	)
+}
+
+func (s *ICAPServer) requestMetricSnapshot(
+	ctx context.Context,
+	req *icap.Request,
+	resp *icap.Response,
+) (string, requestMetricLabels) {
+	contentTypeLabel, ok := requestinfo.ContextContentTypeLabel(ctx)
+	if !ok {
+		contentTypeLabel = s.canonicalContentTypeLabel(req)
+	}
+	return contentTypeLabel, requestMetricMetadata(ctx, resp)
 }
 
 func (s *ICAPServer) recordIncomingRequestOutcome(
@@ -21,7 +58,8 @@ func (s *ICAPServer) recordIncomingRequestOutcome(
 	resp *icap.Response,
 	outcome string,
 ) {
-	if s.metrics == nil || req == nil {
+	metricsCollector, _ := s.metricsSnapshot()
+	if metricsCollector == nil || req == nil {
 		return
 	}
 	contentTypeLabel, ok := requestinfo.ContextContentTypeLabel(ctx)
@@ -38,11 +76,12 @@ func (s *ICAPServer) recordIncomingRequestWithLabel(
 	outcome string,
 	metadata requestMetricLabels,
 ) {
-	if s.metrics == nil || req == nil {
+	metricsCollector, metricsServer := s.metricsSnapshot()
+	if metricsCollector == nil || req == nil {
 		return
 	}
-	s.metrics.RecordRequestForServerWithContentTypeLabel(
-		s.metricsServerName,
+	metricsCollector.RecordRequestForServerWithContentTypeLabel(
+		metricsServer,
 		req.Method,
 		contentTypeLabel,
 		outcome,
@@ -72,8 +111,8 @@ func responseMetricLabel(resp *icap.Response) string {
 
 func (s *ICAPServer) canonicalContentTypeLabel(req *icap.Request) string {
 	contentType := requestinfo.ContentType(req)
-	if s.metrics != nil {
-		return s.metrics.ContentTypeLabel(contentType)
+	if metricsCollector, _ := s.metricsSnapshot(); metricsCollector != nil {
+		return metricsCollector.ContentTypeLabel(contentType)
 	}
 	return metricsinternal.NormalizeContentTypeLabel(contentType)
 }

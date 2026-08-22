@@ -42,6 +42,9 @@ type StreamRawFileFallback struct {
 }
 
 func (s *StreamConfig) UnmarshalYAML(node *yaml.Node) error {
+	if yamlMappingHasKey(node, "start_delay") {
+		return fmt.Errorf("stream.start_delay is not supported; use response delay or stream.send.duration")
+	}
 	type rawStreamConfig StreamConfig
 	var raw rawStreamConfig
 	if err := node.Decode(&raw); err != nil {
@@ -53,16 +56,19 @@ func (s *StreamConfig) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (s *StreamConfig) UnmarshalJSON(data []byte) error {
+	keys, err := jsonObjectKeys(data)
+	if err != nil {
+		return err
+	}
+	if _, exists := keys["start_delay"]; exists {
+		return fmt.Errorf("stream.start_delay is not supported; use response delay or stream.send.duration")
+	}
 	type rawStreamConfig StreamConfig
 	var raw rawStreamConfig
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	*s = StreamConfig(raw)
-	keys, err := jsonObjectKeys(data)
-	if err != nil {
-		return err
-	}
 	_, s.PartsSet = keys["parts"]
 	return nil
 }
@@ -330,6 +336,17 @@ func boolCount(values ...bool) int {
 }
 
 func yamlMappingHasKey(node *yaml.Node, key string) bool {
+	return yamlMappingHasKeySeen(node, key, make(map[*yaml.Node]bool))
+}
+
+func yamlMappingHasKeySeen(node *yaml.Node, key string, seen map[*yaml.Node]bool) bool {
+	if node == nil || seen[node] {
+		return false
+	}
+	seen[node] = true
+	if node.Kind == yaml.AliasNode {
+		return yamlMappingHasKeySeen(node.Alias, key, seen)
+	}
 	if node.Kind != yaml.MappingNode {
 		return false
 	}
@@ -337,8 +354,26 @@ func yamlMappingHasKey(node *yaml.Node, key string) bool {
 		if node.Content[i].Value == key {
 			return true
 		}
+		if node.Content[i].Value == "<<" && yamlMergeHasKey(node.Content[i+1], key, seen) {
+			return true
+		}
 	}
 	return false
+}
+
+func yamlMergeHasKey(node *yaml.Node, key string, seen map[*yaml.Node]bool) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind == yaml.SequenceNode {
+		for _, item := range node.Content {
+			if yamlMappingHasKeySeen(item, key, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	return yamlMappingHasKeySeen(node, key, seen)
 }
 
 // StreamHasBodyFile reports whether a stream references scenario-local files.

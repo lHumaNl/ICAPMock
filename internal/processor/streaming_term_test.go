@@ -19,13 +19,13 @@ func TestMockProcessor_NewTermPercentStreamCapsBodyBytesAndTerminates(t *testing
 		t.Fatalf("Process() error = %v", err)
 	}
 	stream := resp.HTTPResponse.BodyStream
-	if stream.FinishMode != icap.StreamFinishTerm {
-		t.Fatalf("FinishMode = %q, want %q", stream.FinishMode, icap.StreamFinishTerm)
+	if stream.Plan.FinishMode() != icap.StreamFinishTerm {
+		t.Fatalf("FinishMode() = %q, want %q", stream.Plan.FinishMode(), icap.StreamFinishTerm)
 	}
-	if stream.FinAfterBytes != 40 || !stream.FinAfterBytesSet {
-		t.Fatalf("FinAfterBytes = %d/%v, want 40/true", stream.FinAfterBytes, stream.FinAfterBytesSet)
+	if stream.Plan.BodyBytes() != 40 {
+		t.Fatalf("BodyBytes() = %d, want 40", stream.Plan.BodyBytes())
 	}
-	stream.Sleep = func(time.Duration) {}
+	stream.Sleeper = func(context.Context, time.Duration) error { return nil }
 	assertStreamOutput(t, resp, "28\r\n"+strings.Repeat("a", 40)+"\r\n0\r\n\r\n")
 }
 
@@ -33,6 +33,6 @@ func newPercentTermStreamScenario(body string, percent int) *storage.Scenario {
 	scenario := responseBodyStreamScenario(icap.StreamFinishComplete)
 	scenario.Response.Stream = newPercentFINStream("body", body, percent)
 	scenario.Response.Stream.End.Mode = icap.StreamFinishTerm
-	scenario.Response.Stream.Throttle.ChunkSize = storage.SizeSpec{Min: 64, Max: 64, IsSet: true}
+	scenario.Response.Stream.Throttle.TargetChunkSize = storage.SizeSpec{Min: 64, Max: 64, IsSet: true}
 	return scenario
 }

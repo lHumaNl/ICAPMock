@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/icap-mock/icap-mock/internal/metrics"
 	"github.com/icap-mock/icap-mock/pkg/icap"
 )
 
@@ -73,6 +76,32 @@ func TestEchoProcessor_Name(t *testing.T) {
 
 	if processor.Name() != expected {
 		t.Errorf("expected name %q, got %q", expected, processor.Name())
+	}
+}
+
+func TestEchoProcessor_DoesNotRecordTerminalScenarioMetrics(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	collector, err := metrics.NewCollector(registry)
+	if err != nil {
+		t.Fatalf("NewCollector() error = %v", err)
+	}
+	processor := NewEchoProcessor()
+	processor.SetMetricsForServer(collector, "edge")
+	if _, err := processor.Process(context.Background(), createTestREQMODRequest(t)); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	count := scenarioRequestMetricValue(t, registry, metrics.FallbackScenarioMetricLabel, "204")
+	if count != 0 {
+		t.Fatalf("fallback scenario request count = %v, want 0", count)
+	}
+	processingCount := scenarioProcessingMetricCount(t, registry, map[string]string{
+		"server":   "edge",
+		"scenario": metrics.FallbackScenarioMetricLabel,
+		"response": "204",
+		"outcome":  metrics.OutcomeAllowed,
+	})
+	if processingCount != 1 {
+		t.Fatalf("fallback scenario processing count = %v, want 1", processingCount)
 	}
 }
 

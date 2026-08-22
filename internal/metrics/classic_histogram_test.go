@@ -72,6 +72,9 @@ func TestHandlerWithRegistryTextShowsClassicBuckets(t *testing.T) {
 	if finiteBucketCount := bucketLines - 1; finiteBucketCount != len(scenarioResponseDurationBuckets) {
 		t.Fatalf("text exposition finite bucket count = %d, want %d", finiteBucketCount, len(scenarioResponseDurationBuckets))
 	}
+	if !strings.Contains(rr.Body.String(), "# HELP icap_scenario_response_duration_seconds Server-side elapsed time from timed scenario handling through terminal response delivery in seconds by content type, method, outcome, server, response, and scenario.") {
+		t.Fatalf("scenario response duration HELP is missing or incorrect:\n%s", rr.Body.String())
+	}
 }
 
 func scenarioBucketTextStats(body string) (int, bool) {

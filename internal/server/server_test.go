@@ -772,9 +772,15 @@ func closeAfterWriteHandler(_ context.Context, _ *icap.Request) (*icap.Response,
 }
 
 func partialTestBodyStream() *icap.BodyStream {
+	plan, err := icap.PlanBodyStream(icap.BodyStreamPlanOptions{
+		FinishMode: icap.StreamFinishFIN, SourceSize: int64(len("partial")),
+		SelectedBytes: 4, SelectedBytesSet: true, TargetChunkSize: 4,
+	})
+	if err != nil {
+		panic(err)
+	}
 	return &icap.BodyStream{
-		Payload: icap.NewBytesStreamPayload([]byte("partial")), ChunkSize: 4,
-		FinishMode: icap.StreamFinishFIN, FinAfterBytes: 4, FinAfterBytesSet: true,
+		Payload: icap.NewBytesStreamPayload([]byte("partial")), Plan: plan,
 	}
 }
 
@@ -1033,6 +1039,9 @@ func TestHandleConnectionPanicRecovery(t *testing.T) {
 	}
 	if got := gatheredCounterValue(t, reg, requestsTotalMetricName, errorLabels); got != 1 {
 		t.Errorf("panic request errors = %v, want 1", got)
+	}
+	if got := gatheredHistogramCount(t, reg, errorLabels); got != 1 {
+		t.Errorf("panic latency samples = %v, want 1", got)
 	}
 
 	// Clean shutdown should still work

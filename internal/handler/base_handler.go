@@ -91,23 +91,28 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 	}
 
 	start := time.Now()
+	requestMetrics := h.getMetrics()
 
 	if err := ctx.Err(); err != nil {
 		h.logContextCancellation(ctx, req, err)
-		h.recordRequestError(ctx, req, metrics.RequestErrorStageContext, contextCancellationType(err), metrics.OutcomeError)
+		h.recordRequestError(
+			ctx, requestMetrics, req,
+			metrics.RequestErrorStageContext, contextCancellationType(err), metrics.OutcomeError,
+		)
 		return nil, err
 	}
 
-	if h.getMetrics() != nil {
-		h.getMetrics().IncRequestsInFlightForServer(h.server, h.method)
-		defer h.getMetrics().DecRequestsInFlightForServer(h.server, h.method)
+	if requestMetrics != nil {
+		requestMetrics.IncRequestsProcessingInFlightForServer(h.server, h.method)
+		defer requestMetrics.DecRequestsProcessingInFlightForServer(h.server, h.method)
 	}
 
 	if h.getProcessor() == nil {
-		if h.getMetrics() != nil {
-			h.getMetrics().RecordErrorForServer(h.server, "nil_processor")
+		if requestMetrics != nil {
+			requestMetrics.RecordErrorForServer(h.server, "nil_processor")
 			h.recordRequestError(
 				ctx,
+				requestMetrics,
 				req,
 				metrics.RequestErrorStageProcessorBuild,
 				metrics.RequestErrorTypeNilProcessor,
@@ -118,14 +123,19 @@ func (h *baseHandler) handle(ctx context.Context, req *icap.Request) (*icap.Resp
 	}
 
 	if req.IsPreviewMode() {
-		return h.handlePreview(ctx, req, start)
+		return h.handlePreview(ctx, req, start, requestMetrics)
 	}
 
-	return h.handleNonPreview(ctx, req, start)
+	return h.handleNonPreview(ctx, req, start, requestMetrics)
 }
 
 // handlePreview processes preview mode requests (RFC 3507 Section 4.6).
-func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, start time.Time) (*icap.Response, error) {
+func (h *baseHandler) handlePreview(
+	ctx context.Context,
+	req *icap.Request,
+	start time.Time,
+	requestMetrics *metrics.Collector,
+) (*icap.Response, error) {
 	if h.logger != nil {
 		h.logger.DebugContext(ctx, fmt.Sprintf("processing %s request in preview mode", h.method),
 			"request_id", util.RequestIDFromContext(ctx),
@@ -133,13 +143,13 @@ func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, star
 		)
 	}
 
-	if h.getMetrics() != nil {
-		h.getMetrics().RecordPreviewRequestForServer(h.server, h.method)
+	if requestMetrics != nil {
+		requestMetrics.RecordPreviewRequestForServer(h.server, h.method)
 	}
 
 	resp, err := h.getProcessor().Process(ctx, req)
 
-	if cancelErr := h.checkPostProcessCancellation(ctx, req, err); cancelErr != nil {
+	if cancelErr := h.checkPostProcessCancellation(ctx, requestMetrics, req, err); cancelErr != nil {
 		return nil, cancelErr
 	}
 
@@ -147,7 +157,7 @@ func (h *baseHandler) handlePreview(ctx context.Context, req *icap.Request, star
 		return h.resolvePreviewResponse(ctx, resp)
 	}
 
-	h.recordRequestMetrics(start, err, "preview_processing_error")
+	h.recordRequestMetrics(requestMetrics, start, err, "preview_processing_error")
 	return resp, err
 }
 
@@ -180,49 +190,72 @@ func (h *baseHandler) resolvePreviewResponse(ctx context.Context, resp *icap.Res
 }
 
 // handleNonPreview processes non-preview requests.
-func (h *baseHandler) handleNonPreview(ctx context.Context, req *icap.Request, start time.Time) (*icap.Response, error) {
+func (h *baseHandler) handleNonPreview(
+	ctx context.Context,
+	req *icap.Request,
+	start time.Time,
+	requestMetrics *metrics.Collector,
+) (*icap.Response, error) {
 	resp, err := h.getProcessor().Process(ctx, req)
 
-	if cancelErr := h.checkPostProcessCancellation(ctx, req, err); cancelErr != nil {
+	if cancelErr := h.checkPostProcessCancellation(ctx, requestMetrics, req, err); cancelErr != nil {
 		return nil, cancelErr
 	}
 
-	h.recordRequestMetrics(start, err, "processing_error")
+	h.recordRequestMetrics(requestMetrics, start, err, "processing_error")
 	return resp, err
 }
 
 // checkPostProcessCancellation checks if context was canceled after processing.
 // Returns a cancellation error if canceled, nil if not.
-func (h *baseHandler) checkPostProcessCancellation(ctx context.Context, req *icap.Request, procErr error) error {
+func (h *baseHandler) checkPostProcessCancellation(
+	ctx context.Context,
+	requestMetrics *metrics.Collector,
+	req *icap.Request,
+	procErr error,
+) error {
 	if procErr != nil || ctx.Err() == nil {
 		return nil //nolint:nilerr // procErr is handled by caller; we only add cancellation error when procErr is nil
 	}
 	reason, ctxErr := util.CheckCancellation(ctx)
 	h.logContextCancellation(ctx, req, ctxErr)
-	if h.getMetrics() != nil {
-		h.getMetrics().RecordRequestContextCancellationForServer(h.server, h.method, string(reason))
-		h.getMetrics().RecordRequestCancellationForServer(h.server, h.method)
+	if requestMetrics != nil {
+		requestMetrics.RecordRequestContextCancellationForServer(h.server, h.method, string(reason))
+		requestMetrics.RecordRequestCancellationForServer(h.server, h.method)
 	}
-	h.recordRequestError(ctx, req, metrics.RequestErrorStageContext, contextCancellationType(ctxErr), metrics.OutcomeError)
+	h.recordRequestError(
+		ctx, requestMetrics, req,
+		metrics.RequestErrorStageContext, contextCancellationType(ctxErr), metrics.OutcomeError,
+	)
 	return ctxErr
 }
 
 // recordRequestMetrics records request error metrics.
-func (h *baseHandler) recordRequestMetrics(_ time.Time, err error, errorLabel string) {
-	if h.getMetrics() == nil {
+func (h *baseHandler) recordRequestMetrics(
+	requestMetrics *metrics.Collector,
+	_ time.Time,
+	err error,
+	errorLabel string,
+) {
+	if requestMetrics == nil {
 		return
 	}
 	if err != nil {
-		h.getMetrics().RecordErrorForServer(h.server, errorLabel)
+		requestMetrics.RecordErrorForServer(h.server, errorLabel)
 	}
 }
 
-func (h *baseHandler) recordRequestError(ctx context.Context, req *icap.Request, stage, errorType, response string) {
-	if h.getMetrics() == nil || req == nil {
+func (h *baseHandler) recordRequestError(
+	ctx context.Context,
+	requestMetrics *metrics.Collector,
+	req *icap.Request,
+	stage, errorType, response string,
+) {
+	if requestMetrics == nil || req == nil {
 		return
 	}
 	metadata := requestMetricMetadata(ctx)
-	h.getMetrics().RecordRequestErrorForServer(h.server, h.method, stage, errorType, metadata.Scenario, response)
+	requestMetrics.RecordRequestErrorForServer(h.server, h.method, stage, errorType, metadata.Scenario, response)
 }
 
 func (h *baseHandler) logContextCancellation(ctx context.Context, req *icap.Request, err error) {

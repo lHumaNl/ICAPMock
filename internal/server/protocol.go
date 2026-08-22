@@ -4,6 +4,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -234,6 +235,7 @@ func parseICAPRequest(reader BufferedReader) (*icap.Request, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parsing Preview header: %w", err)
 		}
+		req.PreviewSet = true
 	}
 
 	// Parse Encapsulated header if present
@@ -418,12 +420,17 @@ func parseEmbeddedHTTPResponseStreaming(req *icap.Request) error {
 // This handles the full ICAP response including encapsulated HTTP messages.
 //
 // Returns any error encountered during writing.
-func writeResponseFromICAP(writer BufferedWriter, resp *icap.Response) error {
-	_, err := resp.WriteTo(writer)
+func writeResponseFromICAP(
+	ctx context.Context,
+	writer BufferedWriter,
+	resp *icap.Response,
+	options icap.ResponseWriteOptions,
+) error {
+	_, err := resp.WriteToContext(ctx, writer, options)
 	if err != nil {
 		return fmt.Errorf("writing ICAP response: %w", err)
 	}
-	return writer.Flush()
+	return nil
 }
 
 // extractClientIP extracts the canonical client IP address from the peer socket.

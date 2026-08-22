@@ -2,6 +2,8 @@
 
 package icap
 
+import "sync"
+
 // ReleaseBodies drops buffered body references after a request is fully handled.
 // It preserves metadata and headers so post-write metrics can still inspect them.
 func (r *Request) ReleaseBodies() {
@@ -31,10 +33,15 @@ func (m *HTTPMessage) ReleaseBodies() {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.BodyStream != nil {
+		_ = m.BodyStream.Release()
+	}
 	m.Body = nil
 	m.BodyReader = nil
 	m.BodyStream = nil
 	m.bodyErr = nil
+	m.bodyLoaded = false
+	m.bodyOnce = sync.Once{}
 }
 
 func (r *Request) releaseBody() {
@@ -43,4 +50,6 @@ func (r *Request) releaseBody() {
 	r.Body = nil
 	r.BodyReader = nil
 	r.bodyErr = nil
+	r.bodyLoaded = false
+	r.bodyOnce = sync.Once{}
 }

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestScenarioRegistry_Load_StreamUseTemplate(t *testing.T) {
@@ -45,7 +44,7 @@ scenarios:
 	}
 }
 
-func TestScenarioRegistry_Load_StreamInlineV2(t *testing.T) {
+func TestScenarioRegistry_Load_RejectsRemovedStartDelay(t *testing.T) {
 	scenarioFile := writeScenarioFile(t, `
 defaults:
   method: REQMOD
@@ -65,15 +64,12 @@ scenarios:
 `)
 
 	registry := NewScenarioRegistry()
-	if err := registry.Load(scenarioFile); err != nil {
-		t.Fatalf("Load() error = %v", err)
+	err := registry.Load(scenarioFile)
+	if err == nil {
+		t.Fatal("expected removed start_delay error")
 	}
-	stream := registry.List()[0].Response.Stream
-	if stream == nil {
-		t.Fatal("expected stream config")
-	}
-	if stream.StartDelay.Min != 2*time.Millisecond || stream.StartDelay.Max != 4*time.Millisecond {
-		t.Fatalf("StartDelay = %v-%v, want 2ms-4ms", stream.StartDelay.Min, stream.StartDelay.Max)
+	if !strings.Contains(err.Error(), "stream.start_delay is not supported") {
+		t.Fatalf("Load() error = %v, want actionable start_delay message", err)
 	}
 }
 
@@ -139,7 +135,7 @@ func TestScenarioRegistry_Load_InvalidNewStreamControls(t *testing.T) {
 		{"send-duration-conflict", streamYAML("send:\n        duration: 1ms\n      duration: 1ms")},
 		{"send-finish-conflict", streamYAML("send:\n        duration: 1ms\n      finish:\n        mode: fin")},
 		{"throttle-finish-conflict", streamYAML("throttle:\n        every: 1ms\n      finish:\n        mode: fin")},
-		{"throttle-size-conflict", streamYAML("throttle:\n        chunk_size: 4\n      chunks:\n        size: 2")},
+		{"throttle-size-conflict", streamYAML("throttle:\n        target_chunk_size: 4\n      chunks:\n        size: 2")},
 		{"throttle-every-conflict", streamYAML("throttle:\n        every: 1ms\n      chunks:\n        delay: 1ms")},
 	}
 
@@ -341,15 +337,15 @@ func streamYAML(fragment string) string {
 }
 
 func newCompleteStreamControls() string {
-	return "throttle:\n        chunk_size: 2\n        every: 1ms\n      send:\n        duration: 5ms\n      end:\n        mode: complete"
+	return "throttle:\n        target_chunk_size: 2\n        every: 1ms\n      send:\n        duration: 5ms\n      end:\n        mode: complete"
 }
 
 func newFINStreamControls(percent string) string {
-	return "send:\n        percent: \"" + percent + "\"\n        duration: 5ms\n      throttle:\n        chunk_size: 2\n      end:\n        mode: fin"
+	return "send:\n        percent: \"" + percent + "\"\n        duration: 5ms\n      throttle:\n        target_chunk_size: 2\n      end:\n        mode: fin"
 }
 
 func newTermStreamControls(percent string) string {
-	return "send:\n        percent: \"" + percent + "\"\n        duration: 5ms\n      throttle:\n        chunk_size: 2\n      end:\n        mode: term"
+	return "send:\n        percent: \"" + percent + "\"\n        duration: 5ms\n      throttle:\n        target_chunk_size: 2\n      end:\n        mode: term"
 }
 
 func streamYAMLWithBody(body string) string {
