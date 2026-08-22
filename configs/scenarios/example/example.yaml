@@ -7,11 +7,13 @@
 #
 # HOW MATCHING WORKS
 # ------------------
-# 1. The server collects all scenarios whose "when:" conditions all match the
-#    incoming request headers.
+# 1. A scenario's ICAP method and endpoint must match. All conditions in its
+#    "when:" and "when_http:" blocks must then match the request.
 # 2. Among matching scenarios the one with the highest "priority:" wins.
-#    Scenarios without an explicit priority default to 0; higher numbers win.
-# 3. If no scenario matches, the server falls back to echo pass-through.
+#    Omitting priority preserves file order (v2 assigns values from 1000 down).
+#    A value of 0 is treated as omitted; use a negative value for a fallback.
+# 3. This file's catch-all returns ICAP 204 for otherwise unmatched REQMOD
+#    requests to /example. Requests outside declared routes return ICAP 404.
 #
 # HEADER MATCHING ("when:" block) — ICAP-level headers
 # -----------------------------------------------------
@@ -24,7 +26,8 @@
 #     X-Client-IP: "re:^192\\.0\\.2\\."  # regex match on ICAP header
 #     X-Custom-Tag: "important"          # exact match
 #
-# A scenario with no "when:"/"when_http:" block matches every request.
+# A scenario with no "when:"/"when_http:" block matches every request within
+# its configured ICAP method and endpoint.
 #
 # ENCAPSULATED HTTP MATCHING ("when_http:" block)
 # ------------------------------------------------
@@ -54,7 +57,7 @@
 #     http_body:      Encapsulated HTTP response body
 #     http_body_file: Encapsulated HTTP response body (from disk)
 #     stream:         Streamed encapsulated body (request/response passthrough,
-#                     multipart selection, clean FIN endings, etc.)
+#                     multipart selection, partial FIN/TERM endings, etc.)
 #     block:          Optional allow/block metrics override (true or false)
 #
 # Block pages use the http_* fields so the origin client sees a real HTTP/1.1
@@ -72,7 +75,9 @@
 # - multipart.fields match part names exactly; multipart.files.filename uses regex
 # - fallback.raw_file is for non-multipart raw source bodies only; for multipart
 #   selector misses use allow_empty or explicit fallback.body/body_file/from
-# - finish.mode: complete (default), fin, or weighted
+# - preferred controls are send, throttle, and end (complete, fin, or term)
+# - legacy chunks/duration/finish controls remain supported but cannot be mixed
+#   with send/throttle/end
 #
 # DELAYS
 # ------
@@ -251,12 +256,6 @@ scenarios:
     # each request. Format: <min>-<max>, any Go duration units.
     delay: 100ms-500ms
 
-    # Priority: higher values win when multiple scenarios match the same request.
-    # Default priority is 0. Use positive integers to rank scenarios.
-    # Type: int | Default: 0
-    priority: 10
-
-
   # ---------------------------------------------------------------------------
   # 3. BODY FROM FILE — serve a large or binary response body from disk
   # ---------------------------------------------------------------------------
@@ -281,7 +280,6 @@ scenarios:
     http_body_file: "./configs/scenarios/example/sample_response.pdf"
 
     delay: 50ms-200ms
-    priority: 5
 
 
   # ---------------------------------------------------------------------------
@@ -358,10 +356,6 @@ scenarios:
     http_body: "Email attachment blocked."
     delay: 800ms-2s
 
-    # High priority ensures this matches before the generic email catch-all below.
-    priority: 20
-
-
   # ---------------------------------------------------------------------------
   # 6. CATCH-ALL — scenario with no "when:" block matches everything
   # ---------------------------------------------------------------------------
@@ -374,8 +368,8 @@ scenarios:
       X-Threat-Level: "CLEAN"
     delay: 10ms-50ms
 
-    # Explicit low priority so any scenario with conditions wins over this one.
-    priority: 0
+    # Explicit negative priority keeps this behind implicit file-order priorities.
+    priority: -100
 
 
   # ---------------------------------------------------------------------------
@@ -468,7 +462,6 @@ scenarios:
       Content-Type: "text/plain"
     http_body: "Executable blocked by filename policy."
     delay: 100ms-300ms
-    priority: 15
 
 
   # ---------------------------------------------------------------------------
@@ -515,8 +508,8 @@ scenarios:
   # ---------------------------------------------------------------------------
   # 11. STREAM response_http_body + FIN — pass through wrapped RESPMOD body
   # ---------------------------------------------------------------------------
-  # Trigger: RESPMOD to a dedicated endpoint. Demonstrates clean FIN termination
-  # instead of the final terminating chunk.
+  # Trigger: RESPMOD to a dedicated endpoint. Demonstrates an intentional TCP
+  # FIN without the final terminating chunk.
   stream-response-http-body-fin:
     method: RESPMOD
     endpoint: /stream/response-http-body
@@ -598,8 +591,8 @@ scenarios:
   # ---------------------------------------------------------------------------
   # 15. Weighted complete-vs-FIN ending
   # ---------------------------------------------------------------------------
-  # 80% of responses end normally with the terminating chunk; 20% end with a
-  # clean FIN after some bytes have been sent.
+  # 80% of responses end normally with the terminating chunk; 20% close with a
+  # TCP FIN after some bytes have been sent, without the terminating chunk.
   weighted-finish-stream:
     endpoint: /stream/weighted-finish
     status: 200

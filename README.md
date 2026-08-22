@@ -64,11 +64,7 @@ Ports:
 ### Docker Compose
 
 ```bash
-# Start the mock server
 docker-compose up -d
-
-# Start with monitoring stack (Prometheus + Grafana)
-docker-compose --profile monitoring up -d
 ```
 
 ---
@@ -126,7 +122,9 @@ metrics:
   port: 9090
 ```
 
-See `configs/example.yaml` for a full annotated configuration reference.
+See `configs/example.yaml` for a full annotated configuration reference. Configuration precedence
+is: built-in defaults, then the YAML file, then `ICAP_` environment variables, then explicit CLI
+flags.
 
 ### Management API and client identity
 
@@ -209,7 +207,8 @@ scenarios:
 Scenarios are evaluated in priority order (file order by default); the first matching scenario
 wins. `when:` matches ICAP-envelope headers, `when_http:` matches the encapsulated HTTP message
 (its `headers`, `url`, and `method`) — combine them freely with AND semantics. A scenario without
-a `when`/`when_http` block acts as a catch-all.
+a `when`/`when_http` block acts as a catch-all for its configured method and endpoint. In v2 files,
+omitting `priority` preserves file order; use a negative explicit priority for a final fallback.
 
 If every response variant omits `weight`, selection is uniform. Otherwise all variants must
 define percentages rounded half-up to three decimals. Every value must be greater than `0.000`
@@ -345,11 +344,12 @@ icap-mock server --config configs/my-config.yaml
 # Validate a server config without starting listeners
 icap-mock server --config configs/my-config.yaml --validate
 
-# Validate legacy list-format scenario YAML files in a directory
-icap-mock validate-scenarios --dir ./legacy-scenarios
+# Validate all v1/v2 scenario YAML files in a directory
+icap-mock validate-scenarios --dir ./configs/scenarios
 
 # Test a scenario match against a sample request
-icap-mock match-test --dir configs/scenarios/example --uri icap://localhost:1344/example
+icap-mock match-test --scenarios ./configs/scenarios/example --path /example \
+  --method REQMOD --header X-Filename:malware.exe --verbose
 ```
 
 ---
@@ -373,14 +373,10 @@ Available metrics include:
 - `icap_api_requests_total{server,route,method,status_code}` — management API calls with bounded route labels
 - `icap_api_errors_total{server,route,method,status_code,error_type}` — failed management API calls
 
-A pre-built **Grafana dashboard** is available in `monitoring/grafana/dashboards/`. It includes request error rate/table panels and Go/process runtime utilization panels for GC, CPU, heap/RSS memory, goroutines, Go threads, file descriptors, network receive/transmit, and uptime. Start the full monitoring stack with:
-
-```bash
-docker-compose --profile monitoring up -d
-```
-
-Grafana will be available at `http://localhost:3000` (default credentials: `admin` / `admin`).
-Override these credentials via environment variables or a secret before any shared or exposed deployment.
+A pre-built **Grafana dashboard** is available at `monitoring/grafana/ICAP Mock.json`. Import that
+file into Grafana and select the Prometheus data source that scrapes ICAP Mock. The dashboard
+includes request error rate/table panels and Go/process runtime utilization panels for GC, CPU,
+heap/RSS memory, goroutines, Go threads, file descriptors, network receive/transmit, and uptime.
 
 `icap_scenario_response_duration_seconds` uses classic Prometheus buckets. The finite bucket
 layout starts with `0.001, 0.01, 0.05`, then `0.1, 0.2, ..., 1.0`, then `1.25, 1.5, 1.75, 2.0`, then `2.5, 3.0, ..., 5.0`,
@@ -438,7 +434,7 @@ icap-mock/
 │   ├── icap/             # ICAP protocol types (request, response, headers)
 │   └── pool/             # Buffer pools
 ├── configs/              # Example server and scenario configs
-├── monitoring/           # Prometheus config and Grafana dashboards
+├── monitoring/           # Importable Grafana dashboard
 ├── Dockerfile
 ├── docker-compose.yml
 └── Makefile

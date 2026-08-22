@@ -6,8 +6,9 @@
 #
 # Priority order (highest to lowest):
 #   1. CLI flags  (--server.port 1344)
-#   2. This YAML file
-#   3. Built-in defaults (shown next to each field)
+#   2. Environment variables (ICAP_<SECTION>_<KEY>)
+#   3. This YAML file
+#   4. Built-in defaults (shown next to each field)
 #
 # Two operating modes are shown in this file:
 #   - SINGLE-SERVER MODE  (section "server:" + "mock:")  — active by default

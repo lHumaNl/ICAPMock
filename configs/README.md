@@ -207,7 +207,10 @@ responses are produced by the capability handler rather than scenario processing
 
 Each key is a scenario name. A scenario activates when all conditions in its `when:` / `when_http:`
 blocks match the incoming request. If multiple scenarios match, the one with the highest `priority:`
-wins (default priority is `0`; higher numbers win; file order is used as a tiebreaker).
+wins. When `priority` is omitted, v2 assigns descending priorities from `1000` to preserve file
+order. A value of `0` is also treated as omitted. When mixing explicit and implicit priorities,
+compare explicit values with that generated range; a negative value is suitable for a final
+catch-all.
 
 Either `routes`, or the resolved legacy `method` and `endpoint`, is required in `defaults:` or on
 the scenario itself.
@@ -242,7 +245,7 @@ scenarios:
       Content-Type: "text/html"
     http_body: "<html><body><h1>Blocked</h1></body></html>"
     delay: 300ms
-    priority: 10
+    priority: 1100
 
   catch-all:
     status: 204
@@ -695,12 +698,13 @@ block-email-attachment:
 |---|---|
 | `ICAP_SERVER_HOST` | `server.host` |
 | `ICAP_SERVER_PORT` | `server.port` |
-| `ICAP_SCENARIOS_DIR` | `mock.scenarios_dir` |
-| `ICAP_LOG_LEVEL` | `logging.level` |
-| `ICAP_LOG_FORMAT` | `logging.format` |
+| `ICAP_MOCK_SCENARIOS_DIR` | `mock.scenarios_dir` |
+| `ICAP_LOGGING_LEVEL` | `logging.level` |
+| `ICAP_LOGGING_FORMAT` | `logging.format` |
 | `ICAP_API_TOKEN` | `health.api_token` |
 
-CLI flags take priority over environment variables, which take priority over the YAML file.
+The complete naming pattern is `ICAP_<SECTION>_<KEY>`. Precedence from lowest to highest is:
+built-in defaults, YAML file, environment variables, explicit CLI flags.
 
 ---
 
